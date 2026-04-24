@@ -1,0 +1,11 @@
+{
+  "short_name": "The Drink",
+  "name": "The Drink — Control",
+  "icons": [
+    { "src": "favicon.ico", "sizes": "64x64", "type": "image/x-icon" }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#0A0E27",
+  "background_color": "#0A0E27"
+}
