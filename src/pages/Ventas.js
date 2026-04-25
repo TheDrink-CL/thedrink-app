@@ -120,14 +120,23 @@ export default function Ventas() {
             </div>
           </div>
           {form.precio_venta && form.litros && (
-            <div style={{ color: 'var(--green)', fontSize: 15, marginBottom: 12, textAlign: 'center', fontWeight: 700 }}>
-              Total: {formatCLP(parseFloat(form.litros) * parseFloat(form.precio_venta))}
+            <div style={{ marginBottom: 12, textAlign: 'center' }}>
+              <div style={{ color: 'var(--green)', fontSize: 15, fontWeight: 700 }}>
+                Bruto: {formatCLP(parseFloat(form.litros) * parseFloat(form.precio_venta))}
+              </div>
+              {parseFloat(form.delivery) > 0 && (
+                <div style={{ color: 'var(--cyan)', fontSize: 13, marginTop: 2 }}>
+                  Neto: {formatCLP(parseFloat(form.litros) * parseFloat(form.precio_venta) - parseFloat(form.delivery))}
+                  <span style={{ color: 'var(--muted)', marginLeft: 6 }}>(-{formatCLP(parseFloat(form.delivery))} Uber)</span>
+                </div>
+              )}
             </div>
           )}
           <div className="form-group">
-            <label className="form-label">Delivery cobrado ($) — opcional</label>
-            <input type="number" className="form-input" value={form.delivery} placeholder="0"
+            <label className="form-label">Costo Uber envío ($) — opcional</label>
+            <input type="number" className="form-input" value={form.delivery} placeholder="ej: 2500"
               onChange={e => setForm(f => ({ ...f, delivery: e.target.value }))} />
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Se resta del ingreso neto de esta venta</div>
           </div>
           <div className="form-group">
             <label className="form-label">¿Cómo llegó el cliente? — opcional</label>
@@ -172,7 +181,7 @@ export default function Ventas() {
             <div className="list-item-right" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div>
                 <div style={{ fontWeight: 700, fontSize: 15 }}>{formatCLP(v.litros * v.precio_venta)}</div>
-                {v.delivery > 0 && <div className="list-item-muted">+{formatCLP(v.delivery)} delivery</div>}
+                {v.delivery > 0 && <div className="list-item-muted" style={{ color: 'var(--pink)' }}>-{formatCLP(v.delivery)} Uber envío</div>}
               </div>
               <button onClick={() => setConfirmar(v)}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 4, flexShrink: 0 }}>

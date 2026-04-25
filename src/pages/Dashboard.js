@@ -26,7 +26,7 @@ export default function Dashboard() {
       const litrosTotales = vts?.reduce((s, v) => s + v.litros, 0) || 0
 
       // Saldo caja real: ventas - compras + movimientos manuales extra (no ventas/insumos ya contados)
-      const totalVentas = vts?.reduce((s, v) => s + (v.litros * v.precio_venta) + (v.delivery || 0), 0) || 0
+      const totalVentas = vts?.reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0) || 0
       const totalCompras = cmp?.reduce((s, c) => s + (c.es_inversion ? 0 : c.precio_total), 0) || 0
       const movExtraEntradas = cja?.filter(m => m.tipo === 'entrada' && m.categoria !== 'Venta' && m.categoria !== 'Delivery').reduce((s, m) => s + m.monto, 0) || 0
       const movExtraSalidas = cja?.filter(m => m.tipo === 'salida' && m.categoria !== 'Insumos').reduce((s, m) => s + m.monto, 0) || 0
