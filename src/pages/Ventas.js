@@ -24,7 +24,7 @@ function ConfirmModal({ mensaje, onConfirm, onCancel }) {
 
 export default function Ventas() {
   const [recetas, setRecetas] = useState([])
-  const [form, setForm] = useState({ fecha: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` })(), receta_nombre: '', litros: 1, precio_venta: '', delivery: '', nota: '' })
+  const [form, setForm] = useState({ fecha: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` })(), receta_nombre: '', litros: 1, precio_venta: '', delivery: '', nota: '', origen: '' })
   const [ventas, setVentas] = useState([])
   const [toast, setToast] = useState('')
   const [loading, setLoading] = useState(false)
@@ -60,11 +60,12 @@ export default function Ventas() {
       litros: parseFloat(form.litros),
       precio_venta: parseFloat(form.precio_venta),
       delivery: parseFloat(form.delivery) || 0,
-      nota: form.nota || null
+      nota: form.nota || null,
+      origen: form.origen || null
     })
     if (!error) {
       showToast('Venta registrada ✓')
-      setForm(f => ({ ...f, receta_nombre: '', litros: 1, precio_venta: '', delivery: '', nota: '' }))
+      setForm(f => ({ ...f, receta_nombre: '', litros: 1, precio_venta: '', delivery: '', nota: '', origen: '' }))
       load()
     }
     setLoading(false)
@@ -129,6 +130,18 @@ export default function Ventas() {
               onChange={e => setForm(f => ({ ...f, delivery: e.target.value }))} />
           </div>
           <div className="form-group">
+            <label className="form-label">¿Cómo llegó el cliente? — opcional</label>
+            <div className="chip-row">
+              {['Instagram', 'Referido', 'Cliente habitual', 'Evento', 'Otro'].map(op => (
+                <button key={op} type="button"
+                  className={`chip ${form.origen === op ? 'selected' : ''}`}
+                  onClick={() => setForm(f => ({ ...f, origen: f.origen === op ? '' : op }))}>
+                  {op}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="form-group">
             <label className="form-label">Nota — opcional</label>
             <input type="text" className="form-input" value={form.nota}
               placeholder="ej: descuento 10%, devolución envase..."
@@ -147,7 +160,14 @@ export default function Ventas() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="list-item-name">{v.receta_nombre}</div>
               <div className="list-item-sub">{v.fecha} · {v.litros}L · ${v.precio_venta.toLocaleString('es-CL')}/L</div>
-              {v.nota && <div className="list-item-sub" style={{ color: 'var(--cyan)', opacity: 0.8 }}>{v.nota}</div>}
+              <div style={{ display: 'flex', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
+                {v.origen && (
+                  <span style={{ fontSize: 11, background: v.origen === 'Instagram' ? 'rgba(196,0,90,0.15)' : 'rgba(0,180,180,0.1)', color: v.origen === 'Instagram' ? 'var(--pink)' : 'var(--cyan)', borderRadius: 10, padding: '1px 7px', fontWeight: 600 }}>
+                    {v.origen === 'Instagram' ? '📱' : v.origen === 'Referido' ? '🤝' : v.origen === 'Cliente habitual' ? '⭐' : v.origen === 'Evento' ? '🎉' : '•'} {v.origen}
+                  </span>
+                )}
+                {v.nota && <span style={{ fontSize: 11, color: 'var(--muted)' }}>{v.nota}</span>}
+              </div>
             </div>
             <div className="list-item-right" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div>

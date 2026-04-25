@@ -149,7 +149,7 @@ function TendenciaSemanal({ ventas }) {
 
 // ─── Bloque: Semáforo de publicidad ─────────────────────────────────────────
 
-function SemaforoPub({ ventas, gastosPub }) {
+function SemaforoPub({ ventas, gastosPub, margenBruto }) {
   const hoy = new Date()
 
   // 1. Días desde la última pauta
@@ -173,9 +173,13 @@ function SemaforoPub({ ventas, gastosPub }) {
   const vts7ant = ventas.filter(v => parseFecha(v.fecha) >= hace14 && parseFecha(v.fecha) < hace7).reduce((s, v) => s + v.litros * v.precio_venta, 0)
   const momentum = vts7ant > 0 ? (vts7 - vts7ant) / vts7ant : null
 
-  // 4. % de ventas gastado en publicidad (acumulado total)
+  // 4. % del margen bruto gastado en publicidad (más relevante que % sobre ventas)
   const totalVentas = ventas.reduce((s, v) => s + v.litros * v.precio_venta, 0)
   const totalPub = gastosPub.reduce((s, m) => s + m.monto, 0)
+  const margenPesos = margenBruto != null ? totalVentas * margenBruto : null
+  // pctPubSobreMargen: cuánto del margen se va en publicidad
+  const pctPubSobreMargen = margenPesos != null && margenPesos > 0 ? totalPub / margenPesos : null
+  // también mantenemos % sobre ventas para mostrarlo en el tip
   const pctPubSobreVentas = totalVentas > 0 ? totalPub / totalVentas : null
 
   // 5. Día de la semana actual
@@ -185,17 +189,17 @@ function SemaforoPub({ ventas, gastosPub }) {
   const factores = []
   let puntaje = 0 // negativo = abstenerse, positivo = pautar
 
-  // Factor: % acumulado de ventas en publicidad
-  if (pctPubSobreVentas !== null) {
-    const pct = Math.round(pctPubSobreVentas * 100)
-    if (pctPubSobreVentas > 0.15) {
-      factores.push({ icon: '📊', texto: `Llevas ${pct}% de tus ventas en publicidad — estás por encima del 15% recomendado. Pausa y deja que las ventas suban antes de invertir más`, peso: -2, tipo: 'negativo' })
+  // Factor: % del margen bruto gastado en publicidad
+  if (pctPubSobreMargen !== null) {
+    const pct = Math.round(pctPubSobreMargen * 100)
+    if (pctPubSobreMargen > 0.25) {
+      factores.push({ icon: '📊', texto: `Llevas ${pct}% de tu margen en publicidad — estás por encima del 25%. Antes de pautar más, espera que el margen crezca`, peso: -2, tipo: 'negativo' })
       puntaje -= 2
-    } else if (pctPubSobreVentas > 0.08) {
-      factores.push({ icon: '📊', texto: `Llevas ${pct}% de ventas en publicidad — en zona de vigilancia (8–15%). Pautar es razonable pero monitorea el retorno`, peso: -1, tipo: 'negativo' })
+    } else if (pctPubSobreMargen > 0.15) {
+      factores.push({ icon: '📊', texto: `Llevas ${pct}% de tu margen en publicidad — zona de vigilancia (15–25%). Monitorea si las ventas responden al gasto`, peso: -1, tipo: 'negativo' })
       puntaje -= 1
     } else {
-      factores.push({ icon: '📊', texto: `Llevas ${pct}% de ventas en publicidad — saludable (bajo 8%). Tienes margen para seguir pautando`, peso: 1, tipo: 'positivo' })
+      factores.push({ icon: '📊', texto: `Llevas ${pct}% de tu margen en publicidad — saludable (bajo 15%). Tienes espacio para pautar`, peso: 1, tipo: 'positivo' })
       puntaje += 1
     }
   }
@@ -306,10 +310,89 @@ function SemaforoPub({ ventas, gastosPub }) {
       {/* Tip contextual */}
       <div style={{ marginTop: 8, padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, fontSize: 11, color: 'var(--muted)', lineHeight: 1.7 }}>
         💡 Tip: las fechas de pago (1–5 y 15–20 de cada mes) suelen ser los mejores momentos para activar campañas de tragos en Santiago.
-        {pctPubSobreVentas !== null && (
-          <span> · Publicidad acumulada: <span style={{ color: pctPubSobreVentas > 0.15 ? 'var(--pink)' : pctPubSobreVentas > 0.08 ? '#f59e0b' : 'var(--green)', fontWeight: 700 }}>{Math.round(pctPubSobreVentas * 100)}% de ventas</span> (meta: bajo 8%)</span>
+        {pctPubSobreMargen !== null && (
+          <span> · Publicidad: <span style={{ color: pctPubSobreMargen > 0.25 ? 'var(--pink)' : pctPubSobreMargen > 0.15 ? '#f59e0b' : 'var(--green)', fontWeight: 700 }}>{Math.round(pctPubSobreMargen * 100)}% del margen</span>{pctPubSobreVentas !== null && <span> · {Math.round(pctPubSobreVentas * 100)}% de ventas brutas</span>} (meta: bajo 15% del margen)</span>
         )}
       </div>
+    </div>
+  )
+}
+
+// ─── Bloque: Origen de ventas + CAC estimado ────────────────────────────────
+
+const ORIGEN_ICONS = { Instagram: '📱', Referido: '🤝', 'Cliente habitual': '⭐', Evento: '🎉', Otro: '•' }
+
+function OrigenVentas({ ventas, gastosPub }) {
+  const ventasConOrigen = ventas.filter(v => v.origen)
+  if (ventasConOrigen.length === 0) return (
+    <div className="card" style={{ marginBottom: 12 }}>
+      <div className="card-title">Origen de clientes</div>
+      <div style={{ color: 'var(--muted)', fontSize: 13, textAlign: 'center', padding: '12px 0' }}>
+        Aún no hay datos — selecciona el origen al registrar una venta
+      </div>
+    </div>
+  )
+
+  // Agrupar por origen
+  const porOrigen = {}
+  ventasConOrigen.forEach(v => {
+    const o = v.origen
+    if (!porOrigen[o]) porOrigen[o] = { ventas: 0, ingreso: 0 }
+    porOrigen[o].ventas += 1
+    porOrigen[o].ingreso += v.litros * v.precio_venta
+  })
+
+  const totalIngreso = Object.values(porOrigen).reduce((s, d) => s + d.ingreso, 0)
+  const totalPub = gastosPub.reduce((s, m) => s + m.monto, 0)
+
+  // CAC estimado: gasto pub / ventas atribuidas a Instagram
+  const ventasIG = porOrigen['Instagram']?.ventas || 0
+  const ingresoIG = porOrigen['Instagram']?.ingreso || 0
+  const cac = ventasIG > 0 && totalPub > 0 ? totalPub / ventasIG : null
+  const roiIG = totalPub > 0 && ingresoIG > 0 ? ingresoIG / totalPub : null
+
+  const ordenados = Object.entries(porOrigen).sort((a, b) => b[1].ingreso - a[1].ingreso)
+  const maxIngreso = ordenados[0]?.[1].ingreso || 1
+
+  return (
+    <div className="card" style={{ marginBottom: 12 }}>
+      <div className="card-title">Origen de clientes</div>
+
+      {ordenados.map(([origen, d]) => {
+        const pct = Math.round(d.ingreso / totalIngreso * 100)
+        return (
+          <div key={origen} style={{ marginBottom: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-strong)' }}>
+                {ORIGEN_ICONS[origen] || '•'} {origen}
+                <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 6 }}>×{d.ventas} ventas</span>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--cyan)', fontWeight: 700 }}>{pct}% · {formatCLP(d.ingreso)}</div>
+            </div>
+            <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 4, height: 6, overflow: 'hidden' }}>
+              <div style={{
+                height: '100%', borderRadius: 4,
+                background: origen === 'Instagram' ? 'linear-gradient(90deg, var(--pink), var(--purple))' : 'rgba(0,180,180,0.5)',
+                width: (d.ingreso / maxIngreso * 100) + '%'
+              }} />
+            </div>
+          </div>
+        )
+      })}
+
+      {/* CAC e ingreso por Instagram */}
+      {(cac !== null || roiIG !== null) && (
+        <div style={{ marginTop: 12, padding: '10px 12px', background: 'rgba(196,0,90,0.06)', borderRadius: 8, fontSize: 12, lineHeight: 1.8 }}>
+          <div style={{ fontWeight: 700, color: 'var(--pink)', marginBottom: 4 }}>📱 ROI Instagram Ads</div>
+          {cac !== null && <div style={{ color: 'var(--muted)' }}>CAC estimado: <span style={{ color: 'var(--text-strong)', fontWeight: 700 }}>{formatCLP(cac)}</span> por pedido</div>}
+          {roiIG !== null && <div style={{ color: 'var(--muted)' }}>Ingreso IG / gasto ads: <span style={{ color: roiIG >= 3 ? 'var(--green)' : roiIG >= 1.5 ? '#f59e0b' : 'var(--pink)', fontWeight: 700 }}>{roiIG.toFixed(1)}x</span></div>}
+          <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 4 }}>
+            {roiIG >= 3 && 'Excelente — Instagram está generando buen retorno.'}
+            {roiIG >= 1.5 && roiIG < 3 && 'Retorno razonable — sigue monitoreando.'}
+            {roiIG > 0 && roiIG < 1.5 && 'Las ventas de IG no cubren aún el gasto en ads. Optimiza el targeting o el creativo.'}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -319,17 +402,23 @@ function SemaforoPub({ ventas, gastosPub }) {
 export default function Analisis() {
   const [ventas, setVentas] = useState([])
   const [gastosPub, setGastosPub] = useState([])
+  const [margenBruto, setMargenBruto] = useState(null)
   const [loading, setLoading] = useState(true)
   const [periodo, setPeriodo] = useState('todo') // 'todo' | '90d' | '30d'
 
   useEffect(() => {
     async function load() {
-      const [{ data: vts }, { data: cja }] = await Promise.all([
-        supabase.from('ventas').select('fecha, litros, precio_venta').order('fecha', { ascending: false }),
+      const [{ data: vts }, { data: cja }, { data: cmp }] = await Promise.all([
+        supabase.from('ventas').select('fecha, litros, precio_venta, origen').order('fecha', { ascending: false }),
         supabase.from('caja').select('fecha, monto, categoria, tipo').eq('tipo', 'salida'),
+        supabase.from('compras').select('precio_total, es_inversion'),
       ])
       setVentas(vts || [])
       setGastosPub((cja || []).filter(m => m.categoria === 'Publicidad'))
+      // Margen bruto: ventas - compras operativas (excluye inversión inicial)
+      const totalVtsBruto = (vts || []).reduce((s, v) => s + v.litros * v.precio_venta, 0)
+      const totalCmpOp = (cmp || []).filter(c => !c.es_inversion).reduce((s, c) => s + c.precio_total, 0)
+      setMargenBruto(totalVtsBruto > 0 ? (totalVtsBruto - totalCmpOp) / totalVtsBruto : null)
       setLoading(false)
     }
     load()
@@ -351,7 +440,7 @@ export default function Analisis() {
       <div className="page-title">Análisis</div>
 
       {/* Semáforo de publicidad — siempre con datos completos */}
-      <SemaforoPub ventas={ventas} gastosPub={gastosPub} />
+      <SemaforoPub ventas={ventas} gastosPub={gastosPub} margenBruto={margenBruto} />
 
       {/* Selector de período */}
       <div className="toggle-row" style={{ marginBottom: 16 }}>
@@ -375,6 +464,7 @@ export default function Analisis() {
         </div>
       ) : (
         <>
+          <OrigenVentas ventas={ventasFiltradas} gastosPub={gastosPub} />
           <VentasPorDia ventas={ventasFiltradas} />
           <TendenciaSemanal ventas={ventasFiltradas} />
         </>
