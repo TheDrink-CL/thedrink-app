@@ -59,7 +59,7 @@ function EditStockModal({ insumo, onSave, onCancel }) {
 export default function Compras() {
   const [insumos, setInsumos] = useState([])
   const [compras, setCompras] = useState([])
-  const [form, setForm] = useState({ fecha: new Date().toISOString().split('T')[0], insumo_nombre: '', unidad: 'ml', cantidad: '', precio_total: '', nota: '' })
+  const [form, setForm] = useState({ fecha: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` })(), insumo_nombre: '', unidad: 'ml', cantidad: '', precio_total: '', nota: '' })
   const [toast, setToast] = useState('')
   const [loading, setLoading] = useState(false)
   const [tab, setTab] = useState('registrar')

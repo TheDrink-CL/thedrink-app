@@ -173,12 +173,32 @@ function SemaforoPub({ ventas, gastosPub }) {
   const vts7ant = ventas.filter(v => parseFecha(v.fecha) >= hace14 && parseFecha(v.fecha) < hace7).reduce((s, v) => s + v.litros * v.precio_venta, 0)
   const momentum = vts7ant > 0 ? (vts7 - vts7ant) / vts7ant : null
 
-  // 4. Día de la semana actual (mejor no pautar martes/miércoles genéricamente)
+  // 4. % de ventas gastado en publicidad (acumulado total)
+  const totalVentas = ventas.reduce((s, v) => s + v.litros * v.precio_venta, 0)
+  const totalPub = gastosPub.reduce((s, m) => s + m.monto, 0)
+  const pctPubSobreVentas = totalVentas > 0 ? totalPub / totalVentas : null
+
+  // 5. Día de la semana actual
   const diaSemana = hoy.getDay() // 0=Dom, 5=Vie, 6=Sáb
 
   // ── Lógica de recomendación ──────────────────────────────────────────────
   const factores = []
-  let puntaje = 0 // -2 a +2, positivo = sí pautar
+  let puntaje = 0 // negativo = abstenerse, positivo = pautar
+
+  // Factor: % acumulado de ventas en publicidad
+  if (pctPubSobreVentas !== null) {
+    const pct = Math.round(pctPubSobreVentas * 100)
+    if (pctPubSobreVentas > 0.15) {
+      factores.push({ icon: '📊', texto: `Llevas ${pct}% de tus ventas en publicidad — estás por encima del 15% recomendado. Pausa y deja que las ventas suban antes de invertir más`, peso: -2, tipo: 'negativo' })
+      puntaje -= 2
+    } else if (pctPubSobreVentas > 0.08) {
+      factores.push({ icon: '📊', texto: `Llevas ${pct}% de ventas en publicidad — en zona de vigilancia (8–15%). Pautar es razonable pero monitorea el retorno`, peso: -1, tipo: 'negativo' })
+      puntaje -= 1
+    } else {
+      factores.push({ icon: '📊', texto: `Llevas ${pct}% de ventas en publicidad — saludable (bajo 8%). Tienes margen para seguir pautando`, peso: 1, tipo: 'positivo' })
+      puntaje += 1
+    }
+  }
 
   // Factor: tiempo sin publicidad
   if (diasSinPub === null) {
@@ -286,6 +306,9 @@ function SemaforoPub({ ventas, gastosPub }) {
       {/* Tip contextual */}
       <div style={{ marginTop: 8, padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, fontSize: 11, color: 'var(--muted)', lineHeight: 1.7 }}>
         💡 Tip: las fechas de pago (1–5 y 15–20 de cada mes) suelen ser los mejores momentos para activar campañas de tragos en Santiago.
+        {pctPubSobreVentas !== null && (
+          <span> · Publicidad acumulada: <span style={{ color: pctPubSobreVentas > 0.15 ? 'var(--pink)' : pctPubSobreVentas > 0.08 ? '#f59e0b' : 'var(--green)', fontWeight: 700 }}>{Math.round(pctPubSobreVentas * 100)}% de ventas</span> (meta: bajo 8%)</span>
+        )}
       </div>
     </div>
   )

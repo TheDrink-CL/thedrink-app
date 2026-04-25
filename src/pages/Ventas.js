@@ -24,7 +24,7 @@ function ConfirmModal({ mensaje, onConfirm, onCancel }) {
 
 export default function Ventas() {
   const [recetas, setRecetas] = useState([])
-  const [form, setForm] = useState({ fecha: new Date().toISOString().split('T')[0], receta_nombre: '', litros: 1, precio_venta: '', delivery: '', nota: '' })
+  const [form, setForm] = useState({ fecha: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` })(), receta_nombre: '', litros: 1, precio_venta: '', delivery: '', nota: '' })
   const [ventas, setVentas] = useState([])
   const [toast, setToast] = useState('')
   const [loading, setLoading] = useState(false)
