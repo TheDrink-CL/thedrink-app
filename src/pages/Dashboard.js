@@ -5,15 +5,17 @@ import { formatCLP, formatPct } from '../lib/calculos'
 export default function Dashboard() {
   const [data, setData] = useState(null)
   const [ventas, setVentas] = useState([])
+  const [alertasStock, setAlertasStock] = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     async function load() {
-      const [{ data: cfg }, { data: vts }, { data: cja }, { data: cmp }] = await Promise.all([
+      const [{ data: cfg }, { data: vts }, { data: cja }, { data: cmp }, { data: ins }] = await Promise.all([
         supabase.from('config').select('*'),
         supabase.from('ventas').select('*').order('fecha', { ascending: false }),
         supabase.from('caja').select('*'),
         supabase.from('compras').select('precio_total'),
+        supabase.from('insumos').select('nombre, stock_actual, stock_minimo, unidad'),
       ])
 
       const config = {}
@@ -22,7 +24,6 @@ export default function Dashboard() {
       const inversion = config.inversion_total || 120480
       const ingresoTotal = vts?.reduce((s, v) => s + (v.litros * v.precio_venta), 0) || 0
       const litrosTotales = vts?.reduce((s, v) => s + v.litros, 0) || 0
-      const ingresoPromLitro = litrosTotales > 0 ? ingresoTotal / litrosTotales : 0
 
       // Saldo caja real: ventas - compras + movimientos manuales extra (no ventas/insumos ya contados)
       const totalVentas = vts?.reduce((s, v) => s + (v.litros * v.precio_venta) + (v.delivery || 0), 0) || 0
@@ -47,7 +48,13 @@ export default function Dashboard() {
         .sort((a, b) => b[1].litros - a[1].litros)
         .slice(0, 5)
 
-      setData({ inversion, ingresoTotal, litrosTotales, ingresoPromLitro, saldoCaja, ingresoMes })
+      // Alertas de stock
+      const alertas = (ins || []).filter(i =>
+        i.stock_actual != null && i.stock_minimo != null && i.stock_actual <= i.stock_minimo
+      )
+      setAlertasStock(alertas)
+
+      setData({ inversion, ingresoTotal, litrosTotales, saldoCaja, ingresoMes })
       setVentas({ topRecetas, recientes: vts?.slice(0, 5) || [] })
       setLoading(false)
     }
@@ -62,6 +69,26 @@ export default function Dashboard() {
   return (
     <div className="page">
       <div className="page-title">The Drink</div>
+
+      {/* Alertas de stock crítico */}
+      {alertasStock.length > 0 && (
+        <div style={{
+          background: 'rgba(196,0,90,0.08)', border: '1px solid rgba(196,0,90,0.35)',
+          borderRadius: 10, padding: '12px 14px', marginBottom: 12
+        }}>
+          <div style={{ fontSize: 11, color: 'var(--pink)', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700, marginBottom: 8 }}>
+            ⚠ Stock crítico
+          </div>
+          {alertasStock.map(i => (
+            <div key={i.nombre} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <div style={{ fontSize: 14, color: 'var(--text-strong)', fontWeight: 600 }}>{i.nombre}</div>
+              <div style={{ fontSize: 12, color: 'var(--pink)' }}>
+                {i.stock_actual} {i.unidad} (mín {i.stock_minimo})
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="kpi-grid">
         <div className="kpi-card">
