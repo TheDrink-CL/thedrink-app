@@ -65,6 +65,8 @@ export default function Compras() {
   const [tab, setTab] = useState('registrar')
   const [confirmar, setConfirmar] = useState(null)
   const [editandoStock, setEditandoStock] = useState(null)
+  const [fabricandoGoma, setFabricandoGoma] = useState(false)
+  const [mlGoma, setMlGoma] = useState('')
 
   useEffect(() => { loadData() }, [])
 
@@ -116,6 +118,27 @@ export default function Compras() {
     setEditandoStock(null)
     showToast('Stock actualizado')
     loadData()
+  }
+
+  // Proporción: 1000g azúcar → 1500ml goma
+  const GOMA_POR_KG = 1500 // ml de goma por 1000g de azúcar
+  const azucarParaGoma = mlGoma ? Math.round((parseFloat(mlGoma) / GOMA_POR_KG) * 1000) : 0
+
+  const handleFabricarGoma = async () => {
+    if (!mlGoma || parseFloat(mlGoma) <= 0) return
+    const azucar = insumos.find(i => i.nombre === 'Azúcar')
+    const goma = insumos.find(i => i.nombre === 'Goma')
+    if (!azucar || !goma) { showToast('No se encontró Azúcar o Goma en insumos'); return }
+    setLoading(true)
+    await Promise.all([
+      supabase.from('insumos').update({ stock_actual: Math.max(0, (azucar.stock_actual || 0) - azucarParaGoma) }).eq('nombre', 'Azúcar'),
+      supabase.from('insumos').update({ stock_actual: (goma.stock_actual || 0) + parseFloat(mlGoma) }).eq('nombre', 'Goma'),
+    ])
+    showToast(`Goma fabricada ✓ · -${azucarParaGoma}g azúcar · +${mlGoma}ml goma`)
+    setFabricandoGoma(false)
+    setMlGoma('')
+    loadData()
+    setLoading(false)
   }
 
   const costoPorUnidad = form.cantidad && form.precio_total
@@ -254,6 +277,43 @@ export default function Compras() {
             Toca un insumo para actualizar su stock o configurar la alerta mínima.
             Las compras suman automáticamente al stock.
           </div>
+
+          {/* Botón fabricar goma */}
+          <button
+            onClick={() => setFabricandoGoma(true)}
+            style={{ width: '100%', background: 'rgba(0,180,180,0.08)', border: '1px solid rgba(0,180,180,0.3)', borderRadius: 10, padding: '10px 0', color: 'var(--cyan)', cursor: 'pointer', fontSize: 13, fontWeight: 600, marginBottom: 12 }}>
+            🧪 Fabricar goma
+          </button>
+
+          {/* Modal fabricar goma */}
+          {fabricandoGoma && (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: 24 }}>
+              <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24, maxWidth: 320, width: '100%' }}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text-strong)', marginBottom: 4 }}>🧪 Fabricar goma</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>
+                  Proporción: 1000g azúcar → 1500ml goma
+                </div>
+                <div className="form-group">
+                  <label className="form-label">¿Cuántos ml de goma vas a fabricar?</label>
+                  <input type="number" className="form-input" value={mlGoma}
+                    placeholder="ej: 1500"
+                    onChange={e => setMlGoma(e.target.value)} />
+                </div>
+                {azucarParaGoma > 0 && (
+                  <div style={{ background: 'rgba(0,180,180,0.06)', borderRadius: 8, padding: '10px 12px', marginBottom: 16, fontSize: 13 }}>
+                    <div style={{ color: 'var(--pink)' }}>Se rebajarán <strong>{azucarParaGoma}g</strong> de azúcar</div>
+                    <div style={{ color: 'var(--green)', marginTop: 4 }}>Se sumarán <strong>{mlGoma}ml</strong> de goma</div>
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={() => { setFabricandoGoma(false); setMlGoma('') }}>Cancelar</button>
+                  <button className="btn btn-primary btn-sm" style={{ flex: 1 }} disabled={loading || !mlGoma} onClick={handleFabricarGoma}>
+                    {loading ? 'Guardando...' : 'Confirmar'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           <div className="card">
             {insumos.map(ins => {
               const estado = getEstadoStock(ins)
