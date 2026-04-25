@@ -169,14 +169,14 @@ export default function Caja() {
     const [{ data: mov }, { data: vts }, { data: compras }] = await Promise.all([
       supabase.from('caja').select('*').order('fecha', { ascending: false }),
       supabase.from('ventas').select('litros, precio_venta, delivery, fecha'),
-      supabase.from('compras').select('precio_total'),
+      supabase.from('compras').select('precio_total, es_inversion'),
     ])
 
     setMovimientos(mov || [])
     setVentas(vts || [])
 
     const totalVentas = (vts || []).reduce((s, v) => s + (v.litros * v.precio_venta) + (v.delivery || 0), 0)
-    const totalCompras = (compras || []).reduce((s, c) => s + c.precio_total, 0)
+    const totalCompras = (compras || []).reduce((s, c) => s + (c.es_inversion ? 0 : c.precio_total), 0)
     const movExtraEntradas = (mov || []).filter(m => m.tipo === 'entrada' && m.categoria !== 'Venta' && m.categoria !== 'Delivery').reduce((s, m) => s + m.monto, 0)
     const movExtraSalidas = (mov || []).filter(m => m.tipo === 'salida' && m.categoria !== 'Insumos').reduce((s, m) => s + m.monto, 0)
 

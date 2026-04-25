@@ -14,7 +14,7 @@ export default function Dashboard() {
         supabase.from('config').select('*'),
         supabase.from('ventas').select('*').order('fecha', { ascending: false }),
         supabase.from('caja').select('*'),
-        supabase.from('compras').select('precio_total'),
+        supabase.from('compras').select('precio_total, es_inversion'),
         supabase.from('insumos').select('nombre, stock_actual, stock_minimo, unidad'),
       ])
 
@@ -27,7 +27,7 @@ export default function Dashboard() {
 
       // Saldo caja real: ventas - compras + movimientos manuales extra (no ventas/insumos ya contados)
       const totalVentas = vts?.reduce((s, v) => s + (v.litros * v.precio_venta) + (v.delivery || 0), 0) || 0
-      const totalCompras = cmp?.reduce((s, c) => s + c.precio_total, 0) || 0
+      const totalCompras = cmp?.reduce((s, c) => s + (c.es_inversion ? 0 : c.precio_total), 0) || 0
       const movExtraEntradas = cja?.filter(m => m.tipo === 'entrada' && m.categoria !== 'Venta' && m.categoria !== 'Delivery').reduce((s, m) => s + m.monto, 0) || 0
       const movExtraSalidas = cja?.filter(m => m.tipo === 'salida' && m.categoria !== 'Insumos').reduce((s, m) => s + m.monto, 0) || 0
       const saldoCaja = totalVentas - totalCompras + movExtraEntradas - movExtraSalidas
