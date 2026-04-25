@@ -19,6 +19,43 @@ function ConfirmModal({ mensaje, onConfirm, onCancel }) {
   )
 }
 
+function EditStockModal({ insumo, onSave, onCancel }) {
+  const [stockActual, setStockActual] = useState(insumo.stock_actual ?? '')
+  const [stockMinimo, setStockMinimo] = useState(insumo.stock_minimo ?? '')
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: 24
+    }}>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24, maxWidth: 320, width: '100%' }}>
+        <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text-strong)', marginBottom: 16 }}>{insumo.nombre}</div>
+        <div className="form-group">
+          <label className="form-label">Stock actual ({insumo.unidad})</label>
+          <input type="number" step="any" className="form-input" value={stockActual}
+            placeholder="ej: 3000"
+            onChange={e => setStockActual(e.target.value)} />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Alerta mínimo ({insumo.unidad})</label>
+          <input type="number" step="any" className="form-input" value={stockMinimo}
+            placeholder="ej: 500"
+            onChange={e => setStockMinimo(e.target.value)} />
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+            El dashboard te avisará cuando baje de este nivel
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={onCancel}>Cancelar</button>
+          <button className="btn btn-primary btn-sm" style={{ flex: 1 }}
+            onClick={() => onSave(insumo.nombre, parseFloat(stockActual) || 0, parseFloat(stockMinimo) || 0)}>
+            Guardar
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Compras() {
   const [insumos, setInsumos] = useState([])
   const [compras, setCompras] = useState([])
@@ -27,18 +64,18 @@ export default function Compras() {
   const [loading, setLoading] = useState(false)
   const [tab, setTab] = useState('registrar')
   const [confirmar, setConfirmar] = useState(null)
+  const [editandoStock, setEditandoStock] = useState(null)
 
-  useEffect(() => {
-    async function load() {
-      const [{ data: ins }, { data: cmp }] = await Promise.all([
-        supabase.from('insumos').select('*').order('nombre'),
-        supabase.from('compras').select('*').order('fecha', { ascending: false }).limit(20)
-      ])
-      setInsumos(ins || [])
-      setCompras(cmp || [])
-    }
-    load()
-  }, [])
+  useEffect(() => { loadData() }, [])
+
+  async function loadData() {
+    const [{ data: ins }, { data: cmp }] = await Promise.all([
+      supabase.from('insumos').select('*').order('nombre'),
+      supabase.from('compras').select('*').order('fecha', { ascending: false }).limit(20)
+    ])
+    setInsumos(ins || [])
+    setCompras(cmp || [])
+  }
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2500) }
 
@@ -62,31 +99,37 @@ export default function Compras() {
     if (!error) {
       showToast('Compra registrada · PPP actualizado')
       setForm(f => ({ ...f, insumo_nombre: '', cantidad: '', precio_total: '', nota: '' }))
-      const [{ data: ins }, { data: cmp }] = await Promise.all([
-        supabase.from('insumos').select('*').order('nombre'),
-        supabase.from('compras').select('*').order('fecha', { ascending: false }).limit(20)
-      ])
-      setInsumos(ins || [])
-      setCompras(cmp || [])
+      loadData()
     }
     setLoading(false)
   }
 
-  const handleEliminar = async (id, insumo) => {
+  const handleEliminar = async (id) => {
     await supabase.from('compras').delete().eq('id', id)
     showToast('Compra eliminada · PPP recalculado')
     setConfirmar(null)
-    const [{ data: ins }, { data: cmp }] = await Promise.all([
-      supabase.from('insumos').select('*').order('nombre'),
-      supabase.from('compras').select('*').order('fecha', { ascending: false }).limit(20)
-    ])
-    setInsumos(ins || [])
-    setCompras(cmp || [])
+    loadData()
+  }
+
+  const handleSaveStock = async (nombre, stockActual, stockMinimo) => {
+    await supabase.from('insumos').update({ stock_actual: stockActual, stock_minimo: stockMinimo }).eq('nombre', nombre)
+    setEditandoStock(null)
+    showToast('Stock actualizado')
+    loadData()
   }
 
   const costoPorUnidad = form.cantidad && form.precio_total
     ? (parseFloat(form.precio_total) / parseFloat(form.cantidad)).toFixed(2)
     : null
+
+  const getEstadoStock = (ins) => {
+    if (ins.stock_actual == null) return 'sin_datos'
+    if (ins.stock_minimo != null && ins.stock_actual <= ins.stock_minimo) return 'critico'
+    if (ins.stock_minimo != null && ins.stock_actual <= ins.stock_minimo * 1.5) return 'bajo'
+    return 'ok'
+  }
+  const estadoColor = { ok: 'var(--green)', bajo: '#f59e0b', critico: 'var(--pink)', sin_datos: 'var(--muted)' }
+  const estadoLabel = { ok: 'OK', bajo: 'Bajo', critico: 'Crítico', sin_datos: '—' }
 
   return (
     <div className="page">
@@ -94,15 +137,23 @@ export default function Compras() {
       {confirmar && (
         <ConfirmModal
           mensaje={`¿Eliminar compra de ${confirmar.insumo_nombre} (${formatCLP(confirmar.precio_total)})?`}
-          onConfirm={() => handleEliminar(confirmar.id, confirmar.insumo_nombre)}
+          onConfirm={() => handleEliminar(confirmar.id)}
           onCancel={() => setConfirmar(null)}
+        />
+      )}
+      {editandoStock && (
+        <EditStockModal
+          insumo={editandoStock}
+          onSave={handleSaveStock}
+          onCancel={() => setEditandoStock(null)}
         />
       )}
       <div className="page-title">Compras</div>
 
       <div className="toggle-row">
         <button className={`toggle-btn ${tab === 'registrar' ? 'active-entrada' : ''}`} onClick={() => setTab('registrar')}>Registrar</button>
-        <button className={`toggle-btn ${tab === 'insumos' ? 'active-entrada' : ''}`} onClick={() => setTab('insumos')}>PPP actual</button>
+        <button className={`toggle-btn ${tab === 'ppp' ? 'active-entrada' : ''}`} onClick={() => setTab('ppp')}>PPP</button>
+        <button className={`toggle-btn ${tab === 'stock' ? 'active-entrada' : ''}`} onClick={() => setTab('stock')}>Stock</button>
       </div>
 
       {tab === 'registrar' && (
@@ -179,7 +230,7 @@ export default function Compras() {
         </form>
       )}
 
-      {tab === 'insumos' && (
+      {tab === 'ppp' && (
         <div className="card">
           <div className="card-title">Costo PPP por insumo</div>
           {insumos.map(i => (
@@ -195,6 +246,39 @@ export default function Compras() {
             </div>
           ))}
         </div>
+      )}
+
+      {tab === 'stock' && (
+        <>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.6 }}>
+            Toca un insumo para actualizar su stock o configurar la alerta mínima.
+            Las compras suman automáticamente al stock.
+          </div>
+          <div className="card">
+            {insumos.map(ins => {
+              const estado = getEstadoStock(ins)
+              return (
+                <div className="list-item" key={ins.nombre}
+                  onClick={() => setEditandoStock(ins)}
+                  style={{ cursor: 'pointer' }}>
+                  <div style={{ flex: 1 }}>
+                    <div className="list-item-name">{ins.nombre}</div>
+                    <div className="list-item-sub">
+                      {ins.stock_actual != null ? `${ins.stock_actual} ${ins.unidad}` : `Sin datos · ${ins.unidad}`}
+                      {ins.stock_minimo != null && ` · Mín: ${ins.stock_minimo}`}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: estadoColor[estado], textTransform: 'uppercase' }}>
+                      {estadoLabel[estado]}
+                    </div>
+                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: estadoColor[estado] }} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </>
       )}
     </div>
   )
