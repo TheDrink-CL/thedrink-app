@@ -44,10 +44,27 @@ export default function Caja() {
   useEffect(() => { loadData() }, [])
 
   async function loadData() {
-    const { data } = await supabase.from('caja').select('*').order('fecha', { ascending: false }).limit(40)
-    setMovimientos(data || [])
-    const s = (data || []).reduce((acc, m) => m.tipo === 'entrada' ? acc + m.monto : acc - m.monto, 0)
-    setSaldo(s)
+    const [{ data: mov }, { data: ventas }, { data: compras }] = await Promise.all([
+      supabase.from('caja').select('*').order('fecha', { ascending: false }).limit(40),
+      supabase.from('ventas').select('litros, precio_venta, delivery'),
+      supabase.from('compras').select('precio_total'),
+    ])
+
+    setMovimientos(mov || [])
+
+    // Saldo = ingresos por ventas + delivery + movimientos manuales de entrada - compras - movimientos manuales de salida
+    const totalVentas = (ventas || []).reduce((s, v) => s + (v.litros * v.precio_venta) + (v.delivery || 0), 0)
+    const totalCompras = (compras || []).reduce((s, c) => s + c.precio_total, 0)
+    const totalMovEntradas = (mov || []).filter(m => m.tipo === 'entrada').reduce((s, m) => s + m.monto, 0)
+    const totalMovSalidas = (mov || []).filter(m => m.tipo === 'salida').reduce((s, m) => s + m.monto, 0)
+
+    // Evitar doble conteo: si hay movimientos de caja que ya registran ventas/compras, usar solo los manuales extra
+    // Por ahora: saldo real = ventas - compras + otros ingresos manuales - otros gastos manuales
+    // (los movimientos de caja iniciales que registran ventas/compras acumuladas los ignoramos en favor de las tablas reales)
+    const movExtraEntradas = (mov || []).filter(m => m.tipo === 'entrada' && m.categoria !== 'Venta' && m.categoria !== 'Delivery').reduce((s, m) => s + m.monto, 0)
+    const movExtraSalidas = (mov || []).filter(m => m.tipo === 'salida' && m.categoria !== 'Insumos').reduce((s, m) => s + m.monto, 0)
+
+    setSaldo(totalVentas - totalCompras + movExtraEntradas - movExtraSalidas)
   }
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2500) }

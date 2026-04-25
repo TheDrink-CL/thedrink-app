@@ -9,10 +9,11 @@ export default function Dashboard() {
 
   useEffect(() => {
     async function load() {
-      const [{ data: cfg }, { data: vts }, { data: cja }] = await Promise.all([
+      const [{ data: cfg }, { data: vts }, { data: cja }, { data: cmp }] = await Promise.all([
         supabase.from('config').select('*'),
         supabase.from('ventas').select('*').order('fecha', { ascending: false }),
         supabase.from('caja').select('*'),
+        supabase.from('compras').select('precio_total'),
       ])
 
       const config = {}
@@ -23,10 +24,12 @@ export default function Dashboard() {
       const litrosTotales = vts?.reduce((s, v) => s + v.litros, 0) || 0
       const ingresoPromLitro = litrosTotales > 0 ? ingresoTotal / litrosTotales : 0
 
-      // Saldo caja
-      const saldoCaja = cja?.reduce((s, m) => {
-        return m.tipo === 'entrada' ? s + m.monto : s - m.monto
-      }, 0) || 0
+      // Saldo caja real: ventas - compras + movimientos manuales extra (no ventas/insumos ya contados)
+      const totalVentas = vts?.reduce((s, v) => s + (v.litros * v.precio_venta) + (v.delivery || 0), 0) || 0
+      const totalCompras = cmp?.reduce((s, c) => s + c.precio_total, 0) || 0
+      const movExtraEntradas = cja?.filter(m => m.tipo === 'entrada' && m.categoria !== 'Venta' && m.categoria !== 'Delivery').reduce((s, m) => s + m.monto, 0) || 0
+      const movExtraSalidas = cja?.filter(m => m.tipo === 'salida' && m.categoria !== 'Insumos').reduce((s, m) => s + m.monto, 0) || 0
+      const saldoCaja = totalVentas - totalCompras + movExtraEntradas - movExtraSalidas
 
       // Ventas últimos 30 días
       const hace30 = new Date(); hace30.setDate(hace30.getDate() - 30)
