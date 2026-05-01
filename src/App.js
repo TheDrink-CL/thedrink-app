@@ -4,8 +4,10 @@ import Ventas from './pages/Ventas'
 import Compras from './pages/Compras'
 import Caja from './pages/Caja'
 import Analisis from './pages/Analisis'
+import Proyectos from './pages/Proyectos'
+import Cuentas from './pages/Cuentas'
 
-const TABS = [
+const TABS_MAIN = [
   { id: 'dashboard', label: 'Inicio', icon: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
@@ -36,28 +38,92 @@ const TABS = [
   )},
 ]
 
+const TABS_MAS = [
+  { id: 'proyectos', label: 'Proyectos', icon: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+      <polyline points="14 2 14 8 20 8"/>
+      <line x1="9" y1="13" x2="15" y2="13"/>
+      <line x1="9" y1="17" x2="13" y2="17"/>
+    </svg>
+  )},
+  { id: 'cuentas', label: 'Cuentas', icon: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <line x1="12" y1="1" x2="12" y2="23"/>
+      <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+    </svg>
+  )},
+]
+
+const ALL_TABS = [...TABS_MAIN, ...TABS_MAS]
+
 export default function App() {
   const [tab, setTab] = useState('dashboard')
+  const [menuMas, setMenuMas] = useState(false)
+
+  const isEnMas = TABS_MAS.some(t => t.id === tab)
+
+  const handleNavClick = (id) => {
+    setTab(id)
+    setMenuMas(false)
+  }
 
   return (
     <div>
-      {tab === 'dashboard' && <Dashboard />}
-      {tab === 'ventas' && <Ventas />}
-      {tab === 'compras' && <Compras />}
-      {tab === 'caja' && <Caja />}
-      {tab === 'analisis' && <Analisis />}
+      {tab === 'dashboard'  && <Dashboard />}
+      {tab === 'ventas'     && <Ventas />}
+      {tab === 'compras'    && <Compras />}
+      {tab === 'caja'       && <Caja />}
+      {tab === 'analisis'   && <Analisis />}
+      {tab === 'proyectos'  && <Proyectos />}
+      {tab === 'cuentas'    && <Cuentas />}
+
+      {/* Menú "Más" desplegable */}
+      {menuMas && (
+        <>
+          <div onClick={() => setMenuMas(false)}
+            style={{ position:'fixed', inset:0, zIndex:90 }} />
+          <div style={{
+            position:'fixed', bottom:70, right:12, zIndex:100,
+            background:'var(--card)', border:'1px solid var(--border)',
+            borderRadius:14, padding:8, minWidth:170,
+            boxShadow:'0 8px 32px rgba(0,0,0,0.5)'
+          }}>
+            {TABS_MAS.map(t => (
+              <button key={t.id} onClick={() => handleNavClick(t.id)}
+                style={{
+                  display:'flex', alignItems:'center', gap:12,
+                  width:'100%', background: tab === t.id ? 'rgba(0,180,180,0.1)' : 'none',
+                  border:'none', borderRadius:10, padding:'10px 14px',
+                  color: tab === t.id ? 'var(--cyan)' : 'var(--text)',
+                  cursor:'pointer', fontSize:14, fontWeight: tab === t.id ? 700 : 400
+                }}>
+                <span style={{ width:20, height:20, display:'block' }}>{t.icon}</span>
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       <nav className="bottom-nav">
-        {TABS.map(t => (
-          <button
-            key={t.id}
-            className={`nav-btn ${tab === t.id ? 'active' : ''}`}
-            onClick={() => setTab(t.id)}
-          >
+        {TABS_MAIN.map(t => (
+          <button key={t.id} className={`nav-btn ${tab === t.id ? 'active' : ''}`}
+            onClick={() => { setMenuMas(false); setTab(t.id) }}>
             {t.icon}
             {t.label}
           </button>
         ))}
+        {/* Botón "Más" */}
+        <button className={`nav-btn ${isEnMas ? 'active' : ''}`}
+          onClick={() => setMenuMas(m => !m)}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="5" r="1" fill="currentColor"/>
+            <circle cx="12" cy="12" r="1" fill="currentColor"/>
+            <circle cx="12" cy="19" r="1" fill="currentColor"/>
+          </svg>
+          Más
+        </button>
       </nav>
     </div>
   )

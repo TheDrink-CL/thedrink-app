@@ -19,6 +19,82 @@ function ConfirmModal({ mensaje, onConfirm, onCancel }) {
   )
 }
 
+function EditCompraModal({ compra, insumos, onSave, onCancel }) {
+  const [fecha, setFecha] = useState(compra.fecha)
+  const [insumoNombre, setInsumoNombre] = useState(compra.insumo_nombre)
+  const [unidad, setUnidad] = useState(compra.unidad)
+  const [cantidad, setCantidad] = useState(compra.cantidad)
+  const [precioTotal, setPrecioTotal] = useState(compra.precio_total)
+  const [nota, setNota] = useState(compra.nota || '')
+  const [saving, setSaving] = useState(false)
+
+  const handleSelectInsumo = (nombre) => {
+    const ins = insumos.find(i => i.nombre === nombre)
+    setInsumoNombre(nombre)
+    setUnidad(ins?.unidad || 'ml')
+  }
+
+  const costoPorUnidad = cantidad && precioTotal
+    ? (parseFloat(precioTotal) / parseFloat(cantidad)).toFixed(2) : null
+
+  const handleSave = async () => {
+    if (!insumoNombre || !cantidad || !precioTotal) return
+    setSaving(true)
+    await supabase.from('compras').update({
+      fecha, insumo_nombre: insumoNombre, unidad,
+      cantidad: parseFloat(cantidad),
+      precio_total: parseFloat(precioTotal),
+      nota: nota || null
+    }).eq('id', compra.id)
+    setSaving(false)
+    onSave()
+  }
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, padding:24 }}>
+      <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:14, padding:24, maxWidth:400, width:'100%' }}>
+        <div style={{ fontWeight:700, fontSize:16, color:'var(--text)', marginBottom:18 }}>Editar compra</div>
+        <div className="form-group">
+          <label className="form-label">Fecha</label>
+          <input type="date" className="form-input" value={fecha} onChange={e => setFecha(e.target.value)} />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Insumo</label>
+          <select className="form-select" value={insumoNombre} onChange={e => handleSelectInsumo(e.target.value)}>
+            <option value="">Seleccionar...</option>
+            {insumos.map(i => <option key={i.nombre} value={i.nombre}>{i.nombre}</option>)}
+          </select>
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+          <div className="form-group">
+            <label className="form-label">Cantidad ({unidad})</label>
+            <input type="number" step="any" className="form-input" value={cantidad} onChange={e => setCantidad(e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Precio total ($)</label>
+            <input type="number" className="form-input" value={precioTotal} onChange={e => setPrecioTotal(e.target.value)} />
+          </div>
+        </div>
+        {costoPorUnidad && (
+          <div style={{ color:'var(--cyan)', fontSize:13, marginBottom:12, textAlign:'center' }}>
+            ${costoPorUnidad} por {unidad}
+          </div>
+        )}
+        <div className="form-group">
+          <label className="form-label">Nota</label>
+          <input type="text" className="form-input" value={nota} placeholder="opcional" onChange={e => setNota(e.target.value)} />
+        </div>
+        <div style={{ display:'flex', gap:10, marginTop:4 }}>
+          <button className="btn btn-secondary btn-sm" style={{ flex:1 }} onClick={onCancel}>Cancelar</button>
+          <button className="btn btn-primary btn-sm" style={{ flex:1 }} onClick={handleSave} disabled={saving}>
+            {saving ? 'Guardando...' : 'Guardar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function EditStockModal({ insumo, onSave, onCancel }) {
   const [stockActual, setStockActual] = useState(insumo.stock_actual ?? '')
   const [stockMinimo, setStockMinimo] = useState(insumo.stock_minimo ?? '')
@@ -65,6 +141,7 @@ export default function Compras() {
   const [tab, setTab] = useState('registrar')
   const [confirmar, setConfirmar] = useState(null)
   const [editandoStock, setEditandoStock] = useState(null)
+  const [editandoCompra, setEditandoCompra] = useState(null)
   const [fabricandoGoma, setFabricandoGoma] = useState(false)
   const [mlGoma, setMlGoma] = useState('')
 
@@ -73,7 +150,7 @@ export default function Compras() {
   async function loadData() {
     const [{ data: ins }, { data: cmp }] = await Promise.all([
       supabase.from('insumos').select('*').order('nombre'),
-      supabase.from('compras').select('*').order('fecha', { ascending: false }).limit(20)
+      supabase.from('compras').select('*').order('fecha', { ascending: false })
     ])
     setInsumos(ins || [])
     setCompras(cmp || [])
@@ -171,6 +248,14 @@ export default function Compras() {
           onCancel={() => setEditandoStock(null)}
         />
       )}
+      {editandoCompra && (
+        <EditCompraModal
+          compra={editandoCompra}
+          insumos={insumos}
+          onSave={() => { setEditandoCompra(null); showToast('Compra actualizada ✓'); loadData() }}
+          onCancel={() => setEditandoCompra(null)}
+        />
+      )}
       <div className="page-title">Compras</div>
 
       <div className="toggle-row">
@@ -225,7 +310,7 @@ export default function Compras() {
             </button>
           </div>
 
-          <div className="section-divider">Últimas compras</div>
+          <div className="section-divider">Todas las compras ({compras.length})</div>
           <div className="card">
             {compras.map(c => (
               <div className="list-item" key={c.id} style={{ gap: 8 }}>
@@ -234,14 +319,23 @@ export default function Compras() {
                   <div className="list-item-sub">{c.fecha} · {c.cantidad} {c.unidad}</div>
                   {c.nota && <div className="list-item-sub" style={{ color: 'var(--muted)' }}>{c.nota}</div>}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div className="list-item-right">
                     <div className="list-item-value">{formatCLP(c.precio_total)}</div>
                     <div className="list-item-muted">${(c.precio_total / c.cantidad).toFixed(2)}/{c.unidad}</div>
                   </div>
+                  <button onClick={() => setEditandoCompra(c)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--cyan)', padding: 4 }}
+                    title="Editar">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                    </svg>
+                  </button>
                   <button onClick={() => setConfirmar(c)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 4 }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 4 }}
+                    title="Eliminar">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>
                       <path d="M9 6V4h6v2"/>
                     </svg>
