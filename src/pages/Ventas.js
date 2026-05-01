@@ -9,6 +9,11 @@ const fechaHoy = () => {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
 }
 
+const horaAhora = () => {
+  const d = new Date()
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+}
+
 const itemVacio = () => ({ receta_nombre: '', litros: 1, precio_venta: '', devuelve_envase: false })
 
 const ORIGENES = ['Instagram', 'Referido', 'Cliente habitual', 'Evento', 'Otro']
@@ -35,6 +40,7 @@ function ConfirmModal({ mensaje, onConfirm, onCancel }) {
 
 function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
   const [fecha, setFecha] = useState(orden.fecha)
+  const [hora, setHora] = useState(orden.hora || '')
   const [cliente, setCliente] = useState(orden.cliente_nombre || '')
   const [origenVal, setOrigenVal] = useState(orden.origen || '')
   const [medioPago, setMedioPago] = useState(orden.medio_pago || 'transferencia')
@@ -65,6 +71,7 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
     // Actualizar orden
     await supabase.from('ordenes').update({
       fecha,
+      hora: hora || null,
       cliente_nombre: cliente || null,
       origen: origenVal || null,
       medio_pago: medioPago,
@@ -102,9 +109,13 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
             <input type="date" className="form-input" value={fecha} onChange={e => setFecha(e.target.value)} />
           </div>
           <div className="form-group">
-            <label className="form-label">Cliente</label>
-            <input type="text" className="form-input" value={cliente} placeholder="opcional" onChange={e => setCliente(e.target.value)} />
+            <label className="form-label">Hora</label>
+            <input type="time" className="form-input" value={hora} onChange={e => setHora(e.target.value)} />
           </div>
+        </div>
+        <div className="form-group" style={{ marginBottom:12 }}>
+          <label className="form-label">Cliente</label>
+          <input type="text" className="form-input" value={cliente} placeholder="opcional" onChange={e => setCliente(e.target.value)} />
         </div>
 
         <div className="form-group" style={{ marginBottom:12 }}>
@@ -199,6 +210,7 @@ export default function Ventas() {
 
   // Formulario de orden nueva
   const [fecha, setFecha] = useState(fechaHoy())
+  const [hora, setHora] = useState(horaAhora())
   const [cliente, setCliente] = useState('')
   const [origen, setOrigen] = useState('')
   const [medioPago, setMedioPago] = useState('transferencia')
@@ -260,6 +272,7 @@ export default function Ventas() {
 
     const { data: orden, error: errOrden } = await supabase.from('ordenes').insert({
       fecha,
+      hora: hora || null,
       cliente_nombre: cliente || null,
       origen: origen || null,
       medio_pago: medioPago,
@@ -301,6 +314,7 @@ export default function Ventas() {
 
     showToast('Pedido registrado ✓')
     setFecha(fechaHoy())
+    setHora(horaAhora())
     setCliente('')
     setOrigen('')
     setMedioPago('transferencia')
@@ -355,10 +369,14 @@ export default function Ventas() {
               <input type="date" className="form-input" value={fecha} onChange={e => setFecha(e.target.value)} />
             </div>
             <div className="form-group">
-              <label className="form-label">Cliente — opcional</label>
-              <input type="text" className="form-input" value={cliente} placeholder="ej: Juan Pérez"
-                onChange={e => setCliente(e.target.value)} />
+              <label className="form-label">Hora</label>
+              <input type="time" className="form-input" value={hora} onChange={e => setHora(e.target.value)} />
             </div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Cliente — opcional</label>
+            <input type="text" className="form-input" value={cliente} placeholder="ej: Juan Pérez"
+              onChange={e => setCliente(e.target.value)} />
           </div>
 
           <div className="form-group">
@@ -477,7 +495,7 @@ export default function Ventas() {
             <div className="list-item" key={o.id} style={{ gap:8, alignItems:'flex-start' }}>
               <div style={{ flex:1, minWidth:0 }}>
                 <div className="list-item-name">{o.cliente_nombre || 'Cliente anónimo'}</div>
-                <div className="list-item-sub">{o.fecha} · {nItems} producto{nItems !== 1 ? 's' : ''}</div>
+                <div className="list-item-sub">{o.fecha}{o.hora ? ` · ${o.hora}` : ''} · {nItems} producto{nItems !== 1 ? 's' : ''}</div>
                 <div style={{ display:'flex', gap:6, marginTop:3, flexWrap:'wrap' }}>
                   {o.origen && (
                     <span style={{ fontSize:11, background:oc.bg, color:oc.color, borderRadius:10, padding:'1px 7px', fontWeight:600 }}>
