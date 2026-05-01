@@ -6,6 +6,7 @@ import Caja from './pages/Caja'
 import Analisis from './pages/Analisis'
 import Proyectos from './pages/Proyectos'
 import Cuentas from './pages/Cuentas'
+import Catalogo from './pages/Catalogo'
 
 const TABS_MAIN = [
   { id: 'dashboard', label: 'Inicio', icon: (
@@ -47,6 +48,13 @@ const TABS_MAS = [
       <line x1="9" y1="17" x2="13" y2="17"/>
     </svg>
   )},
+  { id: 'catalogo', label: 'Recetas', icon: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+      <rect x="9" y="3" width="6" height="4" rx="1"/>
+      <line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="13" y2="16"/>
+    </svg>
+  )},
   { id: 'cuentas', label: 'Cuentas', icon: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <line x1="12" y1="1" x2="12" y2="23"/>
@@ -77,6 +85,7 @@ export default function App() {
       {tab === 'analisis'   && <Analisis />}
       {tab === 'proyectos'  && <Proyectos />}
       {tab === 'cuentas'    && <Cuentas />}
+      {tab === 'catalogo'   && <Catalogo />}
 
       {/* Menú "Más" desplegable */}
       {menuMas && (
