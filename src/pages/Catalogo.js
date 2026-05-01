@@ -2,152 +2,369 @@ import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { calcularCostoReceta, formatCLP, formatPct } from '../lib/calculos'
 
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function margenColor(pct) {
+  if (pct >= 0.65) return 'var(--green)'
+  if (pct >= 0.50) return 'var(--cyan)'
+  return 'var(--pink)'
+}
+
+// ─── Modal edición de receta ─────────────────────────────────────────────────
+
+function EditRecetaModal({ receta, ingredientes, insumos, config, onSave, onCancel }) {
+  const [precio, setPrecio] = useState(receta.precio_venta || 9000)
+  const [ings, setIngs] = useState(
+    ingredientes
+      .filter(i => i.insumo_nombre !== 'ENVASE')
+      .map(i => ({ ...i }))
+  )
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const updateIng = (idx, campo, valor) =>
+    setIngs(prev => prev.map((it, i) => i !== idx ? it : { ...it, [campo]: valor }))
+
+  const quitarIng = (idx) => setIngs(prev => prev.filter((_, i) => i !== idx))
+
+  const agregarIng = () =>
+    setIngs(prev => [...prev, { receta_nombre: receta.nombre, insumo_nombre: '', cantidad: 0, unidad: 'ml' }])
+
+  const costo = calcularCostoReceta(
+    ings.filter(i => i.insumo_nombre),
+    insumos,
+    config.merma_pct,
+    config.costo_envase
+  )
+  const margen = precio > 0 ? (precio - costo) / precio : 0
+
+  const handleSave = async () => {
+    const ingsValidos = ings.filter(i => i.insumo_nombre && parseFloat(i.cantidad) > 0)
+    if (ingsValidos.length === 0) { setError('Agrega al menos un ingrediente válido'); return }
+    setSaving(true)
+    setError('')
+
+    // Actualizar precio_venta en receta
+    await supabase.from('recetas').update({ precio_venta: parseFloat(precio) || 9000 }).eq('nombre', receta.nombre)
+
+    // Eliminar ingredientes existentes e insertar los nuevos
+    await supabase.from('receta_ingredientes').delete().eq('receta_nombre', receta.nombre)
+    const { error: errIng } = await supabase.from('receta_ingredientes').insert(
+      ingsValidos.map(i => ({
+        receta_nombre: receta.nombre,
+        insumo_nombre: i.insumo_nombre,
+        cantidad: parseFloat(i.cantidad) || 0,
+        unidad: i.unidad || 'ml',
+      }))
+    )
+    if (errIng) { setError('Error guardando ingredientes: ' + errIng.message); setSaving(false); return }
+
+    setSaving(false)
+    onSave()
+  }
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.78)', display:'flex', alignItems:'flex-start', justifyContent:'center', zIndex:200, padding:24, overflowY:'auto' }}>
+      <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:14, padding:24, maxWidth:500, width:'100%', marginTop:20 }}>
+        <div style={{ fontFamily:'Orbitron', fontSize:16, color:'var(--cyan)', marginBottom:18 }}>{receta.nombre}</div>
+
+        {/* Precio de venta */}
+        <div className="form-group" style={{ marginBottom:16 }}>
+          <label className="form-label">Precio de venta ($)</label>
+          <input type="number" className="form-input" value={precio}
+            onChange={e => setPrecio(e.target.value)} />
+        </div>
+
+        {/* Resumen costo/margen en tiempo real */}
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginBottom:16, background:'rgba(255,255,255,0.03)', borderRadius:10, padding:12 }}>
+          <div style={{ textAlign:'center' }}>
+            <div className="kpi-label">Costo/L</div>
+            <div style={{ color:'var(--pink)', fontWeight:700, fontSize:15 }}>{formatCLP(costo)}</div>
+          </div>
+          <div style={{ textAlign:'center' }}>
+            <div className="kpi-label">Margen $</div>
+            <div style={{ color:'var(--cyan)', fontWeight:700, fontSize:15 }}>{formatCLP(precio - costo)}</div>
+          </div>
+          <div style={{ textAlign:'center' }}>
+            <div className="kpi-label">Margen %</div>
+            <div style={{ color: margenColor(margen), fontWeight:700, fontSize:15 }}>{formatPct(margen)}</div>
+          </div>
+        </div>
+
+        {/* Ingredientes */}
+        <div style={{ fontSize:12, color:'var(--muted)', textTransform:'uppercase', letterSpacing:1, fontWeight:700, marginBottom:10 }}>
+          Ingredientes por litro
+        </div>
+
+        {ings.map((ing, idx) => (
+          <div key={idx} style={{ display:'grid', gridTemplateColumns:'1fr 80px 60px 28px', gap:6, marginBottom:6, alignItems:'center' }}>
+            <select className="form-select" value={ing.insumo_nombre}
+              onChange={e => updateIng(idx, 'insumo_nombre', e.target.value)}>
+              <option value="">Insumo...</option>
+              {insumos.filter(i => i.nombre !== 'ENVASE').map(i => (
+                <option key={i.nombre} value={i.nombre}>{i.nombre}</option>
+              ))}
+            </select>
+            <input type="number" className="form-input" value={ing.cantidad} placeholder="cant."
+              step="0.001" min="0"
+              onChange={e => updateIng(idx, 'cantidad', e.target.value)} />
+            <select className="form-select" value={ing.unidad || 'ml'}
+              onChange={e => updateIng(idx, 'unidad', e.target.value)}>
+              <option value="ml">ml</option>
+              <option value="g">g</option>
+              <option value="kg">kg</option>
+              <option value="L">L</option>
+              <option value="unidad">u</option>
+            </select>
+            <button type="button" onClick={() => quitarIng(idx)}
+              style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)', fontSize:18, lineHeight:1, padding:0 }}>×</button>
+          </div>
+        ))}
+
+        <button type="button" onClick={agregarIng}
+          style={{ width:'100%', background:'rgba(255,255,255,0.04)', border:'1px dashed var(--border)', borderRadius:10, padding:'8px 0', color:'var(--muted)', cursor:'pointer', fontSize:13, marginBottom:14 }}>
+          + Agregar ingrediente
+        </button>
+
+        {error && <div style={{ color:'var(--pink)', fontSize:13, marginBottom:10 }}>{error}</div>}
+
+        <div style={{ display:'flex', gap:10 }}>
+          <button className="btn btn-secondary" style={{ flex:1 }} onClick={onCancel}>Cancelar</button>
+          <button className="btn btn-primary" style={{ flex:1 }} onClick={handleSave} disabled={saving}>
+            {saving ? 'Guardando...' : 'Guardar receta'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Vista detalle receta (solo lectura) ─────────────────────────────────────
+
+function DetalleReceta({ receta, ingredientes, insumos, config, onEditar, onVolver }) {
+  const ings = ingredientes.filter(i => i.insumo_nombre !== 'ENVASE')
+  const costo = calcularCostoReceta(ings, insumos, config.merma_pct, config.costo_envase)
+  const precio = receta.precio_venta || 9000
+  const margen = precio > 0 ? (precio - costo) / precio : 0
+  const costoInsumos = ings.reduce((s, ing) => {
+    const ins = insumos.find(i => i.nombre.toLowerCase() === ing.insumo_nombre.toLowerCase())
+    return s + (ins?.costo_ppp || 0) * ing.cantidad
+  }, 0)
+
+  return (
+    <div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+        <button className="btn btn-secondary btn-sm" onClick={onVolver}>← Volver</button>
+        <button className="btn btn-primary btn-sm" onClick={onEditar}>✏ Editar</button>
+      </div>
+
+      <div className="card">
+        <div style={{ fontFamily:'Orbitron', fontSize:18, color:'var(--cyan)', marginBottom:16 }}>{receta.nombre}</div>
+
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10, marginBottom:16 }}>
+          <div style={{ textAlign:'center' }}>
+            <div className="kpi-label">Costo/L</div>
+            <div style={{ color:'var(--pink)', fontWeight:700, fontSize:16 }}>{formatCLP(costo)}</div>
+          </div>
+          <div style={{ textAlign:'center' }}>
+            <div className="kpi-label">Precio</div>
+            <div style={{ color:'var(--cyan)', fontWeight:700, fontSize:16 }}>{formatCLP(precio)}</div>
+          </div>
+          <div style={{ textAlign:'center' }}>
+            <div className="kpi-label">Margen</div>
+            <div style={{ color: margenColor(margen), fontWeight:700, fontSize:16 }}>{formatPct(margen)}</div>
+          </div>
+        </div>
+
+        <div className="section-divider">Ingredientes por litro</div>
+        {ings.length === 0 && (
+          <div style={{ color:'var(--muted)', textAlign:'center', padding:12 }}>Sin ingredientes registrados</div>
+        )}
+        {ings.map(ing => {
+          const ins = insumos.find(i => i.nombre.toLowerCase() === ing.insumo_nombre.toLowerCase())
+          const costoIng = (ins?.costo_ppp || 0) * ing.cantidad
+          const stockOk = ins?.stock_actual == null || ins.stock_actual > ins?.stock_minimo
+          return (
+            <div className="list-item" key={ing.id || ing.insumo_nombre}>
+              <div>
+                <div className="list-item-name" style={{ fontSize:14 }}>
+                  {ing.insumo_nombre}
+                  {!stockOk && <span style={{ marginLeft:6, fontSize:11, color:'var(--pink)' }}>⚠ stock bajo</span>}
+                </div>
+                <div className="list-item-sub">{ing.cantidad} {ing.unidad}</div>
+              </div>
+              <div className="list-item-right">
+                <div style={{ color:'var(--muted)', fontSize:13 }}>{formatCLP(costoIng)}</div>
+              </div>
+            </div>
+          )
+        })}
+
+        <div style={{ borderTop:'1px solid var(--border)', paddingTop:10, marginTop:6 }}>
+          <div className="list-item">
+            <div className="list-item-name" style={{ fontSize:13 }}>Merma ({Math.round(config.merma_pct * 100)}%)</div>
+            <div style={{ color:'var(--muted)', fontSize:13 }}>{formatCLP(costoInsumos * config.merma_pct)}</div>
+          </div>
+          <div className="list-item">
+            <div className="list-item-name" style={{ fontSize:13 }}>Envase + etiqueta</div>
+            <div style={{ color:'var(--muted)', fontSize:13 }}>{formatCLP(config.costo_envase)}</div>
+          </div>
+          <div className="list-item" style={{ borderTop:'1px solid var(--border)', marginTop:4, paddingTop:8 }}>
+            <div style={{ fontWeight:700, fontSize:14, color:'var(--text)' }}>Ganancia por litro</div>
+            <div style={{ fontWeight:700, fontSize:14, color: margenColor(margen) }}>{formatCLP(precio - costo)}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Página principal ────────────────────────────────────────────────────────
+
 export default function Catalogo() {
   const [recetas, setRecetas] = useState([])
   const [insumos, setInsumos] = useState([])
   const [ingredientes, setIngredientes] = useState([])
-  const [seleccionada, setSeleccionada] = useState(null)
-  const [loading, setLoading] = useState(true)
   const [config, setConfig] = useState({ merma_pct: 0.08, costo_envase: 794.6 })
+  const [seleccionada, setSeleccionada] = useState(null)
+  const [editando, setEditando] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [toast, setToast] = useState('')
 
-  useEffect(() => {
-    async function load() {
-      const [{ data: r }, { data: i }, { data: ing }, { data: cfg }] = await Promise.all([
-        supabase.from('recetas').select('*').order('nombre'),
-        supabase.from('insumos').select('*'),
-        supabase.from('receta_ingredientes').select('*'),
-        supabase.from('config').select('*')
-      ])
-      setRecetas(r || [])
-      setInsumos(i || [])
-      setIngredientes(ing || [])
-      const c = {}
-      cfg?.forEach(x => { c[x.clave] = x.valor })
-      setConfig({ merma_pct: c.merma_pct || 0.08, costo_envase: c.costo_envase || 794.6 })
-      setLoading(false)
-    }
-    load()
-  }, [])
+  useEffect(() => { load() }, [])
+
+  async function load() {
+    setLoading(true)
+    const [{ data: r }, { data: i }, { data: ing }, { data: cfg }] = await Promise.all([
+      supabase.from('recetas').select('*').order('nombre'),
+      supabase.from('insumos').select('*'),
+      supabase.from('receta_ingredientes').select('*'),
+      supabase.from('config').select('*'),
+    ])
+    setRecetas(r || [])
+    setInsumos(i || [])
+    setIngredientes(ing || [])
+    const c = {}
+    cfg?.forEach(x => { c[x.clave] = parseFloat(x.valor) || x.valor })
+    setConfig({
+      merma_pct: c.merma_pct ?? 0.08,
+      costo_envase: c.costo_envase ?? 794.6,
+    })
+    setLoading(false)
+  }
+
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2800) }
 
   const getIngredientes = (nombre) => ingredientes.filter(i => i.receta_nombre === nombre)
 
   const getCosto = (nombre) => {
-    const ings = getIngredientes(nombre)
-    // excluir ENVASE del costo de insumos
-    const ingsReceta = ings.filter(i => i.receta_nombre !== 'ENVASE')
-    return calcularCostoReceta(ingsReceta, insumos, config.merma_pct, config.costo_envase)
+    const ings = getIngredientes(nombre).filter(i => i.insumo_nombre !== 'ENVASE')
+    return calcularCostoReceta(ings, insumos, config.merma_pct, config.costo_envase)
   }
 
-  const PRECIOS_REFERENCIA = {
-    colada: 9000, daikiri: 8000, default: 9000
-  }
-  const getPrecio = (nombre) => {
-    const n = nombre.toLowerCase()
-    if (n.includes('colada')) return 9000
-    if (n.includes('daikiri')) return 8000
-    return 9000
-  }
+  const getPrecio = (receta) => receta.precio_venta || 9000
 
   if (loading) return <div className="loading">Cargando recetas...</div>
 
-  // filtrar ENVASE de la lista de recetas
   const recetasFiltradas = recetas.filter(r => r.nombre !== 'ENVASE')
 
+  // Vista detalle + edición
+  if (seleccionada) {
+    const receta = recetasFiltradas.find(r => r.nombre === seleccionada)
+    if (!receta) { setSeleccionada(null); return null }
+    const ings = getIngredientes(seleccionada).filter(i => i.insumo_nombre !== 'ENVASE')
+
+    return (
+      <div className="page">
+        {toast && <div className="toast">{toast}</div>}
+
+        {editando && (
+          <EditRecetaModal
+            receta={receta}
+            ingredientes={ings}
+            insumos={insumos}
+            config={config}
+            onSave={async () => {
+              setEditando(false)
+              await load()
+              showToast('Receta actualizada ✓')
+            }}
+            onCancel={() => setEditando(false)}
+          />
+        )}
+
+        <div className="page-title">Catálogo</div>
+        <DetalleReceta
+          receta={receta}
+          ingredientes={ings}
+          insumos={insumos}
+          config={config}
+          onEditar={() => setEditando(true)}
+          onVolver={() => setSeleccionada(null)}
+        />
+      </div>
+    )
+  }
+
+  // Lista de recetas
   return (
     <div className="page">
+      {toast && <div className="toast">{toast}</div>}
       <div className="page-title">Catálogo</div>
 
-      {!seleccionada ? (
-        <div className="card">
-          {recetasFiltradas.map(r => {
-            const costo = getCosto(r.nombre)
-            const precio = getPrecio(r.nombre)
-            const margen = precio - costo
-            const margenPct = precio > 0 ? margen / precio : 0
-            return (
-              <div className="list-item" key={r.nombre}
-                onClick={() => setSeleccionada(r.nombre)}
-                style={{ cursor: 'pointer' }}>
-                <div>
-                  <div className="list-item-name">{r.nombre}</div>
-                  <div className="list-item-sub">Costo: {formatCLP(costo)}</div>
-                </div>
-                <div className="list-item-right">
-                  <div className="list-item-value" style={{ color: margenPct > 0.6 ? '#00ff88' : 'var(--cyan)' }}>
-                    {formatPct(margenPct)}
-                  </div>
-                  <div className="list-item-muted">{formatCLP(margen)} margen</div>
+      <div className="card">
+        {recetasFiltradas.length === 0 && (
+          <div style={{ color:'var(--muted)', textAlign:'center', padding:20 }}>Sin recetas registradas</div>
+        )}
+        {recetasFiltradas.map(r => {
+          const costo = getCosto(r.nombre)
+          const precio = getPrecio(r)
+          const margen = precio > 0 ? (precio - costo) / precio : 0
+          const color = margenColor(margen)
+          return (
+            <div className="list-item" key={r.nombre}
+              onClick={() => setSeleccionada(r.nombre)}
+              style={{ cursor:'pointer' }}>
+              <div>
+                <div className="list-item-name">{r.nombre}</div>
+                <div className="list-item-sub">
+                  Costo: {formatCLP(costo)} · Precio: {formatCLP(precio)}
                 </div>
               </div>
-            )
-          })}
-        </div>
-      ) : (
-        <div>
-          <button className="btn btn-secondary btn-sm" style={{ marginBottom: 16 }}
-            onClick={() => setSeleccionada(null)}>
-            ← Volver
-          </button>
-          <div className="card">
-            <div style={{ fontFamily: 'Orbitron', fontSize: 18, color: 'var(--cyan)', marginBottom: 16 }}>
-              {seleccionada}
+              <div className="list-item-right">
+                <div style={{ color, fontWeight:700, fontSize:15 }}>{formatPct(margen)}</div>
+                <div className="list-item-muted">{formatCLP(precio - costo)} margen</div>
+              </div>
             </div>
-            {(() => {
-              const ings = getIngredientes(seleccionada).filter(i => i.receta_nombre !== 'ENVASE')
-              const costo = getCosto(seleccionada)
-              const precio = getPrecio(seleccionada)
-              const margen = precio - costo
-              return (
-                <>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
-                    <div style={{ textAlign: 'center' }}>
-                      <div className="kpi-label">Costo/L</div>
-                      <div style={{ color: 'var(--pink)', fontWeight: 700, fontSize: 16 }}>{formatCLP(costo)}</div>
-                    </div>
-                    <div style={{ textAlign: 'center' }}>
-                      <div className="kpi-label">Precio ref.</div>
-                      <div style={{ color: 'var(--cyan)', fontWeight: 700, fontSize: 16 }}>{formatCLP(precio)}</div>
-                    </div>
-                    <div style={{ textAlign: 'center' }}>
-                      <div className="kpi-label">Margen</div>
-                      <div style={{ color: '#00ff88', fontWeight: 700, fontSize: 16 }}>{formatPct(margen / precio)}</div>
-                    </div>
-                  </div>
-                  <div className="section-divider">Ingredientes por litro</div>
-                  {ings.map(ing => {
-                    const insumo = insumos.find(i => i.nombre.toLowerCase() === ing.insumo_nombre.toLowerCase())
-                    const costoIng = (insumo?.costo_ppp || 0) * ing.cantidad
-                    return (
-                      <div className="list-item" key={ing.id}>
-                        <div>
-                          <div className="list-item-name" style={{ fontSize: 14 }}>{ing.insumo_nombre}</div>
-                          <div className="list-item-sub">{ing.cantidad} {ing.unidad}</div>
-                        </div>
-                        <div className="list-item-right">
-                          <div style={{ color: 'var(--muted)', fontSize: 13 }}>{formatCLP(costoIng)}</div>
-                        </div>
-                      </div>
-                    )
-                  })}
-                  <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10, marginTop: 6 }}>
-                    <div className="list-item">
-                      <div className="list-item-name">Merma (8%)</div>
-                      <div style={{ color: 'var(--muted)', fontSize: 13 }}>{formatCLP(ings.reduce((s, ing) => {
-                        const ins = insumos.find(i => i.nombre.toLowerCase() === ing.insumo_nombre.toLowerCase())
-                        return s + (ins?.costo_ppp || 0) * ing.cantidad
-                      }, 0) * config.merma_pct)}</div>
-                    </div>
-                    <div className="list-item">
-                      <div className="list-item-name">Envase + etiqueta</div>
-                      <div style={{ color: 'var(--muted)', fontSize: 13 }}>{formatCLP(config.costo_envase)}</div>
-                    </div>
-                  </div>
-                </>
-              )
-            })()}
+          )
+        })}
+      </div>
+
+      {/* Resumen márgenes */}
+      {recetasFiltradas.length > 0 && (() => {
+        const datos = recetasFiltradas.map(r => {
+          const costo = getCosto(r.nombre)
+          const precio = getPrecio(r)
+          return precio > 0 ? (precio - costo) / precio : 0
+        })
+        const prom = datos.reduce((s, x) => s + x, 0) / datos.length
+        const min = Math.min(...datos)
+        const max = Math.max(...datos)
+        return (
+          <div className="kpi-grid" style={{ marginTop:8 }}>
+            <div className="kpi-card">
+              <div className="kpi-label">Margen promedio</div>
+              <div className="kpi-value" style={{ color: margenColor(prom) }}>{formatPct(prom)}</div>
+            </div>
+            <div className="kpi-card">
+              <div className="kpi-label">Rango márgenes</div>
+              <div className="kpi-value" style={{ fontSize:14, color:'var(--muted)' }}>
+                {formatPct(min)} – {formatPct(max)}
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
     </div>
   )
 }

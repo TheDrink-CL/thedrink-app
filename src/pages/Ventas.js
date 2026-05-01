@@ -200,6 +200,53 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
   )
 }
 
+// Descuenta ingredientes del stock al registrar una venta.
+// Aplica merma del 8% sobre la cantidad utilizada.
+async function descontarStock(itemsValidos) {
+  const MERMA = 0.08
+
+  // Obtener nombres de recetas únicas involucradas
+  const nombresRecetas = [...new Set(itemsValidos.map(it => it.receta_nombre))]
+
+  // Cargar ingredientes de esas recetas
+  const { data: ings } = await supabase
+    .from('receta_ingredientes')
+    .select('receta_nombre, insumo_nombre, cantidad')
+    .in('receta_nombre', nombresRecetas)
+
+  if (!ings || ings.length === 0) return
+
+  // Agregar cuánto hay que descontar de cada insumo (suma de todos los ítems)
+  const descuentos = {} // { insumo_nombre: cantidad_total_a_descontar }
+  itemsValidos.forEach(it => {
+    const litros = parseFloat(it.litros) || 1
+    const ingsReceta = ings.filter(i => i.receta_nombre === it.receta_nombre && i.insumo_nombre !== 'ENVASE')
+    ingsReceta.forEach(ing => {
+      const usado = ing.cantidad * litros * (1 + MERMA)
+      descuentos[ing.insumo_nombre] = (descuentos[ing.insumo_nombre] || 0) + usado
+    })
+  })
+
+  if (Object.keys(descuentos).length === 0) return
+
+  // Cargar stock actual de todos los insumos afectados
+  const nombresInsumos = Object.keys(descuentos)
+  const { data: stocks } = await supabase
+    .from('insumos')
+    .select('nombre, stock_actual')
+    .in('nombre', nombresInsumos)
+
+  if (!stocks) return
+
+  // Actualizar cada insumo en paralelo
+  await Promise.all(
+    stocks.map(ins => {
+      const nuevo = Math.max(0, (ins.stock_actual || 0) - (descuentos[ins.nombre] || 0))
+      return supabase.from('insumos').update({ stock_actual: nuevo }).eq('nombre', ins.nombre)
+    })
+  )
+}
+
 export default function Ventas() {
   const [recetas, setRecetas] = useState([])
   const [ordenes, setOrdenes] = useState([])
@@ -222,7 +269,7 @@ export default function Ventas() {
 
   async function load() {
     const [{ data: r }, { data: o }, { data: vts }] = await Promise.all([
-      supabase.from('recetas').select('nombre').order('nombre'),
+      supabase.from('recetas').select('nombre, precio_venta').order('nombre'),
       supabase.from('ordenes').select('*').order('fecha', { ascending: false }),
       supabase.from('ventas').select('*').order('fecha', { ascending: false }),
     ])
@@ -276,8 +323,10 @@ export default function Ventas() {
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2800) }
 
   const getPrecioSugerido = (nombre) => {
+    const r = recetas.find(x => x.nombre === nombre)
+    if (r?.precio_venta) return r.precio_venta
+    // fallback mientras no haya precio_venta en la receta
     const n = nombre.toLowerCase()
-    if (n.includes('colada')) return 9000
     if (n.includes('daikiri')) return 8000
     return 9000
   }
@@ -355,6 +404,9 @@ export default function Ventas() {
       const { data: ins } = await supabase.from('insumos').select('stock_actual').eq('nombre', 'Frascos de vidrio').single()
       await supabase.from('insumos').update({ stock_actual: (ins?.stock_actual || 0) + envasesDevueltos }).eq('nombre', 'Frascos de vidrio')
     }
+
+    // Descuento de stock por ingredientes utilizados
+    await descontarStock(itemsValidos)
 
     showToast('Pedido registrado ✓')
     setFecha(fechaHoy())
