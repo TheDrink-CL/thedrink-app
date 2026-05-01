@@ -17,7 +17,7 @@ export default function Dashboard() {
         supabase.from('config').select('*'),
         supabase.from('ventas').select('*').order('fecha', { ascending: false }),
         supabase.from('caja').select('*'),
-        supabase.from('compras').select('precio_total, es_inversion'),
+        supabase.from('compras').select('precio_total, es_inversion, tipo'),
         supabase.from('insumos').select('nombre, stock_actual, stock_minimo, unidad'),
         supabase.from('ordenes').select('id, fecha, medio_pago, cliente_nombre'),
       ])
@@ -25,7 +25,13 @@ export default function Dashboard() {
       const config = {}
       cfg?.forEach(c => { config[c.clave] = c.valor })
 
-      const inversion = config.inversion_total || 120480
+      // Inversión: solo capital de trabajo (es_inversion=true), excluye activos fijos (tipo='activo_fijo')
+      const inversion = cmp?.reduce((s, c) =>
+        (c.es_inversion || c.tipo === 'capital_trabajo') && c.tipo !== 'activo_fijo'
+          ? s + c.precio_total : s, 0) || config.inversion_total || 120480
+      // Activos fijos registrados
+      const totalActivosFijos = cmp?.reduce((s, c) =>
+        c.tipo === 'activo_fijo' ? s + c.precio_total : s, 0) || 0
       const ingresoTotal = vts?.reduce((s, v) => s + (v.litros * v.precio_venta), 0) || 0
       const litrosTotales = vts?.reduce((s, v) => s + v.litros, 0) || 0
 
@@ -94,6 +100,7 @@ export default function Dashboard() {
         ticketPromedio, totalOrdenes,
         clientesRecurrentes: clientesRecurrentes.length,
         totalClientesNombrados, pctRecurrentes, topRecurrentes,
+        totalActivosFijos,
       })
       setVentas({ topRecetas, recientes: vts?.slice(0, 5) || [] })
       setLoading(false)
@@ -177,7 +184,7 @@ export default function Dashboard() {
           <div className="kpi-sub">sobre ventas</div>
         </div>
         <div className="kpi-card">
-          <div className="kpi-label">ROI inversión</div>
+          <div className="kpi-label">ROI capital trabajo</div>
           <div className="kpi-value">{formatPct(roi)}</div>
           <div className="kpi-sub">recuperado</div>
         </div>
@@ -193,6 +200,21 @@ export default function Dashboard() {
           <div className="kpi-value cyan">{formatCLP(data.ingresoMes)}</div>
         </div>
       </div>
+
+      {data.totalActivosFijos > 0 && (
+        <div className="kpi-grid">
+          <div className="kpi-card">
+            <div className="kpi-label">Capital de trabajo</div>
+            <div className="kpi-value">{formatCLP(data.inversion)}</div>
+            <div className="kpi-sub">inversión inicial</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Activos fijos</div>
+            <div className="kpi-value" style={{ color: 'var(--cyan)' }}>{formatCLP(data.totalActivosFijos)}</div>
+            <div className="kpi-sub">equipos y utensilios</div>
+          </div>
+        </div>
+      )}
 
       {/* Ticket promedio + Recurrencia */}
       <div className="kpi-grid">
