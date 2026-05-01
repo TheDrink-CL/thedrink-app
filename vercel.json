@@ -1,5 +1,5 @@
 {
-  "buildCommand": "react-scripts build",
+  "buildCommand": "chmod +x node_modules/.bin/react-scripts && CI=false react-scripts build",
   "outputDirectory": "build",
   "installCommand": "npm install"
 }
