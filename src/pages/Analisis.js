@@ -399,8 +399,84 @@ function OrigenVentas({ ventas, gastosPub }) {
 
 // ─── Página principal ────────────────────────────────────────────────────────
 
+// ─── Bloque: Horas activas ───────────────────────────────────────────────────
+
+function HorasActivas({ ordenes }) {
+  const conHora = ordenes.filter(o => o.hora)
+  if (conHora.length === 0) return (
+    <div className="card">
+      <div className="card-title">⏰ Horas activas</div>
+      <div style={{ color: 'var(--muted)', fontSize: 13, textAlign: 'center', padding: '12px 0' }}>
+        Aún no hay pedidos con hora registrada — la hora se guarda automáticamente en los nuevos pedidos
+      </div>
+    </div>
+  )
+
+  // Agrupar por franja horaria (bloques de 2 horas)
+  const franjas = {}
+  conHora.forEach(o => {
+    const h = parseInt(o.hora.split(':')[0], 10)
+    const inicio = Math.floor(h / 2) * 2
+    const key = `${String(inicio).padStart(2,'0')}:00`
+    if (!franjas[key]) franjas[key] = { pedidos: 0, label: `${String(inicio).padStart(2,'0')}:00–${String(inicio+2).padStart(2,'0')}:00` }
+    franjas[key].pedidos++
+  })
+
+  const ordenadas = Object.entries(franjas).sort((a, b) => a[0].localeCompare(b[0]))
+  const maxPedidos = Math.max(...ordenadas.map(([, d]) => d.pedidos), 1)
+  const mejorFranja = ordenadas.reduce((best, cur) => cur[1].pedidos > best[1].pedidos ? cur : best, ordenadas[0])
+
+  // Franja de menor actividad (para sugerir descanso)
+  // Solo consideramos franjas "de día" (10:00–00:00)
+  const franjasActivas = ordenadas.filter(([k]) => parseInt(k) >= 10)
+  const peorFranja = franjasActivas.length > 1
+    ? franjasActivas.reduce((worst, cur) => cur[1].pedidos < worst[1].pedidos ? cur : worst, franjasActivas[0])
+    : null
+
+  return (
+    <div className="card">
+      <div className="card-title">⏰ Horas activas</div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 12 }}>
+        Basado en {conHora.length} pedido{conHora.length !== 1 ? 's' : ''} con hora registrada
+      </div>
+
+      {ordenadas.map(([key, d]) => {
+        const pct = d.pedidos / maxPedidos
+        const esMejor = key === mejorFranja[0]
+        return (
+          <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+            <div style={{ width: 52, fontSize: 11, fontWeight: 700, color: esMejor ? 'var(--cyan)' : 'var(--muted)', flexShrink: 0 }}>
+              {d.label.split('–')[0]}
+            </div>
+            <div style={{ flex: 1, background: 'rgba(255,255,255,0.06)', borderRadius: 4, height: 8, overflow: 'hidden' }}>
+              <div style={{
+                height: '100%', borderRadius: 4,
+                background: esMejor ? 'linear-gradient(90deg, var(--cyan), #00e5e5)' : 'rgba(0,180,180,0.35)',
+                width: `${pct * 100}%`, transition: 'width 0.4s'
+              }} />
+            </div>
+            <div style={{ width: 24, fontSize: 12, textAlign: 'right', color: esMejor ? 'var(--cyan)' : 'var(--text)', fontWeight: esMejor ? 700 : 400, flexShrink: 0 }}>
+              {d.pedidos}
+            </div>
+          </div>
+        )
+      })}
+
+      <div style={{ marginTop: 12, padding: '10px 12px', background: 'rgba(0,180,180,0.05)', borderRadius: 8, fontSize: 12, color: 'var(--muted)', lineHeight: 1.8 }}>
+        🔥 Pico: <span style={{ color: 'var(--cyan)', fontWeight: 700 }}>{mejorFranja[1].label}</span> · {mejorFranja[1].pedidos} pedido{mejorFranja[1].pedidos !== 1 ? 's' : ''}
+        {peorFranja && peorFranja[0] !== mejorFranja[0] && (
+          <span> · 😴 Descanso sugerido: <span style={{ color: 'var(--muted)', fontWeight: 700 }}>{peorFranja[1].label}</span></span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Página principal ────────────────────────────────────────────────────────
+
 export default function Analisis() {
   const [ventas, setVentas] = useState([])
+  const [ordenes, setOrdenes] = useState([])
   const [gastosPub, setGastosPub] = useState([])
   const [margenBruto, setMargenBruto] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -408,14 +484,15 @@ export default function Analisis() {
 
   useEffect(() => {
     async function load() {
-      const [{ data: vts }, { data: cja }, { data: cmp }] = await Promise.all([
+      const [{ data: vts }, { data: cja }, { data: cmp }, { data: ords }] = await Promise.all([
         supabase.from('ventas').select('fecha, litros, precio_venta, origen').order('fecha', { ascending: false }),
         supabase.from('caja').select('fecha, monto, categoria, tipo').eq('tipo', 'salida'),
         supabase.from('compras').select('precio_total, es_inversion'),
+        supabase.from('ordenes').select('fecha, hora').order('fecha', { ascending: false }),
       ])
       setVentas(vts || [])
+      setOrdenes(ords || [])
       setGastosPub((cja || []).filter(m => m.categoria === 'Publicidad'))
-      // Margen bruto: ventas - compras operativas (excluye inversión inicial)
       const totalVtsBruto = (vts || []).reduce((s, v) => s + v.litros * v.precio_venta, 0)
       const totalCmpOp = (cmp || []).filter(c => !c.es_inversion).reduce((s, c) => s + c.precio_total, 0)
       setMargenBruto(totalVtsBruto > 0 ? (totalVtsBruto - totalCmpOp) / totalVtsBruto : null)
@@ -465,6 +542,7 @@ export default function Analisis() {
       ) : (
         <>
           <OrigenVentas ventas={ventasFiltradas} gastosPub={gastosPub} />
+          <HorasActivas ordenes={ordenes} />
           <VentasPorDia ventas={ventasFiltradas} />
           <TendenciaSemanal ventas={ventasFiltradas} />
         </>

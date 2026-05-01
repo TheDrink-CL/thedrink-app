@@ -262,7 +262,12 @@ export default function Ventas() {
     })
 
     const todo = [...ordenesConVentas, ...Object.values(gruposHuerfanos)]
-      .sort((a, b) => (b.fecha > a.fecha ? 1 : b.fecha < a.fecha ? -1 : 0))
+      .sort((a, b) => {
+        // Ordenar por fecha + hora descendente (más reciente primero)
+        const keyA = `${a.fecha}_${a.hora || '00:00'}`
+        const keyB = `${b.fecha}_${b.hora || '00:00'}`
+        return keyB.localeCompare(keyA)
+      })
 
     setRecetas((r || []).filter(x => x.nombre !== 'ENVASE'))
     setOrdenes(todo)
