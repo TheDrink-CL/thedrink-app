@@ -6,16 +6,20 @@ export default function Dashboard() {
   const [data, setData] = useState(null)
   const [ventas, setVentas] = useState([])
   const [alertasStock, setAlertasStock] = useState([])
+  const [transferenciasMes, setTransferenciasMes] = useState(0)
   const [loading, setLoading] = useState(true)
+
+  const LIMITE_TRANSFERENCIAS = 50
 
   useEffect(() => {
     async function load() {
-      const [{ data: cfg }, { data: vts }, { data: cja }, { data: cmp }, { data: ins }] = await Promise.all([
+      const [{ data: cfg }, { data: vts }, { data: cja }, { data: cmp }, { data: ins }, { data: ordenes }] = await Promise.all([
         supabase.from('config').select('*'),
         supabase.from('ventas').select('*').order('fecha', { ascending: false }),
         supabase.from('caja').select('*'),
         supabase.from('compras').select('precio_total, es_inversion'),
         supabase.from('insumos').select('nombre, stock_actual, stock_minimo, unidad'),
+        supabase.from('ordenes').select('fecha, medio_pago'),
       ])
 
       const config = {}
@@ -54,6 +58,14 @@ export default function Dashboard() {
       )
       setAlertasStock(alertas)
 
+      // Transferencias del mes calendario actual
+      const ahora = new Date()
+      const inicioMes = `${ahora.getFullYear()}-${String(ahora.getMonth()+1).padStart(2,'0')}-01`
+      const transferencias = (ordenes || []).filter(o =>
+        o.medio_pago === 'transferencia' && o.fecha >= inicioMes
+      ).length
+      setTransferenciasMes(transferencias)
+
       setData({ inversion, ingresoTotal, litrosTotales, saldoCaja, ingresoMes })
       setVentas({ topRecetas, recientes: vts?.slice(0, 5) || [] })
       setLoading(false)
@@ -89,6 +101,35 @@ export default function Dashboard() {
           ))}
         </div>
       )}
+
+      {/* Alerta transferencias mensuales */}
+      {(() => {
+        const pct = transferenciasMes / LIMITE_TRANSFERENCIAS
+        const restantes = LIMITE_TRANSFERENCIAS - transferenciasMes
+        const color = pct >= 1 ? 'var(--pink)' : pct >= 0.8 ? '#f59e0b' : 'var(--cyan)'
+        const bg = pct >= 1 ? 'rgba(196,0,90,0.08)' : pct >= 0.8 ? 'rgba(245,158,11,0.08)' : 'rgba(0,180,180,0.06)'
+        const border = pct >= 1 ? 'rgba(196,0,90,0.35)' : pct >= 0.8 ? 'rgba(245,158,11,0.35)' : 'rgba(0,180,180,0.2)'
+        return (
+          <div style={{ background: bg, border: `1px solid ${border}`, borderRadius: 12, padding: '12px 14px', marginBottom: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <div style={{ fontSize: 12, color, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+                {pct >= 1 ? '🚫 Límite alcanzado' : pct >= 0.8 ? '⚠ Cerca del límite' : '🏦 Transferencias del mes'}
+              </div>
+              <div style={{ fontSize: 18, fontWeight: 800, color }}>
+                {transferenciasMes}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--muted)' }}>/{LIMITE_TRANSFERENCIAS}</span>
+              </div>
+            </div>
+            <div style={{ height: 6, background: 'rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden', marginBottom: 6 }}>
+              <div style={{ height: '100%', width: `${Math.min(100, pct * 100)}%`, background: color, borderRadius: 3, transition: 'width 0.4s' }} />
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+              {pct >= 1
+                ? 'Alcanzaste el límite legal. No registres más transferencias este mes.'
+                : `Quedan ${restantes} transferencias disponibles este mes.`}
+            </div>
+          </div>
+        )
+      })()}
 
       <div className="kpi-grid">
         <div className="kpi-card">

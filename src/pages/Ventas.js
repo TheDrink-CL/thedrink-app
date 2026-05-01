@@ -12,6 +12,12 @@ const fechaHoy = () => {
 const itemVacio = () => ({ receta_nombre: '', litros: 1, precio_venta: '', devuelve_envase: false })
 
 const ORIGENES = ['Instagram', 'Referido', 'Cliente habitual', 'Evento', 'Otro']
+const MEDIOS_PAGO = [
+  { id: 'transferencia', label: '🏦 Transferencia' },
+  { id: 'debito',        label: '💳 Débito' },
+  { id: 'credito',       label: '💳 Crédito' },
+  { id: 'efectivo',      label: '💵 Efectivo' },
+]
 
 function ConfirmModal({ mensaje, onConfirm, onCancel }) {
   return (
@@ -31,6 +37,7 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
   const [fecha, setFecha] = useState(orden.fecha)
   const [cliente, setCliente] = useState(orden.cliente_nombre || '')
   const [origenVal, setOrigenVal] = useState(orden.origen || '')
+  const [medioPago, setMedioPago] = useState(orden.medio_pago || 'transferencia')
   const [delivery, setDelivery] = useState(orden.delivery || '')
   const [nota, setNota] = useState(orden.nota || '')
   const [items, setItems] = useState(
@@ -60,6 +67,7 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
       fecha,
       cliente_nombre: cliente || null,
       origen: origenVal || null,
+      medio_pago: medioPago,
       nota: nota || null,
       delivery: parseFloat(delivery) || 0,
     }).eq('id', orden.id)
@@ -105,6 +113,16 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
             {ORIGENES.map(op => (
               <button key={op} type="button" className={`chip ${origenVal === op ? 'selected' : ''}`}
                 onClick={() => setOrigenVal(o => o === op ? '' : op)}>{op}</button>
+            ))}
+          </div>
+        </div>
+
+        <div className="form-group" style={{ marginBottom:12 }}>
+          <label className="form-label">Medio de pago</label>
+          <div className="chip-row">
+            {MEDIOS_PAGO.map(m => (
+              <button key={m.id} type="button" className={`chip ${medioPago === m.id ? 'selected' : ''}`}
+                onClick={() => setMedioPago(m.id)}>{m.label}</button>
             ))}
           </div>
         </div>
@@ -183,6 +201,7 @@ export default function Ventas() {
   const [fecha, setFecha] = useState(fechaHoy())
   const [cliente, setCliente] = useState('')
   const [origen, setOrigen] = useState('')
+  const [medioPago, setMedioPago] = useState('transferencia')
   const [delivery, setDelivery] = useState('')
   const [nota, setNota] = useState('')
   const [items, setItems] = useState([itemVacio()])
@@ -243,6 +262,7 @@ export default function Ventas() {
       fecha,
       cliente_nombre: cliente || null,
       origen: origen || null,
+      medio_pago: medioPago,
       nota: nota || null,
       delivery: parseFloat(delivery) || 0,
     }).select().single()
@@ -283,6 +303,7 @@ export default function Ventas() {
     setFecha(fechaHoy())
     setCliente('')
     setOrigen('')
+    setMedioPago('transferencia')
     setDelivery('')
     setNota('')
     setItems([itemVacio()])
@@ -346,6 +367,16 @@ export default function Ventas() {
               {ORIGENES.map(op => (
                 <button key={op} type="button" className={`chip ${origen === op ? 'selected' : ''}`}
                   onClick={() => setOrigen(o => o === op ? '' : op)}>{op}</button>
+              ))}
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Medio de pago</label>
+            <div className="chip-row">
+              {MEDIOS_PAGO.map(m => (
+                <button key={m.id} type="button" className={`chip ${medioPago === m.id ? 'selected' : ''}`}
+                  onClick={() => setMedioPago(m.id)}>{m.label}</button>
               ))}
             </div>
           </div>
@@ -448,6 +479,11 @@ export default function Ventas() {
                   {o.origen && (
                     <span style={{ fontSize:11, background:oc.bg, color:oc.color, borderRadius:10, padding:'1px 7px', fontWeight:600 }}>
                       {origenIcon(o.origen)} {o.origen}
+                    </span>
+                  )}
+                  {o.medio_pago && (
+                    <span style={{ fontSize:11, background:'rgba(255,255,255,0.06)', color:'var(--muted)', borderRadius:10, padding:'1px 7px' }}>
+                      {MEDIOS_PAGO.find(m => m.id === o.medio_pago)?.label || o.medio_pago}
                     </span>
                   )}
                   {(o.ventas || []).map((v, i) => (
