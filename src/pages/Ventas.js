@@ -221,12 +221,23 @@ export default function Ventas() {
   useEffect(() => { load() }, [])
 
   async function load() {
-    const [{ data: r }, { data: o }] = await Promise.all([
+    const [{ data: r }, { data: o }, { data: vts }] = await Promise.all([
       supabase.from('recetas').select('nombre').order('nombre'),
-      supabase.from('ordenes').select('*, ventas(*)').order('fecha', { ascending: false })
+      supabase.from('ordenes').select('*').order('fecha', { ascending: false }),
+      supabase.from('ventas').select('*'),
     ])
+    // Agrupar ventas por orden_id manualmente para evitar el límite de relaciones anidadas
+    const ventasPorOrden = {}
+    ;(vts || []).forEach(v => {
+      if (!ventasPorOrden[v.orden_id]) ventasPorOrden[v.orden_id] = []
+      ventasPorOrden[v.orden_id].push(v)
+    })
+    const ordenesConVentas = (o || []).map(ord => ({
+      ...ord,
+      ventas: ventasPorOrden[ord.id] || []
+    }))
     setRecetas((r || []).filter(x => x.nombre !== 'ENVASE'))
-    setOrdenes(o || [])
+    setOrdenes(ordenesConVentas)
   }
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2800) }
