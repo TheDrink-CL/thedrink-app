@@ -224,20 +224,48 @@ export default function Ventas() {
     const [{ data: r }, { data: o }, { data: vts }] = await Promise.all([
       supabase.from('recetas').select('nombre').order('nombre'),
       supabase.from('ordenes').select('*').order('fecha', { ascending: false }),
-      supabase.from('ventas').select('*'),
+      supabase.from('ventas').select('*').order('fecha', { ascending: false }),
     ])
-    // Agrupar ventas por orden_id manualmente para evitar el límite de relaciones anidadas
+
+    // Ventas con orden asociada
     const ventasPorOrden = {}
     ;(vts || []).forEach(v => {
+      if (!v.orden_id) return
       if (!ventasPorOrden[v.orden_id]) ventasPorOrden[v.orden_id] = []
       ventasPorOrden[v.orden_id].push(v)
     })
     const ordenesConVentas = (o || []).map(ord => ({
       ...ord,
-      ventas: ventasPorOrden[ord.id] || []
+      ventas: ventasPorOrden[ord.id] || [],
+      _tipo: 'orden'
     }))
+
+    // Ventas huérfanas (sin orden_id) — registradas antes del sistema de pedidos
+    const huerfanas = (vts || []).filter(v => !v.orden_id)
+    // Agrupar huérfanas por fecha + origen para reconstruir "pedidos"
+    const gruposHuerfanos = {}
+    huerfanas.forEach(v => {
+      const key = `${v.fecha}_${v.origen || ''}_${v.id}`
+      // Cada venta huérfana es su propio "pedido" (no había agrupación antes)
+      gruposHuerfanos[v.id] = {
+        id: `huerfana_${v.id}`,
+        fecha: v.fecha,
+        hora: null,
+        cliente_nombre: null,
+        origen: v.origen,
+        medio_pago: null,
+        nota: v.nota,
+        delivery: v.delivery || 0,
+        ventas: [v],
+        _tipo: 'huerfana'
+      }
+    })
+
+    const todo = [...ordenesConVentas, ...Object.values(gruposHuerfanos)]
+      .sort((a, b) => (b.fecha > a.fecha ? 1 : b.fecha < a.fecha ? -1 : 0))
+
     setRecetas((r || []).filter(x => x.nombre !== 'ENVASE'))
-    setOrdenes(ordenesConVentas)
+    setOrdenes(todo)
   }
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2800) }
@@ -529,7 +557,8 @@ export default function Ventas() {
                   <div style={{ fontWeight:700, fontSize:15 }}>{formatCLP(totalOrden)}</div>
                   {o.delivery > 0 && <div style={{ fontSize:11, color:'var(--pink)' }}>-{formatCLP(o.delivery)} Uber</div>}
                 </div>
-                {/* Editar */}
+                {/* Editar y eliminar solo para órdenes reales */}
+                {o._tipo !== 'huerfana' && (<>
                 <button onClick={() => setEditando(o)}
                   style={{ background:'none', border:'none', cursor:'pointer', color:'var(--cyan)', padding:4 }}
                   title="Editar pedido">
@@ -538,7 +567,6 @@ export default function Ventas() {
                     <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                   </svg>
                 </button>
-                {/* Eliminar */}
                 <button onClick={() => setConfirmar(o)}
                   style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)', padding:4 }}
                   title="Eliminar pedido">
@@ -547,6 +575,7 @@ export default function Ventas() {
                     <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
                   </svg>
                 </button>
+                </>)}
               </div>
             </div>
           )
