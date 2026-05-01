@@ -135,7 +135,10 @@ function EditStockModal({ insumo, onSave, onCancel }) {
 export default function Compras() {
   const [insumos, setInsumos] = useState([])
   const [compras, setCompras] = useState([])
-  const [form, setForm] = useState({ fecha: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` })(), insumo_nombre: '', unidad: 'ml', cantidad: '', precio_total: '', nota: '' })
+  const fechaHoy = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` }
+  const [form, setForm] = useState({ fecha: '', insumo_nombre: '', unidad: 'ml', cantidad: '', precio_total: '', nota: '' })
+  const [esActivo, setEsActivo] = useState(false)
+  const [activoForm, setActivoForm] = useState({ fecha: '', descripcion: '', precio: '', nota: '' })
   const [toast, setToast] = useState('')
   const [loading, setLoading] = useState(false)
   const [tab, setTab] = useState('registrar')
@@ -145,7 +148,12 @@ export default function Compras() {
   const [fabricandoGoma, setFabricandoGoma] = useState(false)
   const [mlGoma, setMlGoma] = useState('')
 
-  useEffect(() => { loadData() }, [])
+  useEffect(() => {
+    const hoy = fechaHoy()
+    setForm(f => ({ ...f, fecha: hoy }))
+    setActivoForm(f => ({ ...f, fecha: hoy }))
+    loadData()
+  }, [])
 
   async function loadData() {
     const [{ data: ins }, { data: cmp }] = await Promise.all([
@@ -173,11 +181,35 @@ export default function Compras() {
       unidad: form.unidad,
       cantidad: parseFloat(form.cantidad),
       precio_total: parseFloat(form.precio_total),
-      nota: form.nota || null
+      nota: form.nota || null,
+      es_inversion: false,
+      tipo: 'insumo',
     })
     if (!error) {
       showToast('Compra registrada · PPP actualizado')
       setForm(f => ({ ...f, insumo_nombre: '', cantidad: '', precio_total: '', nota: '' }))
+      loadData()
+    }
+    setLoading(false)
+  }
+
+  const handleSubmitActivo = async (e) => {
+    e.preventDefault()
+    if (!activoForm.descripcion || !activoForm.precio) return
+    setLoading(true)
+    const { error } = await supabase.from('compras').insert({
+      fecha: activoForm.fecha,
+      insumo_nombre: activoForm.descripcion,
+      unidad: 'unidad',
+      cantidad: 1,
+      precio_total: parseFloat(activoForm.precio),
+      nota: activoForm.nota || null,
+      es_inversion: false,
+      tipo: 'activo_fijo',
+    })
+    if (!error) {
+      showToast('Activo fijo registrado ✓')
+      setActivoForm(f => ({ ...f, descripcion: '', precio: '', nota: '' }))
       loadData()
     }
     setLoading(false)
@@ -265,86 +297,145 @@ export default function Compras() {
       </div>
 
       {tab === 'registrar' && (
-        <form onSubmit={handleSubmit}>
-          <div className="card">
-            <div className="form-group">
-              <label className="form-label">Fecha</label>
-              <input type="date" className="form-input" value={form.fecha}
-                onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Insumo</label>
-              <select className="form-select" value={form.insumo_nombre}
-                onChange={e => handleSelectInsumo(e.target.value)}>
-                <option value="">Seleccionar insumo...</option>
-                {insumos.map(i => <option key={i.nombre} value={i.nombre}>{i.nombre}</option>)}
-              </select>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div className="form-group">
-                <label className="form-label">Cantidad ({form.unidad})</label>
-                <input type="number" step="any" className="form-input" value={form.cantidad}
-                  placeholder="ej: 1000"
-                  onChange={e => setForm(f => ({ ...f, cantidad: e.target.value }))} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Precio total ($)</label>
-                <input type="number" className="form-input" value={form.precio_total}
-                  placeholder="ej: 4990"
-                  onChange={e => setForm(f => ({ ...f, precio_total: e.target.value }))} />
-              </div>
-            </div>
-            {costoPorUnidad && (
-              <div style={{ color: 'var(--cyan)', fontSize: 13, marginBottom: 12, textAlign: 'center' }}>
-                ${costoPorUnidad} por {form.unidad}
-              </div>
-            )}
-            <div className="form-group">
-              <label className="form-label">Nota — opcional</label>
-              <input type="text" className="form-input" value={form.nota}
-                placeholder="ej: Unimarc, oferta..."
-                onChange={e => setForm(f => ({ ...f, nota: e.target.value }))} />
-            </div>
-            <button type="submit" className="btn btn-primary" disabled={loading}>
-              {loading ? 'Guardando...' : 'Registrar compra'}
-            </button>
+        <div>
+          {/* Selector tipo */}
+          <div className="toggle-row" style={{ marginBottom: 12 }}>
+            <button className={`toggle-btn ${!esActivo ? 'active-entrada' : ''}`} onClick={() => setEsActivo(false)}>🧪 Insumo</button>
+            <button className={`toggle-btn ${esActivo ? 'active-entrada' : ''}`} onClick={() => setEsActivo(true)}>🔧 Activo fijo</button>
           </div>
 
-          <div className="section-divider">Todas las compras ({compras.length})</div>
-          <div className="card">
-            {compras.map(c => (
-              <div className="list-item" key={c.id} style={{ gap: 8 }}>
-                <div style={{ flex: 1 }}>
-                  <div className="list-item-name">{c.insumo_nombre}</div>
-                  <div className="list-item-sub">{c.fecha} · {c.cantidad} {c.unidad}</div>
-                  {c.nota && <div className="list-item-sub" style={{ color: 'var(--muted)' }}>{c.nota}</div>}
+          {/* Formulario insumo */}
+          {!esActivo && (
+            <form onSubmit={handleSubmit}>
+              <div className="card">
+                <div className="form-group">
+                  <label className="form-label">Fecha</label>
+                  <input type="date" className="form-input" value={form.fecha}
+                    onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div className="list-item-right">
-                    <div className="list-item-value">{formatCLP(c.precio_total)}</div>
-                    <div className="list-item-muted">${(c.precio_total / c.cantidad).toFixed(2)}/{c.unidad}</div>
+                <div className="form-group">
+                  <label className="form-label">Insumo</label>
+                  <select className="form-select" value={form.insumo_nombre}
+                    onChange={e => handleSelectInsumo(e.target.value)}>
+                    <option value="">Seleccionar insumo...</option>
+                    {insumos.map(i => <option key={i.nombre} value={i.nombre}>{i.nombre}</option>)}
+                  </select>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div className="form-group">
+                    <label className="form-label">Cantidad ({form.unidad})</label>
+                    <input type="number" step="any" className="form-input" value={form.cantidad}
+                      placeholder="ej: 1000"
+                      onChange={e => setForm(f => ({ ...f, cantidad: e.target.value }))} />
                   </div>
-                  <button onClick={() => setEditandoCompra(c)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--cyan)', padding: 4 }}
-                    title="Editar">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                    </svg>
-                  </button>
-                  <button onClick={() => setConfirmar(c)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 4 }}
-                    title="Eliminar">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>
-                      <path d="M9 6V4h6v2"/>
-                    </svg>
-                  </button>
+                  <div className="form-group">
+                    <label className="form-label">Precio total ($)</label>
+                    <input type="number" className="form-input" value={form.precio_total}
+                      placeholder="ej: 4990"
+                      onChange={e => setForm(f => ({ ...f, precio_total: e.target.value }))} />
+                  </div>
                 </div>
+                {costoPorUnidad && (
+                  <div style={{ color: 'var(--cyan)', fontSize: 13, marginBottom: 12, textAlign: 'center' }}>
+                    ${costoPorUnidad} por {form.unidad}
+                  </div>
+                )}
+                <div className="form-group">
+                  <label className="form-label">Nota — opcional</label>
+                  <input type="text" className="form-input" value={form.nota}
+                    placeholder="ej: Unimarc, oferta..."
+                    onChange={e => setForm(f => ({ ...f, nota: e.target.value }))} />
+                </div>
+                <button type="submit" className="btn btn-primary" disabled={loading}>
+                  {loading ? 'Guardando...' : 'Registrar compra'}
+                </button>
               </div>
-            ))}
+            </form>
+          )}
+
+          {/* Formulario activo fijo */}
+          {esActivo && (
+            <form onSubmit={handleSubmitActivo}>
+              <div className="card" style={{ border: '1px solid rgba(0,180,180,0.25)' }}>
+                <div style={{ fontSize: 12, color: 'var(--cyan)', marginBottom: 12, lineHeight: 1.5 }}>
+                  Los activos fijos (equipos, utensilios, mobiliario) se registran aparte de los insumos y no afectan el margen operativo.
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Fecha</label>
+                  <input type="date" className="form-input" value={activoForm.fecha}
+                    onChange={e => setActivoForm(f => ({ ...f, fecha: e.target.value }))} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Descripción</label>
+                  <input type="text" className="form-input" value={activoForm.descripcion}
+                    placeholder="ej: Licuadora Oster, Frascos × 50..."
+                    onChange={e => setActivoForm(f => ({ ...f, descripcion: e.target.value }))} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Precio ($)</label>
+                  <input type="number" className="form-input" value={activoForm.precio}
+                    placeholder="ej: 45990"
+                    onChange={e => setActivoForm(f => ({ ...f, precio: e.target.value }))} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Nota — opcional</label>
+                  <input type="text" className="form-input" value={activoForm.nota}
+                    placeholder="ej: Ripley, garantía 1 año..."
+                    onChange={e => setActivoForm(f => ({ ...f, nota: e.target.value }))} />
+                </div>
+                <button type="submit" className="btn btn-primary" disabled={loading}>
+                  {loading ? 'Guardando...' : 'Registrar activo fijo'}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Historial unificado */}
+          <div className="section-divider">Historial ({compras.length})</div>
+          <div className="card">
+            {compras.map(c => {
+              const esAF = c.tipo === 'activo_fijo'
+              const esCT = c.tipo === 'capital_trabajo' || c.es_inversion
+              return (
+                <div className="list-item" key={c.id} style={{ gap: 8 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div className="list-item-name">{c.insumo_nombre}</div>
+                      {esAF && <span style={{ fontSize: 10, background: 'rgba(0,180,180,0.15)', color: 'var(--cyan)', borderRadius: 6, padding: '1px 6px', fontWeight: 700 }}>ACTIVO</span>}
+                      {esCT && !esAF && <span style={{ fontSize: 10, background: 'rgba(196,0,90,0.12)', color: 'var(--pink)', borderRadius: 6, padding: '1px 6px', fontWeight: 700 }}>INV</span>}
+                    </div>
+                    <div className="list-item-sub">{c.fecha}{!esAF ? ` · ${c.cantidad} ${c.unidad}` : ''}</div>
+                    {c.nota && <div className="list-item-sub" style={{ color: 'var(--muted)' }}>{c.nota}</div>}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div className="list-item-right">
+                      <div className="list-item-value">{formatCLP(c.precio_total)}</div>
+                      {!esAF && c.cantidad > 0 && <div className="list-item-muted">${(c.precio_total / c.cantidad).toFixed(2)}/{c.unidad}</div>}
+                    </div>
+                    {!esAF && (
+                      <button onClick={() => setEditandoCompra(c)}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--cyan)', padding: 4 }}
+                        title="Editar">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                        </svg>
+                      </button>
+                    )}
+                    <button onClick={() => setConfirmar(c)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 4 }}
+                      title="Eliminar">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>
+                        <path d="M9 6V4h6v2"/>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
           </div>
-        </form>
+        </div>
       )}
 
       {tab === 'ppp' && (
