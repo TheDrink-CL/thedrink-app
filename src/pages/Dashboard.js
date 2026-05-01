@@ -47,9 +47,20 @@ export default function Dashboard() {
       const vtsMes = vts?.filter(v => new Date(v.fecha) >= hace30) || []
       const ingresoMes = vtsMes.reduce((s, v) => s + (v.litros * v.precio_venta), 0)
 
-      // Ticket promedio por orden
+      // Ticket por orden
       const totalOrdenes = (ordenes || []).length
       const ticketPromedio = totalOrdenes > 0 ? ingresoTotal / totalOrdenes : 0
+
+      // Ticket mediana — más representativo que el promedio ante outliers
+      const ticketsPorOrden = (ordenes || []).map(o => {
+        const ventasOrden = (vts || []).filter(v => v.orden_id === o.id)
+        return ventasOrden.reduce((s, v) => s + v.litros * v.precio_venta, 0)
+      }).filter(t => t > 0).sort((a, b) => a - b)
+      const mid = Math.floor(ticketsPorOrden.length / 2)
+      const ticketMediana = ticketsPorOrden.length === 0 ? 0
+        : ticketsPorOrden.length % 2 !== 0
+          ? ticketsPorOrden[mid]
+          : (ticketsPorOrden[mid - 1] + ticketsPorOrden[mid]) / 2
 
       // Clientes recurrentes (han comprado más de 1 vez con nombre registrado)
       const porCliente = {}
@@ -97,7 +108,7 @@ export default function Dashboard() {
 
       setData({
         inversion, ingresoTotal, litrosTotales, saldoCaja, ingresoMes,
-        ticketPromedio, totalOrdenes,
+        ticketPromedio, ticketMediana, totalOrdenes,
         clientesRecurrentes: clientesRecurrentes.length,
         totalClientesNombrados, pctRecurrentes, topRecurrentes,
         totalActivosFijos,
@@ -219,9 +230,16 @@ export default function Dashboard() {
       {/* Ticket promedio + Recurrencia */}
       <div className="kpi-grid">
         <div className="kpi-card">
-          <div className="kpi-label">Ticket promedio</div>
-          <div className="kpi-value cyan">{formatCLP(data.ticketPromedio)}</div>
-          <div className="kpi-sub">{data.totalOrdenes} pedidos totales</div>
+          <div className="kpi-label">Ticket típico</div>
+          <div className="kpi-value cyan">{formatCLP(data.ticketMediana)}</div>
+          <div className="kpi-sub">
+            mediana · {data.totalOrdenes} pedidos
+            {data.ticketPromedio > 0 && (
+              <span style={{ display:'block', color:'var(--muted)', fontSize:10, marginTop:2 }}>
+                prom. {formatCLP(data.ticketPromedio)}
+              </span>
+            )}
+          </div>
         </div>
         <div className="kpi-card">
           <div className="kpi-label">Clientes recurrentes</div>
