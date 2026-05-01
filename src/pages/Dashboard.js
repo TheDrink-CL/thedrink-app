@@ -19,7 +19,7 @@ export default function Dashboard() {
         supabase.from('caja').select('*'),
         supabase.from('compras').select('precio_total, es_inversion'),
         supabase.from('insumos').select('nombre, stock_actual, stock_minimo, unidad'),
-        supabase.from('ordenes').select('fecha, medio_pago'),
+        supabase.from('ordenes').select('id, fecha, medio_pago, cliente_nombre'),
       ])
 
       const config = {}
@@ -29,7 +29,7 @@ export default function Dashboard() {
       const ingresoTotal = vts?.reduce((s, v) => s + (v.litros * v.precio_venta), 0) || 0
       const litrosTotales = vts?.reduce((s, v) => s + v.litros, 0) || 0
 
-      // Saldo caja real: ventas - compras + movimientos manuales extra (no ventas/insumos ya contados)
+      // Saldo caja real
       const totalVentas = vts?.reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0) || 0
       const totalCompras = cmp?.reduce((s, c) => s + (c.es_inversion ? 0 : c.precio_total), 0) || 0
       const movExtraEntradas = cja?.filter(m => m.tipo === 'entrada' && m.categoria !== 'Venta' && m.categoria !== 'Delivery').reduce((s, m) => s + m.monto, 0) || 0
@@ -40,6 +40,29 @@ export default function Dashboard() {
       const hace30 = new Date(); hace30.setDate(hace30.getDate() - 30)
       const vtsMes = vts?.filter(v => new Date(v.fecha) >= hace30) || []
       const ingresoMes = vtsMes.reduce((s, v) => s + (v.litros * v.precio_venta), 0)
+
+      // Ticket promedio por orden
+      const totalOrdenes = (ordenes || []).length
+      const ticketPromedio = totalOrdenes > 0 ? ingresoTotal / totalOrdenes : 0
+
+      // Clientes recurrentes (han comprado más de 1 vez con nombre registrado)
+      const porCliente = {}
+      ;(ordenes || []).forEach(o => {
+        if (!o.cliente_nombre) return
+        const key = o.cliente_nombre.trim().toLowerCase()
+        if (!porCliente[key]) porCliente[key] = { nombre: o.cliente_nombre, pedidos: 0 }
+        porCliente[key].pedidos++
+      })
+      const clientesConNombre = Object.values(porCliente)
+      const clientesRecurrentes = clientesConNombre.filter(c => c.pedidos > 1)
+      const totalClientesNombrados = clientesConNombre.length
+      const pctRecurrentes = totalClientesNombrados > 0
+        ? clientesRecurrentes.length / totalClientesNombrados
+        : 0
+      // Top recurrentes (máx 3)
+      const topRecurrentes = clientesRecurrentes
+        .sort((a, b) => b.pedidos - a.pedidos)
+        .slice(0, 3)
 
       // Top recetas
       const porReceta = {}
@@ -66,7 +89,12 @@ export default function Dashboard() {
       ).length
       setTransferenciasMes(transferencias)
 
-      setData({ inversion, ingresoTotal, litrosTotales, saldoCaja, ingresoMes })
+      setData({
+        inversion, ingresoTotal, litrosTotales, saldoCaja, ingresoMes,
+        ticketPromedio, totalOrdenes,
+        clientesRecurrentes: clientesRecurrentes.length,
+        totalClientesNombrados, pctRecurrentes, topRecurrentes,
+      })
       setVentas({ topRecetas, recientes: vts?.slice(0, 5) || [] })
       setLoading(false)
     }
@@ -131,6 +159,7 @@ export default function Dashboard() {
         )
       })()}
 
+      {/* KPIs principales */}
       <div className="kpi-grid">
         <div className="kpi-card">
           <div className="kpi-label">Ingresos totales</div>
@@ -164,6 +193,54 @@ export default function Dashboard() {
           <div className="kpi-value cyan">{formatCLP(data.ingresoMes)}</div>
         </div>
       </div>
+
+      {/* Ticket promedio + Recurrencia */}
+      <div className="kpi-grid">
+        <div className="kpi-card">
+          <div className="kpi-label">Ticket promedio</div>
+          <div className="kpi-value cyan">{formatCLP(data.ticketPromedio)}</div>
+          <div className="kpi-sub">{data.totalOrdenes} pedidos totales</div>
+        </div>
+        <div className="kpi-card">
+          <div className="kpi-label">Clientes recurrentes</div>
+          <div className="kpi-value" style={{ color: data.pctRecurrentes >= 0.3 ? 'var(--green)' : 'var(--text)' }}>
+            {data.clientesRecurrentes}
+            {data.totalClientesNombrados > 0 && (
+              <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--muted)', marginLeft: 4 }}>
+                /{data.totalClientesNombrados}
+              </span>
+            )}
+          </div>
+          <div className="kpi-sub">
+            {data.totalClientesNombrados > 0
+              ? `${Math.round(data.pctRecurrentes * 100)}% vuelve`
+              : 'registra clientes para ver'}
+          </div>
+        </div>
+      </div>
+
+      {/* Top clientes recurrentes */}
+      {data.topRecurrentes.length > 0 && (
+        <div className="card">
+          <div className="card-title">Clientes frecuentes</div>
+          {data.topRecurrentes.map(c => (
+            <div className="list-item" key={c.nombre}>
+              <div>
+                <div className="list-item-name">{c.nombre}</div>
+                <div className="list-item-sub">{c.pedidos} pedidos</div>
+              </div>
+              <div className="list-item-right">
+                <div style={{ display: 'flex', gap: 3 }}>
+                  {Array.from({ length: Math.min(c.pedidos, 5) }).map((_, i) => (
+                    <div key={i} style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--cyan)', opacity: 0.7 + i * 0.06 }} />
+                  ))}
+                  {c.pedidos > 5 && <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 2 }}>+{c.pedidos - 5}</span>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="card">
         <div className="card-title">Top recetas (litros)</div>

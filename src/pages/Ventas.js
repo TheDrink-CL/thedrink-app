@@ -397,12 +397,15 @@ export default function Ventas() {
                   <option value="">Seleccionar receta...</option>
                   {recetas.map(r => <option key={r.nombre} value={r.nombre}>{r.nombre}</option>)}
                 </select>
-                <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                  <div style={{ flex:1 }}>
-                    <input type="number" className="form-input" value={it.precio_venta} placeholder="Precio ($)"
-                      onChange={e => updateItem(i, 'precio_venta', e.target.value)} />
-                  </div>
-                  <label style={{ display:'flex', alignItems:'center', gap:6, cursor:'pointer', flexShrink:0 }}>
+                <div style={{ display:'flex', gap:8, marginBottom:6 }}>
+                  <input type="number" className="form-input" value={it.precio_venta} placeholder="Precio ($)" style={{ flex:1 }}
+                    onChange={e => updateItem(i, 'precio_venta', e.target.value)} />
+                  <input type="number" className="form-input" value={it.litros} placeholder="Litros" style={{ width:80 }}
+                    step="0.5" min="0.5"
+                    onChange={e => updateItem(i, 'litros', e.target.value)} />
+                </div>
+                <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                  <label style={{ display:'flex', alignItems:'center', gap:6, cursor:'pointer' }}>
                     <input type="checkbox" checked={it.devuelve_envase}
                       onChange={e => updateItem(i, 'devuelve_envase', e.target.checked)}
                       style={{ width:16, height:16, accentColor:'var(--cyan)' }} />
