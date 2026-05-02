@@ -193,7 +193,7 @@ export default function Caja() {
   }
 
   const handleTipo = (tipo) => {
-    setForm(f => ({ ...f, tipo, categoria: tipo === 'entrada' ? 'Venta' : 'Insumos' }))
+    setForm(f => ({ ...f, tipo, categoria: tipo === 'entrada' ? 'Venta' : 'Publicidad' }))
   }
 
   const handleSubmit = async (e) => {
