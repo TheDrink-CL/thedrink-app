@@ -259,7 +259,7 @@ export default function Dashboard() {
           borderRadius: 10, padding: '12px 14px', marginBottom: 12
         }}>
           <div style={{ fontSize: 11, color: 'var(--pink)', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700, marginBottom: 8 }}>
-            ⚠ Stock crítico
+            {'Stock critico'}
           </div>
           {alertasStock.map(i => (
             <div key={i.nombre} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
@@ -279,23 +279,27 @@ export default function Dashboard() {
         const color = pct >= 1 ? 'var(--pink)' : pct >= 0.8 ? '#f59e0b' : 'var(--cyan)'
         const bg = pct >= 1 ? 'rgba(196,0,90,0.08)' : pct >= 0.8 ? 'rgba(245,158,11,0.08)' : 'rgba(0,180,180,0.06)'
         const border = pct >= 1 ? 'rgba(196,0,90,0.35)' : pct >= 0.8 ? 'rgba(245,158,11,0.35)' : 'rgba(0,180,180,0.2)'
+        const labelXfer = pct >= 1 ? 'Limite alcanzado' : pct >= 0.8 ? 'Cerca del limite' : 'Transferencias del mes'
+        const mensajeXfer = pct >= 1
+          ? 'Alcanzaste el limite legal. No registres mas transferencias este mes.'
+          : 'Quedan ' + restantes + ' transferencias disponibles este mes.'
+        const barWidth = Math.min(100, pct * 100) + '%'
         return (
-          <div style={{ background: bg, border: `1px solid ${border}`, borderRadius: 12, padding: '12px 14px', marginBottom: 12 }}>
+          <div style={{ background: bg, border: '1px solid ' + border, borderRadius: 12, padding: '12px 14px', marginBottom: 12 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <div style={{ fontSize: 12, color, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8 }}>
-                {pct >= 1 ? '🚫 Límite alcanzado' : pct >= 0.8 ? '⚠ Cerca del límite' : '🏦 Transferencias del mes'}
+              <div style={{ fontSize: 12, color: color, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+                {labelXfer}
               </div>
-              <div style={{ fontSize: 18, fontWeight: 800, color }}>
-                {transferenciasMes}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--muted)' }}>/{limiteTransferencias}</span>
+              <div style={{ fontSize: 18, fontWeight: 800, color: color }}>
+                {transferenciasMes}
+                <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--muted)' }}>/{limiteTransferencias}</span>
               </div>
             </div>
             <div style={{ height: 6, background: 'rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden', marginBottom: 6 }}>
-              <div style={{ height: '100%', width: `${Math.min(100, pct * 100)}%`, background: color, borderRadius: 3, transition: 'width 0.4s' }} />
+              <div style={{ height: '100%', width: barWidth, background: color, borderRadius: 3, transition: 'width 0.4s' }} />
             </div>
             <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-              {pct >= 1
-                ? 'Alcanzaste el límite legal. No registres más transferencias este mes.'
-                : `Quedan ${restantes} transferencias disponibles este mes.`}
+              {mensajeXfer}
             </div>
           </div>
         )
