@@ -66,7 +66,11 @@ function TicketModal({ orden, onCerrar }) {
         )}
         {orden.delivery > 0 && (
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: 13, color: 'var(--muted)' }}>
-            <span>Uber Eats</span>
+            <span>
+              {orden.delivery_tipo === 'motoboy' ? 'Motoboy' :
+               orden.delivery_tipo === 'otro' ? 'Entrega' :
+               'Uber Eats'}
+            </span>
             <span style={{ color: 'var(--pink)' }}>-{formatCLP(orden.delivery)}</span>
           </div>
         )}
@@ -132,6 +136,12 @@ const MEDIOS_PAGO = [
   { id: 'credito',       label: '💳 Crédito' },
   { id: 'efectivo',      label: '💵 Efectivo' },
 ]
+const TIPOS_DELIVERY = [
+  { id: 'uber',    label: '🛵 Uber Eats' },
+  { id: 'motoboy', label: '🏍️ Motoboy' },
+  { id: 'retiro',  label: '🚶 Retiro' },
+  { id: 'otro',    label: '· Otro' },
+]
 
 function ConfirmModal({ mensaje, onConfirm, onCancel }) {
   return (
@@ -154,6 +164,7 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
   const [origenVal, setOrigenVal] = useState(orden.origen || '')
   const [medioPago, setMedioPago] = useState(orden.medio_pago || 'transferencia')
   const [delivery, setDelivery] = useState(orden.delivery || '')
+  const [deliveryTipo, setDeliveryTipo] = useState(orden.delivery_tipo || '')
   const [nota, setNota] = useState(orden.nota || '')
   const [items, setItems] = useState(
     (orden.ventas || []).map(v => ({
@@ -186,6 +197,7 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
       medio_pago: medioPago,
       nota: nota || null,
       delivery: parseFloat(delivery) || 0,
+      delivery_tipo: (parseFloat(delivery) > 0 || deliveryTipo === 'retiro') ? (deliveryTipo || null) : null,
     }).eq('id', orden.id)
 
     // Borrar ventas antiguas e insertar nuevas
@@ -281,11 +293,30 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
           + Agregar producto
         </button>
 
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 }}>
-          <div className="form-group">
-            <label className="form-label">Costo Uber</label>
-            <input type="number" className="form-input" value={delivery} placeholder="ej: 2500" onChange={e => setDelivery(e.target.value)} />
+        <div className="form-group" style={{ marginBottom:12 }}>
+          <label className="form-label">Tipo de entrega</label>
+          <div className="chip-row">
+            {TIPOS_DELIVERY.map(t => (
+              <button key={t.id} type="button" className={`chip ${deliveryTipo === t.id ? 'selected' : ''}`}
+                onClick={() => {
+                  setDeliveryTipo(d => d === t.id ? '' : t.id)
+                  if (t.id === 'retiro') setDelivery('')
+                }}>{t.label}</button>
+            ))}
           </div>
+        </div>
+
+        <div style={{ display:'grid', gridTemplateColumns: deliveryTipo && deliveryTipo !== 'retiro' ? '1fr 1fr' : '1fr', gap:12, marginBottom:16 }}>
+          {deliveryTipo && deliveryTipo !== 'retiro' && (
+            <div className="form-group">
+              <label className="form-label">
+                {deliveryTipo === 'uber' ? 'Costo Uber' :
+                 deliveryTipo === 'motoboy' ? 'Pago motoboy' :
+                 'Costo entrega'}
+              </label>
+              <input type="number" className="form-input" value={delivery} placeholder="ej: 2500" onChange={e => setDelivery(e.target.value)} />
+            </div>
+          )}
           <div className="form-group">
             <label className="form-label">Nota</label>
             <input type="text" className="form-input" value={nota} placeholder="opcional" onChange={e => setNota(e.target.value)} />
@@ -377,6 +408,7 @@ export default function Ventas() {
   const [origen, setOrigen] = useState('')
   const [medioPago, setMedioPago] = useState('transferencia')
   const [delivery, setDelivery] = useState('')
+  const [deliveryTipo, setDeliveryTipo] = useState('')
   const [nota, setNota] = useState('')
   const [items, setItems] = useState([itemVacio()])
 
@@ -486,6 +518,7 @@ export default function Ventas() {
       medio_pago: medioPago,
       nota: nota || null,
       delivery: parseFloat(delivery) || 0,
+      delivery_tipo: (parseFloat(delivery) > 0 || deliveryTipo === 'retiro') ? (deliveryTipo || null) : null,
     }).select().single()
 
     console.log('orden result:', orden, 'error:', errOrden)
@@ -530,6 +563,7 @@ export default function Ventas() {
     setOrigen('')
     setMedioPago('transferencia')
     setDelivery('')
+    setDeliveryTipo('')
     setNota('')
     setItems([itemVacio()])
     load()
@@ -680,17 +714,35 @@ export default function Ventas() {
             </div>
           )}
 
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginTop:14 }}>
+          <div className="form-group" style={{ marginTop:14 }}>
+            <label className="form-label">Tipo de entrega — opcional</label>
+            <div className="chip-row">
+              {TIPOS_DELIVERY.map(t => (
+                <button key={t.id} type="button" className={`chip ${deliveryTipo === t.id ? 'selected' : ''}`}
+                  onClick={() => {
+                    setDeliveryTipo(d => d === t.id ? '' : t.id)
+                    if (t.id === 'retiro') setDelivery('')
+                  }}>{t.label}</button>
+              ))}
+            </div>
+          </div>
+
+          {deliveryTipo && deliveryTipo !== 'retiro' && (
             <div className="form-group">
-              <label className="form-label">Costo Uber — opcional</label>
+              <label className="form-label">
+                {deliveryTipo === 'uber' ? 'Costo Uber Eats' :
+                 deliveryTipo === 'motoboy' ? 'Pago al motoboy' :
+                 'Costo entrega'}
+              </label>
               <input type="number" className="form-input" value={delivery} placeholder="ej: 2500"
                 onChange={e => setDelivery(e.target.value)} />
             </div>
-            <div className="form-group">
-              <label className="form-label">Nota — opcional</label>
-              <input type="text" className="form-input" value={nota} placeholder="ej: pago en 2 partes"
-                onChange={e => setNota(e.target.value)} />
-            </div>
+          )}
+
+          <div className="form-group">
+            <label className="form-label">Nota — opcional</label>
+            <input type="text" className="form-input" value={nota} placeholder="ej: pago en 2 partes"
+              onChange={e => setNota(e.target.value)} />
           </div>
 
           <button type="submit" className="btn btn-primary" disabled={loading}>
@@ -734,14 +786,12 @@ export default function Ventas() {
         // Aplicar filtros
         const hoy = new Date()
         const ordenesFiltradas = ordenes.filter(o => {
-          // Filtro período
           if (filtroPeriodo !== 'todo') {
             const dias = filtroPeriodo === '7d' ? 7 : filtroPeriodo === '30d' ? 30 : 90
             const corte = new Date(hoy); corte.setDate(hoy.getDate() - dias)
             const [y, m, d] = o.fecha.split('-').map(Number)
             if (new Date(y, m-1, d) < corte) return false
           }
-          // Filtro cliente + receta (texto libre)
           if (filtroCliente.trim()) {
             const q = filtroCliente.toLowerCase()
             const matchCliente = (o.cliente_nombre || '').toLowerCase().includes(q)
@@ -766,72 +816,74 @@ export default function Ventas() {
                 </div>
               )}
               {ordenesFiltradas.map(o => {
-          const totalOrden = (o.ventas || []).reduce((s, v) => s + (v.litros||1) * (v.precio_venta||0), 0)
-          const nItems = (o.ventas || []).length
-          const oc = origenColor(o.origen)
-          return (
-            <div className="list-item" key={o.id} style={{ gap:8, alignItems:'flex-start' }}>
-              <div style={{ flex:1, minWidth:0 }}>
-                <div className="list-item-name">{o.cliente_nombre || 'Cliente anónimo'}</div>
-                <div className="list-item-sub">{o.fecha}{o.hora ? ` · ${o.hora}` : ''} · {nItems} producto{nItems !== 1 ? 's' : ''}</div>
-                <div style={{ display:'flex', gap:6, marginTop:3, flexWrap:'wrap' }}>
-                  {o.origen && (
-                    <span style={{ fontSize:11, background:oc.bg, color:oc.color, borderRadius:10, padding:'1px 7px', fontWeight:600 }}>
-                      {origenIcon(o.origen)} {o.origen}
-                    </span>
-                  )}
-                  {o.medio_pago && (
-                    <span style={{ fontSize:11, background:'rgba(255,255,255,0.06)', color:'var(--muted)', borderRadius:10, padding:'1px 7px' }}>
-                      {MEDIOS_PAGO.find(m => m.id === o.medio_pago)?.label || o.medio_pago}
-                    </span>
-                  )}
-                  {(o.ventas || []).map((v, i) => (
-                    <span key={i} style={{ fontSize:11, color:'var(--muted)' }}>{v.receta_nombre}</span>
-                  ))}
-                </div>
-                {o.nota && <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>{o.nota}</div>}
-              </div>
-              <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
-                <div style={{ textAlign:'right' }}>
-                  <div style={{ fontWeight:700, fontSize:15 }}>{formatCLP(totalOrden)}</div>
-                  {o.delivery > 0 && <div style={{ fontSize:11, color:'var(--pink)' }}>-{formatCLP(o.delivery)} Uber</div>}
-                </div>
-                {/* Ticket siempre disponible */}
-                <button onClick={() => setTicket(o)}
-                  style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)', padding:4 }}
-                  title="Ver ticket">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M20 12V22H4V12"/><path d="M22 7H2v5h20V7z"/>
-                    <path d="M12 22V7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/>
-                    <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/>
-                  </svg>
-                </button>
-                {/* Editar y eliminar solo para órdenes reales */}
-                {o._tipo !== 'huerfana' && (<>
-                <button onClick={() => setEditando(o)}
-                  style={{ background:'none', border:'none', cursor:'pointer', color:'var(--cyan)', padding:4 }}
-                  title="Editar pedido">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                  </svg>
-                </button>
-                <button onClick={() => setConfirmar(o)}
-                  style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)', padding:4 }}
-                  title="Eliminar pedido">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
-                    <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
-                  </svg>
-                </button>
-                </>)}
-              </div>
+                const totalOrden = (o.ventas || []).reduce((s, v) => s + (v.litros||1) * (v.precio_venta||0), 0)
+                const nItems = (o.ventas || []).length
+                const oc = origenColor(o.origen)
+                return (
+                  <div className="list-item" key={o.id} style={{ gap:8, alignItems:'flex-start' }}>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div className="list-item-name">{o.cliente_nombre || 'Cliente anónimo'}</div>
+                      <div className="list-item-sub">{o.fecha}{o.hora ? ` · ${o.hora}` : ''} · {nItems} producto{nItems !== 1 ? 's' : ''}</div>
+                      <div style={{ display:'flex', gap:6, marginTop:3, flexWrap:'wrap' }}>
+                        {o.origen && (
+                          <span style={{ fontSize:11, background:oc.bg, color:oc.color, borderRadius:10, padding:'1px 7px', fontWeight:600 }}>
+                            {origenIcon(o.origen)} {o.origen}
+                          </span>
+                        )}
+                        {o.medio_pago && (
+                          <span style={{ fontSize:11, background:'rgba(255,255,255,0.06)', color:'var(--muted)', borderRadius:10, padding:'1px 7px' }}>
+                            {MEDIOS_PAGO.find(m => m.id === o.medio_pago)?.label || o.medio_pago}
+                          </span>
+                        )}
+                        {(o.ventas || []).map((v, i) => (
+                          <span key={i} style={{ fontSize:11, color:'var(--muted)' }}>{v.receta_nombre}</span>
+                        ))}
+                      </div>
+                      {o.nota && <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>{o.nota}</div>}
+                    </div>
+                    <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
+                      <div style={{ textAlign:'right' }}>
+                        <div style={{ fontWeight:700, fontSize:15 }}>{formatCLP(totalOrden)}</div>
+                        {o.delivery > 0 && (
+                          <div style={{ fontSize:11, color:'var(--pink)' }}>
+                            -{formatCLP(o.delivery)} {o.delivery_tipo === 'motoboy' ? 'Moto' : o.delivery_tipo === 'otro' ? 'Entrega' : 'Uber'}
+                          </div>
+                        )}
+                      </div>
+                      <button onClick={() => setTicket(o)}
+                        style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)', padding:4 }}
+                        title="Ver ticket">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M20 12V22H4V12"/><path d="M22 7H2v5h20V7z"/>
+                          <path d="M12 22V7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/>
+                          <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/>
+                        </svg>
+                      </button>
+                      {o._tipo !== 'huerfana' && (<>
+                        <button onClick={() => setEditando(o)}
+                          style={{ background:'none', border:'none', cursor:'pointer', color:'var(--cyan)', padding:4 }}
+                          title="Editar pedido">
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                          </svg>
+                        </button>
+                        <button onClick={() => setConfirmar(o)}
+                          style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)', padding:4 }}
+                          title="Eliminar pedido">
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
+                            <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+                          </svg>
+                        </button>
+                      </>)}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
-              )
-            })}
-          </div>
-        </>
-      )
+          </>
+        )
       })()}
     </div>
   )

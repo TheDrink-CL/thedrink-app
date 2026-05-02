@@ -229,3 +229,30 @@ body {
   background: rgba(196,0,90,0.1);
   border-color: rgba(196,0,90,0.4); color: var(--pink);
 }
+
+/* PRINT — para reporte mensual exportable a PDF */
+@media print {
+  body {
+    background: white !important;
+    color: #111 !important;
+    font-size: 11pt;
+  }
+  .no-print, .bottom-nav, .toast { display: none !important; }
+  .page { padding: 0 !important; max-width: 100% !important; }
+  .card, .kpi-card, .print-friendly {
+    background: white !important;
+    border: 1px solid #ccc !important;
+    color: #111 !important;
+    page-break-inside: avoid;
+  }
+  .kpi-value, .kpi-value.cyan, .kpi-value.pink, .kpi-value.green, .kpi-value.purple {
+    color: #111 !important;
+  }
+  .kpi-value.cyan { color: #006666 !important; }
+  .kpi-value.pink { color: #8a003e !important; }
+  .kpi-value.green { color: #166534 !important; }
+  .kpi-label, .list-item-sub, .list-item-muted { color: #555 !important; }
+  .list-item-name, .list-item-value { color: #111 !important; }
+  .section-divider { color: #555 !important; border-color: #ccc !important; }
+  .page-title { color: #006666 !important; }
+}

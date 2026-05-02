@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { formatCLP } from '../lib/calculos'
+import { formatCLP, calcularCostoReceta } from '../lib/calculos'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -691,35 +691,277 @@ function EvolucionCostos({ compras }) {
   )
 }
 
+// ─── Reporte Mensual + Punto de Equilibrio ──────────────────────────────────
+
+function ReporteMensual({ ventas, ordenes, compras, gastosCaja, recetaIngredientes, insumos, config }) {
+  const ahora = new Date()
+  const [mesSel, setMesSel] = useState(`${ahora.getFullYear()}-${String(ahora.getMonth()+1).padStart(2,'0')}`)
+
+  // Lista de meses con datos
+  const mesesDisponibles = [...new Set([
+    ...ventas.map(v => v.fecha.slice(0, 7)),
+    ...compras.map(c => c.fecha.slice(0, 7)),
+  ])].sort().reverse()
+
+  if (mesesDisponibles.length === 0) {
+    return (
+      <div className="card" style={{ textAlign:'center', padding:32 }}>
+        <div style={{ color:'var(--muted)', fontSize:14 }}>Sin datos para reportar todavía</div>
+      </div>
+    )
+  }
+
+  // Datos del mes seleccionado
+  const ventasMes = ventas.filter(v => v.fecha.startsWith(mesSel))
+  const ordenesMes = ordenes.filter(o => o.fecha && o.fecha.startsWith(mesSel))
+  const comprasMes = compras.filter(c => c.fecha.startsWith(mesSel) && !c.es_inversion && c.tipo !== 'activo_fijo')
+  const gastosMes = gastosCaja.filter(g => g.fecha && g.fecha.startsWith(mesSel))
+
+  // KPIs del mes
+  const ingresoMes = ventasMes.reduce((s, v) => s + (v.litros * v.precio_venta), 0)
+  const litrosMes = ventasMes.reduce((s, v) => s + v.litros, 0)
+  const costoInsumosMes = comprasMes.reduce((s, c) => s + c.precio_total, 0)
+  const totalGastosMes = gastosMes.reduce((s, g) => s + g.monto, 0)
+  const deliveryMes = ordenesMes.reduce((s, o) => s + (o.delivery || 0), 0)
+
+  // Costo real por receta usando PPP actual
+  const merma = config?.merma_pct ?? 0.08
+  const costoEnvase = config?.costo_envase ?? 794.6
+  const costoPorReceta = {}
+  const recetasUnicas = [...new Set(recetaIngredientes.map(i => i.receta_nombre))]
+  recetasUnicas.forEach(nombre => {
+    const ings = recetaIngredientes.filter(i => i.receta_nombre === nombre && i.insumo_nombre !== 'ENVASE')
+    costoPorReceta[nombre] = calcularCostoReceta(ings, insumos, merma, costoEnvase)
+  })
+  const costoRealMes = ventasMes.reduce((s, v) => s + (costoPorReceta[v.receta_nombre] || 0) * v.litros, 0)
+  const margenBrutoMes = ingresoMes > 0 ? (ingresoMes - costoRealMes) / ingresoMes : 0
+  const utilidadMes = ingresoMes - costoRealMes - totalGastosMes - deliveryMes
+
+  // Top recetas
+  const porReceta = {}
+  ventasMes.forEach(v => {
+    if (!porReceta[v.receta_nombre]) porReceta[v.receta_nombre] = { litros: 0, ingreso: 0, costo: 0 }
+    porReceta[v.receta_nombre].litros += v.litros
+    porReceta[v.receta_nombre].ingreso += v.litros * v.precio_venta
+    porReceta[v.receta_nombre].costo += (costoPorReceta[v.receta_nombre] || 0) * v.litros
+  })
+  const topRecetas = Object.entries(porReceta).sort((a, b) => b[1].litros - a[1].litros).slice(0, 5)
+
+  // Medios de pago
+  const medioPago = {}
+  ordenesMes.forEach(o => {
+    const m = o.medio_pago || 'sin_dato'
+    if (!medioPago[m]) medioPago[m] = { count: 0, monto: 0 }
+    medioPago[m].count++
+    const totalOrd = ventasMes.filter(v => v.orden_id === o.id).reduce((s, v) => s + v.litros * v.precio_venta, 0)
+    medioPago[m].monto += totalOrd
+  })
+
+  // Punto de equilibrio: cuántos litros necesitan vender para cubrir gastos del mes
+  // Asumimos margen unitario promedio del mes
+  const margenUnitarioPromedio = litrosMes > 0 ? (ingresoMes - costoRealMes) / litrosMes : 0
+  const litrosEquilibrio = margenUnitarioPromedio > 0 ? totalGastosMes / margenUnitarioPromedio : 0
+  const litrosFaltan = Math.max(0, litrosEquilibrio - litrosMes)
+
+  // Etiqueta del mes
+  const nombreMes = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'][parseInt(mMes, 10) - 1]
+  const labelMesSel = `${nombreMes} ${yMes}`
+
+  const handlePrint = () => {
+    window.print()
+  }
+
+  return (
+    <div>
+      {/* Selector de mes + botón imprimir */}
+      <div style={{ display:'flex', gap:8, marginBottom:14, flexWrap:'wrap' }} className="no-print">
+        <select className="form-select" value={mesSel} onChange={e => setMesSel(e.target.value)} style={{ flex:1, minWidth:160 }}>
+          {mesesDisponibles.map(m => {
+            const [y, mm] = m.split('-')
+            const lbl = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'][parseInt(mm,10)-1] + ' ' + y
+            return <option key={m} value={m}>{lbl}</option>
+          })}
+        </select>
+        <button onClick={handlePrint}
+          style={{ background:'var(--cyan)', color:'#000', border:'none', borderRadius:8, padding:'0 18px', cursor:'pointer', fontWeight:700, fontSize:13, letterSpacing:0.5 }}>
+          🖨 Imprimir / PDF
+        </button>
+      </div>
+
+      {/* Cabecera del reporte */}
+      <div className="card print-friendly">
+        <div style={{ textAlign:'center', borderBottom:'1px solid var(--border)', paddingBottom:14, marginBottom:16 }}>
+          <div style={{ fontFamily:'Orbitron', fontSize:18, color:'var(--cyan)', letterSpacing:3, fontWeight:900 }}>THE DRINK</div>
+          <div style={{ fontSize:12, color:'var(--muted)', letterSpacing:1, marginTop:4 }}>Reporte mensual · {labelMesSel}</div>
+        </div>
+
+        {/* KPIs principales */}
+        <div className="kpi-grid" style={{ marginBottom:14 }}>
+          <div className="kpi-card">
+            <div className="kpi-label">Ingreso bruto</div>
+            <div className="kpi-value cyan">{formatCLP(ingresoMes)}</div>
+            <div className="kpi-sub">{ordenesMes.length} pedidos</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Litros vendidos</div>
+            <div className="kpi-value">{litrosMes}L</div>
+            <div className="kpi-sub">{topRecetas.length} recetas</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Costo de venta</div>
+            <div className="kpi-value pink">{formatCLP(costoRealMes)}</div>
+            <div className="kpi-sub">PPP × volumen</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Margen bruto</div>
+            <div className="kpi-value green">{(margenBrutoMes * 100).toFixed(1)}%</div>
+            <div className="kpi-sub">{formatCLP(ingresoMes - costoRealMes)}</div>
+          </div>
+        </div>
+
+        <div className="kpi-grid" style={{ marginBottom:14 }}>
+          <div className="kpi-card">
+            <div className="kpi-label">Gastos del mes</div>
+            <div className="kpi-value pink">{formatCLP(totalGastosMes)}</div>
+            <div className="kpi-sub">publicidad, otros</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Compras de insumo</div>
+            <div className="kpi-value">{formatCLP(costoInsumosMes)}</div>
+            <div className="kpi-sub">en este mes</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Costo delivery</div>
+            <div className="kpi-value">{formatCLP(deliveryMes)}</div>
+            <div className="kpi-sub">uber + motoboy</div>
+          </div>
+          <div className="kpi-card" style={{ background: utilidadMes >= 0 ? 'rgba(34,197,94,0.07)' : 'rgba(196,0,90,0.07)', borderColor: utilidadMes >= 0 ? 'rgba(34,197,94,0.3)' : 'rgba(196,0,90,0.3)' }}>
+            <div className="kpi-label">Utilidad neta</div>
+            <div className="kpi-value" style={{ color: utilidadMes >= 0 ? 'var(--green)' : 'var(--pink)' }}>{formatCLP(utilidadMes)}</div>
+            <div className="kpi-sub">después de todo</div>
+          </div>
+        </div>
+
+        {/* Punto de equilibrio */}
+        <div style={{ background:'rgba(0,180,180,0.05)', border:'1px solid var(--border)', borderRadius:10, padding:14, marginBottom:14 }}>
+          <div style={{ fontSize:11, color:'var(--muted)', textTransform:'uppercase', letterSpacing:1, fontWeight:700, marginBottom:8 }}>
+            Punto de equilibrio
+          </div>
+          {totalGastosMes === 0 ? (
+            <div style={{ fontSize:13, color:'var(--muted)', lineHeight:1.6 }}>
+              No hay gastos fijos registrados este mes. Cualquier venta es utilidad neta tras descontar el costo de insumos.
+            </div>
+          ) : margenUnitarioPromedio <= 0 ? (
+            <div style={{ fontSize:13, color:'var(--pink)', lineHeight:1.6 }}>
+              ⚠ El margen unitario es 0 o negativo. Revisa precios y costos antes de calcular equilibrio.
+            </div>
+          ) : (
+            <>
+              <div style={{ fontSize:13, color:'var(--text)', lineHeight:1.7, marginBottom:6 }}>
+                Para cubrir {formatCLP(totalGastosMes)} en gastos, necesitas vender ~<strong style={{ color:'var(--cyan)' }}>{litrosEquilibrio.toFixed(1)}L</strong>
+                {' '}(margen prom: {formatCLP(margenUnitarioPromedio)}/L).
+              </div>
+              <div style={{ fontSize:13, color: litrosFaltan === 0 ? 'var(--green)' : 'var(--text)', fontWeight:600 }}>
+                {litrosFaltan === 0
+                  ? `✓ Mes cubierto. Vendiste ${litrosMes}L (${(litrosMes - litrosEquilibrio).toFixed(1)}L sobre el equilibrio).`
+                  : `Faltan ${litrosFaltan.toFixed(1)}L para cubrir gastos del mes (vendiste ${litrosMes}L).`}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Top recetas */}
+        {topRecetas.length > 0 && (
+          <div style={{ marginBottom:14 }}>
+            <div className="section-divider">Top recetas del mes</div>
+            {topRecetas.map(([nombre, d]) => {
+              const margen = d.ingreso > 0 ? (d.ingreso - d.costo) / d.ingreso : 0
+              return (
+                <div className="list-item" key={nombre}>
+                  <div>
+                    <div className="list-item-name">{nombre}</div>
+                    <div className="list-item-sub">{d.litros}L · margen {(margen*100).toFixed(0)}%</div>
+                  </div>
+                  <div className="list-item-right">
+                    <div className="list-item-value">{formatCLP(d.ingreso)}</div>
+                    <div className="list-item-muted">ganancia {formatCLP(d.ingreso - d.costo)}</div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {/* Medios de pago */}
+        {Object.keys(medioPago).length > 0 && (
+          <div style={{ marginBottom:8 }}>
+            <div className="section-divider">Medios de pago</div>
+            {Object.entries(medioPago).sort((a, b) => b[1].monto - a[1].monto).map(([m, d]) => {
+              const lbl = m === 'transferencia' ? 'Transferencia' : m === 'debito' ? 'Débito' : m === 'credito' ? 'Crédito' : m === 'efectivo' ? 'Efectivo' : 'Sin dato'
+              const pct = ingresoMes > 0 ? (d.monto / ingresoMes) * 100 : 0
+              return (
+                <div className="list-item" key={m}>
+                  <div>
+                    <div className="list-item-name" style={{ fontSize:14 }}>{lbl}</div>
+                    <div className="list-item-sub">{d.count} pedidos · {pct.toFixed(0)}%</div>
+                  </div>
+                  <div className="list-item-right">
+                    <div className="list-item-value">{formatCLP(d.monto)}</div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        <div style={{ textAlign:'center', marginTop:18, paddingTop:14, borderTop:'1px solid var(--border)', fontSize:10, color:'var(--muted)', letterSpacing:1 }}>
+          Generado {new Date().toISOString().slice(0, 10)}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Página principal ────────────────────────────────────────────────────────
 
 export default function Analisis() {
   const [ventas, setVentas] = useState([])
   const [ordenes, setOrdenes] = useState([])
   const [gastosPub, setGastosPub] = useState([])
+  const [gastosCaja, setGastosCaja] = useState([])
   const [comprasDetalle, setComprasDetalle] = useState([])
   const [recetaIngredientes, setRecetaIngredientes] = useState([])
   const [insumos, setInsumos] = useState([])
+  const [config, setConfig] = useState({ merma_pct: 0.08, costo_envase: 794.6 })
   const [margenBruto, setMargenBruto] = useState(null)
   const [loading, setLoading] = useState(true)
   const [periodo, setPeriodo] = useState('todo')
+  const [vista, setVista] = useState('tendencias')
 
   useEffect(() => {
     async function load() {
-      const [{ data: vts }, { data: cja }, { data: cmp }, { data: ords }, { data: recIng }, { data: ins }] = await Promise.all([
-        supabase.from('ventas').select('fecha, litros, precio_venta, origen, receta_nombre').order('fecha', { ascending: false }),
+      const [{ data: vts }, { data: cja }, { data: cmp }, { data: ords }, { data: recIng }, { data: ins }, { data: cfg }] = await Promise.all([
+        supabase.from('ventas').select('id, fecha, litros, precio_venta, origen, receta_nombre, orden_id').order('fecha', { ascending: false }),
         supabase.from('caja').select('fecha, monto, categoria, tipo').eq('tipo', 'salida'),
-        supabase.from('compras').select('fecha, insumo_nombre, cantidad, precio_total, es_inversion').order('fecha'),
-        supabase.from('ordenes').select('fecha, hora').order('fecha', { ascending: false }),
+        supabase.from('compras').select('fecha, insumo_nombre, cantidad, precio_total, es_inversion, tipo').order('fecha'),
+        supabase.from('ordenes').select('id, fecha, hora, medio_pago, delivery, delivery_tipo').order('fecha', { ascending: false }),
         supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad, unidad'),
         supabase.from('insumos').select('nombre, stock_actual, costo_ppp, unidad'),
+        supabase.from('config').select('*'),
       ])
       setVentas(vts || [])
       setOrdenes(ords || [])
       setComprasDetalle(cmp || [])
       setRecetaIngredientes(recIng || [])
       setInsumos(ins || [])
+      setGastosCaja(cja || [])
       setGastosPub((cja || []).filter(m => m.categoria === 'Publicidad'))
+      const c = {}
+      cfg?.forEach(x => { c[x.clave] = parseFloat(x.valor) || x.valor })
+      setConfig({
+        merma_pct: c.merma_pct ?? 0.08,
+        costo_envase: c.costo_envase ?? 794.6,
+      })
       const totalVtsBruto = (vts || []).reduce((s, v) => s + v.litros * v.precio_venta, 0)
       const totalCmpOp = (cmp || []).filter(c => !c.es_inversion).reduce((s, c) => s + c.precio_total, 0)
       setMargenBruto(totalVtsBruto > 0 ? (totalVtsBruto - totalCmpOp) / totalVtsBruto : null)
@@ -740,40 +982,61 @@ export default function Analisis() {
 
   return (
     <div className="page">
-      <div className="page-title">Análisis</div>
+      <div className="page-title no-print">Análisis</div>
 
-      <SemaforoPub ventas={ventas} gastosPub={gastosPub} margenBruto={margenBruto} />
-
-      <div className="toggle-row" style={{ marginBottom: 16 }}>
-        {[
-          { key: '30d', label: '30 días' },
-          { key: '90d', label: '90 días' },
-          { key: 'todo', label: 'Todo' },
-        ].map(p => (
-          <button key={p.key}
-            className={`toggle-btn ${periodo === p.key ? 'active-entrada' : ''}`}
-            onClick={() => setPeriodo(p.key)}
-            style={{ fontSize: 13 }}>
-            {p.label}
-          </button>
-        ))}
+      <div className="toggle-row no-print" style={{ marginBottom: 16 }}>
+        <button className={`toggle-btn ${vista === 'tendencias' ? 'active-entrada' : ''}`}
+          onClick={() => setVista('tendencias')}>📊 Tendencias</button>
+        <button className={`toggle-btn ${vista === 'reporte' ? 'active-entrada' : ''}`}
+          onClick={() => setVista('reporte')}>📋 Reporte mensual</button>
       </div>
 
-      {ventasFiltradas.length === 0 ? (
-        <div className="card" style={{ textAlign: 'center', padding: 32, color: 'var(--muted)' }}>
-          Sin ventas en el período seleccionado
-        </div>
+      {vista === 'reporte' ? (
+        <ReporteMensual
+          ventas={ventas}
+          ordenes={ordenes}
+          compras={comprasDetalle}
+          gastosCaja={gastosCaja}
+          recetaIngredientes={recetaIngredientes}
+          insumos={insumos}
+          config={config}
+        />
       ) : (
         <>
-          <OrigenVentas ventas={ventasFiltradas} gastosPub={gastosPub} />
-          <HorasActivas ordenes={ordenes} />
-          <VentasPorDia ventas={ventasFiltradas} />
-          <TendenciaSemanal ventas={ventasFiltradas} />
+          <SemaforoPub ventas={ventas} gastosPub={gastosPub} margenBruto={margenBruto} />
+
+          <div className="toggle-row" style={{ marginBottom: 16 }}>
+            {[
+              { key: '30d', label: '30 días' },
+              { key: '90d', label: '90 días' },
+              { key: 'todo', label: 'Todo' },
+            ].map(p => (
+              <button key={p.key}
+                className={`toggle-btn ${periodo === p.key ? 'active-entrada' : ''}`}
+                onClick={() => setPeriodo(p.key)}
+                style={{ fontSize: 13 }}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          {ventasFiltradas.length === 0 ? (
+            <div className="card" style={{ textAlign: 'center', padding: 32, color: 'var(--muted)' }}>
+              Sin ventas en el período seleccionado
+            </div>
+          ) : (
+            <>
+              <OrigenVentas ventas={ventasFiltradas} gastosPub={gastosPub} />
+              <HorasActivas ordenes={ordenes} />
+              <VentasPorDia ventas={ventasFiltradas} />
+              <TendenciaSemanal ventas={ventasFiltradas} />
+            </>
+          )}
+
+          <ProyeccionDemanda ventas={ventas} recetaIngredientes={recetaIngredientes} insumos={insumos} />
+          <EvolucionCostos compras={comprasDetalle} />
         </>
       )}
-
-      <ProyeccionDemanda ventas={ventas} recetaIngredientes={recetaIngredientes} insumos={insumos} />
-      <EvolucionCostos compras={comprasDetalle} />
     </div>
   )
 }

@@ -19,12 +19,93 @@ function ConfirmModal({ mensaje, onConfirm, onCancel }) {
   )
 }
 
-function EditCompraModal({ compra, insumos, onSave, onCancel }) {
+function ProveedorModal({ proveedor, onSave, onCancel }) {
+  const [nombre, setNombre] = useState(proveedor?.nombre || '')
+  const [contacto, setContacto] = useState(proveedor?.contacto || '')
+  const [rating, setRating] = useState(proveedor?.rating || 0)
+  const [nota, setNota] = useState(proveedor?.nota || '')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleSave = async () => {
+    if (!nombre.trim()) { setError('El nombre es obligatorio'); return }
+    setSaving(true); setError('')
+    const payload = {
+      nombre: nombre.trim(),
+      contacto: contacto.trim() || null,
+      rating: rating > 0 ? rating : null,
+      nota: nota.trim() || null,
+    }
+    const { error: err } = proveedor?.id
+      ? await supabase.from('proveedores').update(payload).eq('id', proveedor.id)
+      : await supabase.from('proveedores').insert(payload)
+    setSaving(false)
+    if (err) { setError(err.message); return }
+    onSave()
+  }
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, padding:24 }}>
+      <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:14, padding:24, maxWidth:400, width:'100%' }}>
+        <div style={{ fontWeight:700, fontSize:16, color:'var(--text)', marginBottom:18 }}>
+          {proveedor?.id ? 'Editar proveedor' : 'Nuevo proveedor'}
+        </div>
+        <div className="form-group">
+          <label className="form-label">Nombre</label>
+          <input type="text" className="form-input" value={nombre}
+            placeholder="ej: Vega Central, Lider, Jumbo..." autoFocus
+            onChange={e => setNombre(e.target.value)} />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Contacto — opcional</label>
+          <input type="text" className="form-input" value={contacto}
+            placeholder="WhatsApp, IG, teléfono..."
+            onChange={e => setContacto(e.target.value)} />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Calificación</label>
+          <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+            {[1,2,3,4,5].map(n => (
+              <button key={n} type="button" onClick={() => setRating(r => r === n ? 0 : n)}
+                style={{ background:'none', border:'none', cursor:'pointer', fontSize:24, padding:2,
+                  color: n <= rating ? '#f59e0b' : 'rgba(255,255,255,0.15)' }}>
+                ★
+              </button>
+            ))}
+            {rating > 0 && (
+              <button type="button" onClick={() => setRating(0)}
+                style={{ background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:11, marginLeft:6 }}>
+                limpiar
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Nota — opcional</label>
+          <textarea className="form-input" value={nota}
+            placeholder="ej: rápido pero caro, abre 8-22..."
+            rows={2} style={{ resize:'vertical' }}
+            onChange={e => setNota(e.target.value)} />
+        </div>
+        {error && <div style={{ color:'var(--pink)', fontSize:13, marginBottom:10 }}>{error}</div>}
+        <div style={{ display:'flex', gap:10 }}>
+          <button className="btn btn-secondary" style={{ flex:1 }} onClick={onCancel}>Cancelar</button>
+          <button className="btn btn-primary" style={{ flex:1 }} onClick={handleSave} disabled={saving || !nombre.trim()}>
+            {saving ? 'Guardando...' : 'Guardar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function EditCompraModal({ compra, insumos, proveedores, onSave, onCancel }) {
   const [fecha, setFecha] = useState(compra.fecha)
   const [insumoNombre, setInsumoNombre] = useState(compra.insumo_nombre)
   const [unidad, setUnidad] = useState(compra.unidad)
   const [cantidad, setCantidad] = useState(compra.cantidad)
   const [precioTotal, setPrecioTotal] = useState(compra.precio_total)
+  const [proveedorId, setProveedorId] = useState(compra.proveedor_id || '')
   const [nota, setNota] = useState(compra.nota || '')
   const [saving, setSaving] = useState(false)
 
@@ -44,6 +125,7 @@ function EditCompraModal({ compra, insumos, onSave, onCancel }) {
       fecha, insumo_nombre: insumoNombre, unidad,
       cantidad: parseFloat(cantidad),
       precio_total: parseFloat(precioTotal),
+      proveedor_id: proveedorId || null,
       nota: nota || null
     }).eq('id', compra.id)
     setSaving(false)
@@ -80,6 +162,13 @@ function EditCompraModal({ compra, insumos, onSave, onCancel }) {
             ${costoPorUnidad} por {unidad}
           </div>
         )}
+        <div className="form-group">
+          <label className="form-label">Proveedor</label>
+          <select className="form-select" value={proveedorId} onChange={e => setProveedorId(e.target.value)}>
+            <option value="">Sin proveedor</option>
+            {proveedores.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          </select>
+        </div>
         <div className="form-group">
           <label className="form-label">Nota</label>
           <input type="text" className="form-input" value={nota} placeholder="opcional" onChange={e => setNota(e.target.value)} />
@@ -132,11 +221,175 @@ function EditStockModal({ insumo, onSave, onCancel }) {
   )
 }
 
+// ─── Histórico PPP por insumo ──────────────────────────────────────
+// Calcula la curva del costo unitario en el tiempo desde la tabla compras
+function HistoricoPPP({ compras, insumos }) {
+  const [insumoSel, setInsumoSel] = useState(null)
+
+  // Solo insumos con al menos 2 compras (para tener línea)
+  const insumosConHistorial = insumos
+    .filter(i => i.nombre !== 'ENVASE')
+    .map(i => {
+      const cmps = compras
+        .filter(c => c.insumo_nombre === i.nombre && c.tipo !== 'activo_fijo' && c.cantidad > 0)
+        .map(c => ({
+          fecha: c.fecha,
+          costo_unitario: c.precio_total / c.cantidad,
+          cantidad: c.cantidad,
+          precio_total: c.precio_total,
+        }))
+        .sort((a, b) => a.fecha.localeCompare(b.fecha))
+
+      // Variación entre primera y última compra
+      const variacion = cmps.length >= 2
+        ? (cmps[cmps.length - 1].costo_unitario - cmps[0].costo_unitario) / cmps[0].costo_unitario
+        : 0
+
+      // Variación entre las dos últimas (para alertar subidas recientes)
+      const variacionReciente = cmps.length >= 2
+        ? (cmps[cmps.length - 1].costo_unitario - cmps[cmps.length - 2].costo_unitario) / cmps[cmps.length - 2].costo_unitario
+        : 0
+
+      return {
+        nombre: i.nombre,
+        unidad: i.unidad,
+        compras: cmps,
+        ppp_actual: i.costo_ppp,
+        variacion,
+        variacionReciente,
+      }
+    })
+    .filter(x => x.compras.length > 0)
+    .sort((a, b) => Math.abs(b.variacionReciente) - Math.abs(a.variacionReciente))
+
+  if (insumosConHistorial.length === 0) {
+    return (
+      <div className="card" style={{ textAlign:'center', padding:32 }}>
+        <div style={{ color:'var(--muted)', fontSize:14, marginBottom:6 }}>Sin histórico aún</div>
+        <div style={{ color:'var(--muted)', fontSize:12 }}>Registra compras para ver cómo varían los precios.</div>
+      </div>
+    )
+  }
+
+  // Detalle de un insumo seleccionado
+  if (insumoSel) {
+    const ins = insumosConHistorial.find(x => x.nombre === insumoSel)
+    if (!ins) { setInsumoSel(null); return null }
+    const min = Math.min(...ins.compras.map(c => c.costo_unitario))
+    const max = Math.max(...ins.compras.map(c => c.costo_unitario))
+    const range = max - min || 1
+
+    return (
+      <div>
+        <button className="btn btn-secondary btn-sm" onClick={() => setInsumoSel(null)} style={{ marginBottom:12 }}>
+          ← Volver
+        </button>
+
+        <div className="card">
+          <div style={{ fontFamily:'Orbitron', fontSize:15, color:'var(--cyan)', marginBottom:4 }}>{ins.nombre}</div>
+          <div style={{ fontSize:11, color:'var(--muted)', marginBottom:14 }}>
+            {ins.compras.length} compras · variación total {(ins.variacion * 100).toFixed(1)}%
+          </div>
+
+          {/* Mini-curva visual */}
+          <div style={{ height:80, position:'relative', background:'rgba(255,255,255,0.02)', borderRadius:8, padding:10, marginBottom:14 }}>
+            <svg viewBox={`0 0 ${ins.compras.length * 40} 60`} preserveAspectRatio="none"
+              style={{ width:'100%', height:'100%' }}>
+              <polyline
+                fill="none"
+                stroke="var(--cyan)"
+                strokeWidth="2"
+                points={ins.compras.map((c, i) => {
+                  const x = i * 40 + 20
+                  const y = 60 - ((c.costo_unitario - min) / range) * 50 - 5
+                  return `${x},${y}`
+                }).join(' ')}
+              />
+              {ins.compras.map((c, i) => {
+                const x = i * 40 + 20
+                const y = 60 - ((c.costo_unitario - min) / range) * 50 - 5
+                return <circle key={i} cx={x} cy={y} r="3" fill="var(--cyan)" />
+              })}
+            </svg>
+          </div>
+
+          {/* Lista detallada */}
+          {ins.compras.slice().reverse().map((c, i, arr) => {
+            const prev = i < arr.length - 1 ? arr[i + 1] : null
+            const delta = prev ? (c.costo_unitario - prev.costo_unitario) / prev.costo_unitario : 0
+            const color = delta > 0.10 ? 'var(--pink)' : delta < -0.05 ? 'var(--green)' : 'var(--muted)'
+            return (
+              <div className="list-item" key={i}>
+                <div>
+                  <div className="list-item-name" style={{ fontSize:14 }}>{c.fecha}</div>
+                  <div className="list-item-sub">
+                    {c.cantidad} {ins.unidad} · {formatCLP(c.precio_total)}
+                  </div>
+                </div>
+                <div className="list-item-right">
+                  <div className="list-item-value">${c.costo_unitario.toFixed(2)}/{ins.unidad}</div>
+                  {prev && (
+                    <div style={{ fontSize:11, color, fontWeight:600 }}>
+                      {delta >= 0 ? '+' : ''}{(delta * 100).toFixed(1)}%
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
+  // Listado general
+  return (
+    <div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.6 }}>
+        Cómo cambió el costo de cada insumo. Toca uno para ver el detalle. Los rojos subieron en la última compra.
+      </div>
+      <div className="card">
+        {insumosConHistorial.map(ins => {
+          const colorReciente = ins.variacionReciente > 0.10 ? 'var(--pink)'
+            : ins.variacionReciente > 0 ? '#f59e0b'
+            : ins.variacionReciente < -0.05 ? 'var(--green)'
+            : 'var(--muted)'
+          return (
+            <div className="list-item" key={ins.nombre}
+              onClick={() => setInsumoSel(ins.nombre)}
+              style={{ cursor:'pointer' }}>
+              <div>
+                <div className="list-item-name">{ins.nombre}</div>
+                <div className="list-item-sub">
+                  {ins.compras.length} compras · actual ${parseFloat(ins.ppp_actual || 0).toFixed(2)}/{ins.unidad}
+                </div>
+              </div>
+              <div className="list-item-right">
+                {ins.compras.length >= 2 ? (
+                  <>
+                    <div style={{ fontSize:13, fontWeight:700, color: colorReciente }}>
+                      {ins.variacionReciente >= 0 ? '+' : ''}{(ins.variacionReciente * 100).toFixed(1)}%
+                    </div>
+                    <div className="list-item-muted">última compra</div>
+                  </>
+                ) : (
+                  <div className="list-item-muted">solo 1 compra</div>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export default function Compras() {
   const [insumos, setInsumos] = useState([])
   const [compras, setCompras] = useState([])
+  const [proveedores, setProveedores] = useState([])
   const fechaHoy = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` }
-  const [form, setForm] = useState({ fecha: '', insumo_nombre: '', unidad: 'ml', cantidad: '', precio_total: '', nota: '' })
+  const [form, setForm] = useState({ fecha: '', insumo_nombre: '', unidad: 'ml', cantidad: '', precio_total: '', proveedor_id: '', nota: '' })
   const [esActivo, setEsActivo] = useState(false)
   const [activoForm, setActivoForm] = useState({ fecha: '', descripcion: '', precio: '', nota: '' })
   const [toast, setToast] = useState('')
@@ -145,6 +398,8 @@ export default function Compras() {
   const [confirmar, setConfirmar] = useState(null)
   const [editandoStock, setEditandoStock] = useState(null)
   const [editandoCompra, setEditandoCompra] = useState(null)
+  const [editandoProveedor, setEditandoProveedor] = useState(null) // null | 'nuevo' | proveedor
+  const [confirmarProveedor, setConfirmarProveedor] = useState(null)
   const [fabricandoGoma, setFabricandoGoma] = useState(false)
   const [mlGoma, setMlGoma] = useState('')
 
@@ -156,12 +411,14 @@ export default function Compras() {
   }, [])
 
   async function loadData() {
-    const [{ data: ins }, { data: cmp }] = await Promise.all([
+    const [{ data: ins }, { data: cmp }, { data: prov }] = await Promise.all([
       supabase.from('insumos').select('*').order('nombre'),
-      supabase.from('compras').select('*').order('fecha', { ascending: false })
+      supabase.from('compras').select('*').order('fecha', { ascending: false }),
+      supabase.from('proveedores').select('*').order('nombre'),
     ])
     setInsumos(ins || [])
     setCompras(cmp || [])
+    setProveedores(prov || [])
   }
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2500) }
@@ -181,16 +438,24 @@ export default function Compras() {
       unidad: form.unidad,
       cantidad: parseFloat(form.cantidad),
       precio_total: parseFloat(form.precio_total),
+      proveedor_id: form.proveedor_id || null,
       nota: form.nota || null,
       es_inversion: false,
       tipo: 'insumo',
     })
     if (!error) {
       showToast('Compra registrada · PPP actualizado')
-      setForm(f => ({ ...f, insumo_nombre: '', cantidad: '', precio_total: '', nota: '' }))
+      setForm(f => ({ ...f, insumo_nombre: '', cantidad: '', precio_total: '', proveedor_id: '', nota: '' }))
       loadData()
     }
     setLoading(false)
+  }
+
+  const handleDeleteProveedor = async (prov) => {
+    await supabase.from('proveedores').delete().eq('id', prov.id)
+    setConfirmarProveedor(null)
+    showToast('Proveedor eliminado')
+    loadData()
   }
 
   const handleSubmitActivo = async (e) => {
@@ -284,8 +549,28 @@ export default function Compras() {
         <EditCompraModal
           compra={editandoCompra}
           insumos={insumos}
+          proveedores={proveedores}
           onSave={() => { setEditandoCompra(null); showToast('Compra actualizada ✓'); loadData() }}
           onCancel={() => setEditandoCompra(null)}
+        />
+      )}
+      {editandoProveedor && (
+        <ProveedorModal
+          proveedor={editandoProveedor === 'nuevo' ? null : editandoProveedor}
+          onSave={() => {
+            const fueNuevo = editandoProveedor === 'nuevo'
+            setEditandoProveedor(null)
+            showToast(fueNuevo ? 'Proveedor creado ✓' : 'Proveedor actualizado ✓')
+            loadData()
+          }}
+          onCancel={() => setEditandoProveedor(null)}
+        />
+      )}
+      {confirmarProveedor && (
+        <ConfirmModal
+          mensaje={`¿Eliminar proveedor "${confirmarProveedor.nombre}"? Las compras asociadas no se borran.`}
+          onConfirm={() => handleDeleteProveedor(confirmarProveedor)}
+          onCancel={() => setConfirmarProveedor(null)}
         />
       )}
       <div className="page-title">Compras</div>
@@ -293,6 +578,8 @@ export default function Compras() {
       <div className="toggle-row">
         <button className={`toggle-btn ${tab === 'registrar' ? 'active-entrada' : ''}`} onClick={() => setTab('registrar')}>Registrar</button>
         <button className={`toggle-btn ${tab === 'ppp' ? 'active-entrada' : ''}`} onClick={() => setTab('ppp')}>PPP</button>
+        <button className={`toggle-btn ${tab === 'historico' ? 'active-entrada' : ''}`} onClick={() => setTab('historico')}>Histórico</button>
+        <button className={`toggle-btn ${tab === 'proveedores' ? 'active-entrada' : ''}`} onClick={() => setTab('proveedores')}>Proveedores</button>
         <button className={`toggle-btn ${tab === 'stock' ? 'active-entrada' : ''}`} onClick={() => setTab('stock')}>Stock</button>
       </div>
 
@@ -341,9 +628,22 @@ export default function Compras() {
                   </div>
                 )}
                 <div className="form-group">
+                  <label className="form-label">Proveedor — opcional</label>
+                  <div style={{ display:'flex', gap:8 }}>
+                    <select className="form-select" value={form.proveedor_id} style={{ flex:1 }}
+                      onChange={e => setForm(f => ({ ...f, proveedor_id: e.target.value }))}>
+                      <option value="">Sin proveedor</option>
+                      {proveedores.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                    </select>
+                    <button type="button" onClick={() => setEditandoProveedor('nuevo')}
+                      style={{ background:'rgba(0,180,180,0.08)', border:'1px solid rgba(0,180,180,0.3)', borderRadius:8, color:'var(--cyan)', padding:'0 14px', cursor:'pointer', fontSize:18, fontWeight:700 }}
+                      title="Nuevo proveedor">+</button>
+                  </div>
+                </div>
+                <div className="form-group">
                   <label className="form-label">Nota — opcional</label>
                   <input type="text" className="form-input" value={form.nota}
-                    placeholder="ej: Unimarc, oferta..."
+                    placeholder="ej: oferta, comentario..."
                     onChange={e => setForm(f => ({ ...f, nota: e.target.value }))} />
                 </div>
                 <button type="submit" className="btn btn-primary" disabled={loading}>
@@ -454,6 +754,78 @@ export default function Compras() {
             </div>
           ))}
         </div>
+      )}
+
+      {tab === 'historico' && (
+        <HistoricoPPP compras={compras} insumos={insumos} />
+      )}
+
+      {tab === 'proveedores' && (
+        <>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+            <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6, flex:1 }}>
+              Registra a quién le compras. Útil para acordarte de contactos y comparar precios.
+            </div>
+            <button className="btn btn-primary btn-sm" onClick={() => setEditandoProveedor('nuevo')}
+              style={{ marginLeft:10 }}>+ Nuevo</button>
+          </div>
+
+          {proveedores.length === 0 ? (
+            <div className="card" style={{ textAlign:'center', padding:32 }}>
+              <div style={{ color:'var(--muted)', fontSize:14, marginBottom:6 }}>Sin proveedores registrados</div>
+              <div style={{ color:'var(--muted)', fontSize:12 }}>Toca "Nuevo" para agregar el primero.</div>
+            </div>
+          ) : (
+            <div className="card">
+              {proveedores.map(p => {
+                const comprasProv = compras.filter(c => c.proveedor_id === p.id)
+                const totalGastado = comprasProv.reduce((s, c) => s + (c.precio_total || 0), 0)
+                return (
+                  <div className="list-item" key={p.id}>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+                        <div className="list-item-name">{p.nombre}</div>
+                        {p.rating > 0 && (
+                          <div style={{ fontSize:11, color:'#f59e0b' }}>
+                            {'★'.repeat(p.rating)}<span style={{ color:'rgba(255,255,255,0.15)' }}>{'★'.repeat(5 - p.rating)}</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="list-item-sub">
+                        {p.contacto || '—'} · {comprasProv.length} compra{comprasProv.length !== 1 ? 's' : ''}
+                      </div>
+                      {p.nota && <div className="list-item-sub" style={{ color:'var(--muted)', fontStyle:'italic' }}>{p.nota}</div>}
+                    </div>
+                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                      {totalGastado > 0 && (
+                        <div className="list-item-right">
+                          <div className="list-item-value" style={{ fontSize:13 }}>{formatCLP(totalGastado)}</div>
+                          <div className="list-item-muted">acumulado</div>
+                        </div>
+                      )}
+                      <button onClick={() => setEditandoProveedor(p)}
+                        style={{ background:'none', border:'none', cursor:'pointer', color:'var(--cyan)', padding:4 }}
+                        title="Editar">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                        </svg>
+                      </button>
+                      <button onClick={() => setConfirmarProveedor(p)}
+                        style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)', padding:4 }}
+                        title="Eliminar">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>
+                          <path d="M9 6V4h6v2"/>
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </>
       )}
 
       {tab === 'stock' && (
