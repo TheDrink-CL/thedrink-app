@@ -38,38 +38,79 @@ function EditRecetaModal({ receta, ingredientes, insumos, config, onSave, onCanc
   )
   const margen = precio > 0 ? (precio - costo) / precio : 0
 
+  // Detecta si la lista de ingredientes cambió respecto del original
+  const ingredientesCambiaron = () => {
+    const originales = ingredientes.filter(i => i.insumo_nombre !== 'ENVASE')
+    if (originales.length !== ings.length) return true
+    // Comparar ordenado por insumo_nombre para evitar falsos positivos por reordenamiento
+    const sortKey = (a, b) => (a.insumo_nombre || '').localeCompare(b.insumo_nombre || '')
+    const orig = [...originales].sort(sortKey)
+    const nuev = [...ings].sort(sortKey)
+    for (let i = 0; i < orig.length; i++) {
+      if (orig[i].insumo_nombre !== nuev[i].insumo_nombre) return true
+      if (parseFloat(orig[i].cantidad) !== parseFloat(nuev[i].cantidad)) return true
+      if ((orig[i].unidad || 'ml') !== (nuev[i].unidad || 'ml')) return true
+    }
+    return false
+  }
+
   const handleSave = async () => {
     const ingsValidos = ings.filter(i => i.insumo_nombre && parseFloat(i.cantidad) > 0)
     if (ingsValidos.length === 0) { setError('Agrega al menos un ingrediente válido'); return }
     setSaving(true)
     setError('')
 
-    // Actualizar precio_venta en receta
+    // ── 1. Actualizar precio_venta en receta ───────────────────────────────
     const precioNum = parseFloat(precio) || 9000
     const matchCol = receta.id ? 'id' : 'nombre'
     const matchVal = receta.id || receta.nombre
-    const { error: errPrecio } = await supabase
+    const { data: updated, error: errPrecio } = await supabase
       .from('recetas')
       .update({ precio_venta: precioNum })
       .eq(matchCol, matchVal)
-    if (errPrecio) { setError('Error actualizando precio: ' + errPrecio.message); setSaving(false); return }
+      .select()  // ← devuelve filas afectadas para confirmar el update
+    if (errPrecio) {
+      setError('Error actualizando precio: ' + errPrecio.message)
+      setSaving(false); return
+    }
+    if (!updated || updated.length === 0) {
+      // Caso típico: el update no encontró la receta por ese match.
+      // Probamos un fallback por nombre antes de rendirnos.
+      const { data: retry, error: errRetry } = await supabase
+        .from('recetas')
+        .update({ precio_venta: precioNum })
+        .eq('nombre', receta.nombre)
+        .select()
+      if (errRetry || !retry || retry.length === 0) {
+        setError('No se pudo actualizar el precio. Verifica que la receta "' + receta.nombre + '" exista en Supabase.')
+        setSaving(false); return
+      }
+    }
 
-    // Eliminar ingredientes existentes e insertar los nuevos
-    const { error: errDel } = await supabase
-      .from('receta_ingredientes')
-      .delete()
-      .eq('receta_nombre', receta.nombre)
-    if (errDel) { setError('Error eliminando ingredientes: ' + errDel.message); setSaving(false); return }
+    // ── 2. Solo regenerar ingredientes si cambiaron ────────────────────────
+    if (ingredientesCambiaron()) {
+      const { error: errDel } = await supabase
+        .from('receta_ingredientes')
+        .delete()
+        .eq('receta_nombre', receta.nombre)
+      if (errDel) {
+        setError('Error eliminando ingredientes: ' + errDel.message)
+        setSaving(false); return
+      }
 
-    const { error: errIng } = await supabase.from('receta_ingredientes').insert(
-      ingsValidos.map(i => ({
-        receta_nombre: receta.nombre,
-        insumo_nombre: i.insumo_nombre,
-        cantidad: parseFloat(i.cantidad) || 0,
-        unidad: i.unidad || 'ml',
-      }))
-    )
-    if (errIng) { setError('Error guardando ingredientes: ' + errIng.message); setSaving(false); return }
+      const { error: errIng } = await supabase.from('receta_ingredientes').insert(
+        ingsValidos.map(i => ({
+          receta_nombre: receta.nombre,
+          insumo_nombre: i.insumo_nombre,
+          cantidad: parseFloat(i.cantidad) || 0,
+          unidad: i.unidad || 'ml',
+        }))
+      )
+      if (errIng) {
+        setError('Error guardando ingredientes: ' + errIng.message)
+        setSaving(false); return
+      }
+    }
 
     setSaving(false)
     onSave()
