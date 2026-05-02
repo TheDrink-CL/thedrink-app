@@ -45,15 +45,20 @@ function EditRecetaModal({ receta, ingredientes, insumos, config, onSave, onCanc
     setError('')
 
     // Actualizar precio_venta en receta
-    await supabase.from('recetas').update({ precio_venta: parseFloat(precio) || 9000 }).eq('nombre', receta.nombre)
+    const precioNum = parseFloat(precio) || 9000
+    const matchCol = receta.id ? 'id' : 'nombre'
+    const matchVal = receta.id || receta.nombre
+    const { error: errPrecio } = await supabase
+      .from('recetas')
+      .update({ precio_venta: precioNum })
+      .eq(matchCol, matchVal)
+    if (errPrecio) { setError('Error actualizando precio: ' + errPrecio.message); setSaving(false); return }
 
     // Eliminar ingredientes existentes e insertar los nuevos
-    const { data: deleted, error: errDel } = await supabase
+    const { error: errDel } = await supabase
       .from('receta_ingredientes')
       .delete()
       .eq('receta_nombre', receta.nombre)
-      .select()
-    console.log('DELETE receta_nombre:', JSON.stringify(receta.nombre), '→ eliminados:', deleted?.length, 'error:', errDel)
     if (errDel) { setError('Error eliminando ingredientes: ' + errDel.message); setSaving(false); return }
 
     const { error: errIng } = await supabase.from('receta_ingredientes').insert(
