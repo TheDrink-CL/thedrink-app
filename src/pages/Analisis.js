@@ -764,6 +764,7 @@ function ReporteMensual({ ventas, ordenes, compras, gastosCaja, recetaIngredient
   const litrosFaltan = Math.max(0, litrosEquilibrio - litrosMes)
 
   // Etiqueta del mes
+  const [yMes, mMes] = mesSel.split('-')
   const nombreMes = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'][parseInt(mMes, 10) - 1]
   const labelMesSel = `${nombreMes} ${yMes}`
 
