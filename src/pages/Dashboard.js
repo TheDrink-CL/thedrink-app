@@ -1,29 +1,124 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { formatCLP, formatPct } from '../lib/calculos'
+import { calcularCostoReceta, formatCLP, formatPct } from '../lib/calculos'
+
+// ─── Comparativo: volumen vs rentabilidad ────────────────────────────────────
+function RecetasComparativo({ topVolumen, topGanancia }) {
+  const [tab, setTab] = useState('volumen')
+
+  if (!topVolumen || topVolumen.length === 0) return null
+
+  const items = tab === 'volumen' ? topVolumen : topGanancia
+  const maxVal = tab === 'volumen'
+    ? Math.max(...(topVolumen || []).map(([, d]) => d.litros), 1)
+    : Math.max(...(topGanancia || []).map(([, d]) => d.ganancia), 1)
+
+  // Detectar si la receta top por volumen es diferente a la top por ganancia
+  const topVol = topVolumen?.[0]?.[0]
+  const topGan = topGanancia?.[0]?.[0]
+  const hayDivergencia = topVol && topGan && topVol !== topGan
+
+  return (
+    <div className="card">
+      <div className="card-title">Recetas</div>
+
+      {/* Alerta de divergencia */}
+      {hayDivergencia && (
+        <div style={{
+          background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)',
+          borderRadius: 8, padding: '8px 12px', marginBottom: 12, fontSize: 12, color: '#f59e0b', lineHeight: 1.6
+        }}>
+          ⚡ <strong>{topGan}</strong> deja más ganancia que <strong>{topVol}</strong>, aunque se vende menos litros.
+          Considera priorizar su producción.
+        </div>
+      )}
+
+      {/* Toggle */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+        {[
+          { key: 'volumen', label: 'Por litros' },
+          { key: 'ganancia', label: 'Por ganancia' },
+        ].map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)}
+            style={{
+              flex: 1, padding: '6px 0', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+              background: tab === t.key ? 'var(--cyan)' : 'rgba(255,255,255,0.06)',
+              color: tab === t.key ? '#000' : 'var(--muted)',
+              transition: 'all 0.2s'
+            }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Lista */}
+      {items?.map(([nombre, d], i) => {
+        const val = tab === 'volumen' ? d.litros : d.ganancia
+        const pct = maxVal > 0 ? val / maxVal : 0
+        const margenColor = d.margen >= 0.65 ? 'var(--green)' : d.margen >= 0.50 ? 'var(--cyan)' : 'var(--pink)'
+        return (
+          <div key={nombre} style={{ marginBottom: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{
+                  width: 18, height: 18, borderRadius: '50%', background: i === 0 ? 'var(--cyan)' : 'rgba(255,255,255,0.08)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 10, fontWeight: 700, color: i === 0 ? '#000' : 'var(--muted)', flexShrink: 0
+                }}>{i + 1}</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-strong)' }}>{nombre}</span>
+              </div>
+              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: tab === 'volumen' ? 'var(--text)' : 'var(--green)' }}>
+                  {tab === 'volumen' ? `${d.litros}L` : formatCLP(d.ganancia)}
+                </div>
+                {d.margen > 0 && (
+                  <div style={{ fontSize: 11, color: margenColor }}>{formatPct(d.margen)}</div>
+                )}
+              </div>
+            </div>
+            <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 4, height: 5, overflow: 'hidden' }}>
+              <div style={{
+                height: '100%', borderRadius: 4, width: `${pct * 100}%`,
+                background: i === 0
+                  ? (tab === 'volumen' ? 'linear-gradient(90deg,var(--cyan),#00e5e5)' : 'linear-gradient(90deg,var(--green),#4ade80)')
+                  : 'rgba(255,255,255,0.15)',
+                transition: 'width 0.4s'
+              }} />
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 export default function Dashboard() {
   const [data, setData] = useState(null)
   const [ventas, setVentas] = useState([])
   const [alertasStock, setAlertasStock] = useState([])
   const [transferenciasMes, setTransferenciasMes] = useState(0)
+  const [limiteTransferencias, setLimiteTransferencias] = useState(50)
   const [loading, setLoading] = useState(true)
-
-  const LIMITE_TRANSFERENCIAS = 50
 
   useEffect(() => {
     async function load() {
-      const [{ data: cfg }, { data: vts }, { data: cja }, { data: cmp }, { data: ins }, { data: ordenes }] = await Promise.all([
+      const [{ data: cfg }, { data: vts }, { data: cja }, { data: cmp }, { data: ins }, { data: ordenes }, { data: recIng }, { data: insumosConPPP }] = await Promise.all([
         supabase.from('config').select('*'),
         supabase.from('ventas').select('*').order('fecha', { ascending: false }),
         supabase.from('caja').select('*'),
         supabase.from('compras').select('precio_total, es_inversion, tipo'),
         supabase.from('insumos').select('nombre, stock_actual, stock_minimo, unidad'),
         supabase.from('ordenes').select('id, fecha, medio_pago, cliente_nombre'),
+        supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad, unidad'),
+        supabase.from('insumos').select('nombre, costo_ppp'),
       ])
 
       const config = {}
       cfg?.forEach(c => { config[c.clave] = c.valor })
+
+      // Límite de transferencias desde config, fallback a 50
+      const limiteXfer = parseInt(config.limite_transferencias) || 50
+      setLimiteTransferencias(limiteXfer)
 
       // Inversión: solo capital de trabajo (es_inversion=true), excluye activos fijos (tipo='activo_fijo')
       const inversion = cmp?.reduce((s, c) =>
@@ -34,6 +129,22 @@ export default function Dashboard() {
         c.tipo === 'activo_fijo' ? s + c.precio_total : s, 0) || 0
       const ingresoTotal = vts?.reduce((s, v) => s + (v.litros * v.precio_venta), 0) || 0
       const litrosTotales = vts?.reduce((s, v) => s + v.litros, 0) || 0
+
+      // ── Costo real por receta usando PPP de insumos ──────────────────────
+      const merma = parseFloat(config.merma_pct) || 0.08
+      const costoEnvase = parseFloat(config.costo_envase) || 794.6
+      // Mapa { receta_nombre → costo_por_litro }
+      const costoPorReceta = {}
+      const recetasUnicas = [...new Set((recIng || []).map(i => i.receta_nombre))]
+      recetasUnicas.forEach(nombre => {
+        const ings = (recIng || []).filter(i => i.receta_nombre === nombre && i.insumo_nombre !== 'ENVASE')
+        costoPorReceta[nombre] = calcularCostoReceta(ings, insumosConPPP || [], merma, costoEnvase)
+      })
+      // Costo total acumulado de todas las ventas (usando PPP real)
+      const costoTotalReal = (vts || []).reduce((s, v) => {
+        const costoUnitario = costoPorReceta[v.receta_nombre] ?? 0
+        return s + costoUnitario * v.litros
+      }, 0)
 
       // Saldo caja real
       const totalVentas = vts?.reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0) || 0
@@ -81,15 +192,26 @@ export default function Dashboard() {
         .sort((a, b) => b.pedidos - a.pedidos)
         .slice(0, 3)
 
-      // Top recetas
+      // Top recetas — con costo real, margen y ganancia por litro
       const porReceta = {}
       vts?.forEach(v => {
-        if (!porReceta[v.receta_nombre]) porReceta[v.receta_nombre] = { litros: 0, ingreso: 0 }
+        if (!porReceta[v.receta_nombre]) porReceta[v.receta_nombre] = { litros: 0, ingreso: 0, costo: 0 }
         porReceta[v.receta_nombre].litros += v.litros
         porReceta[v.receta_nombre].ingreso += v.litros * v.precio_venta
+        porReceta[v.receta_nombre].costo += (costoPorReceta[v.receta_nombre] ?? 0) * v.litros
+      })
+      // Enriquecer con ganancia y margen
+      Object.values(porReceta).forEach(r => {
+        r.ganancia = r.ingreso - r.costo
+        r.margen = r.ingreso > 0 ? r.ganancia / r.ingreso : 0
+        r.gananciaPorLitro = r.litros > 0 ? r.ganancia / r.litros : 0
       })
       const topRecetas = Object.entries(porReceta)
         .sort((a, b) => b[1].litros - a[1].litros)
+        .slice(0, 5)
+      // Top por ganancia (puede diferir del top por volumen)
+      const topPorGanancia = Object.entries(porReceta)
+        .sort((a, b) => b[1].ganancia - a[1].ganancia)
         .slice(0, 5)
 
       // Alertas de stock
@@ -107,13 +229,13 @@ export default function Dashboard() {
       setTransferenciasMes(transferencias)
 
       setData({
-        inversion, ingresoTotal, litrosTotales, saldoCaja, ingresoMes,
+        inversion, ingresoTotal, litrosTotales, costoTotalReal, saldoCaja, ingresoMes,
         ticketPromedio, ticketMediana, totalOrdenes,
         clientesRecurrentes: clientesRecurrentes.length,
         totalClientesNombrados, pctRecurrentes, topRecurrentes,
-        totalActivosFijos,
+        totalActivosFijos, costoPorReceta,
       })
-      setVentas({ topRecetas, recientes: vts?.slice(0, 5) || [] })
+      setVentas({ topRecetas, topPorGanancia, recientes: vts?.slice(0, 5) || [] })
       setLoading(false)
     }
     load()
@@ -121,7 +243,8 @@ export default function Dashboard() {
 
   if (loading) return <div className="loading">Cargando...</div>
 
-  const margenPct = data.ingresoTotal > 0 ? (data.ingresoTotal - data.litrosTotales * 3128) / data.ingresoTotal : 0
+  // Margen calculado con costo real por PPP (no hardcodeado)
+  const margenPct = data.ingresoTotal > 0 ? (data.ingresoTotal - data.costoTotalReal) / data.ingresoTotal : 0
   const roi = data.inversion > 0 ? (data.ingresoTotal * margenPct) / data.inversion : 0
 
   return (
@@ -150,8 +273,8 @@ export default function Dashboard() {
 
       {/* Alerta transferencias mensuales */}
       {(() => {
-        const pct = transferenciasMes / LIMITE_TRANSFERENCIAS
-        const restantes = LIMITE_TRANSFERENCIAS - transferenciasMes
+        const pct = transferenciasMes / limiteTransferencias
+        const restantes = limiteTransferencias - transferenciasMes
         const color = pct >= 1 ? 'var(--pink)' : pct >= 0.8 ? '#f59e0b' : 'var(--cyan)'
         const bg = pct >= 1 ? 'rgba(196,0,90,0.08)' : pct >= 0.8 ? 'rgba(245,158,11,0.08)' : 'rgba(0,180,180,0.06)'
         const border = pct >= 1 ? 'rgba(196,0,90,0.35)' : pct >= 0.8 ? 'rgba(245,158,11,0.35)' : 'rgba(0,180,180,0.2)'
@@ -162,7 +285,7 @@ export default function Dashboard() {
                 {pct >= 1 ? '🚫 Límite alcanzado' : pct >= 0.8 ? '⚠ Cerca del límite' : '🏦 Transferencias del mes'}
               </div>
               <div style={{ fontSize: 18, fontWeight: 800, color }}>
-                {transferenciasMes}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--muted)' }}>/{LIMITE_TRANSFERENCIAS}</span>
+                {transferenciasMes}<span style={{ fontSize: 12, fontWeight: 400, color: 'var(--muted)' }}>/{limiteTransferencias}</span>
               </div>
             </div>
             <div style={{ height: 6, background: 'rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden', marginBottom: 6 }}>
@@ -282,20 +405,11 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Comparativo rentabilidad vs volumen */}
+      <RecetasComparativo topVolumen={ventas.topRecetas} topGanancia={ventas.topPorGanancia} />
+
       <div className="card">
-        <div className="card-title">Top recetas (litros)</div>
-        {ventas.topRecetas?.map(([nombre, d]) => (
-          <div className="list-item" key={nombre}>
-            <div>
-              <div className="list-item-name">{nombre}</div>
-              <div className="list-item-sub">{formatCLP(d.ingreso)}</div>
-            </div>
-            <div className="list-item-right">
-              <div className="list-item-value">{d.litros}L</div>
-            </div>
-          </div>
-        ))}
-      </div>
+        <div className="card-title">Últimas ventas</div>
 
       <div className="card">
         <div className="card-title">Últimas ventas</div>

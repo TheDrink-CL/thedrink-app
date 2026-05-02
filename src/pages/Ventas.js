@@ -2,6 +2,115 @@ import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatCLP } from '../lib/calculos'
 
+// ─── Modal ticket de pedido ──────────────────────────────────────────────────
+function TicketModal({ orden, onCerrar }) {
+  const total = (orden.ventas || []).reduce((s, v) => s + (v.litros||1) * (v.precio_venta||0), 0)
+  const neto = total - (orden.delivery || 0)
+
+  const medioPagoLabel = {
+    transferencia: '🏦 Transferencia', debito: '💳 Débito',
+    credito: '💳 Crédito', efectivo: '💵 Efectivo'
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.82)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 300, padding: 24
+    }}>
+      <div style={{
+        background: '#0e0e12', border: '1px solid rgba(0,180,180,0.3)',
+        borderRadius: 18, padding: 28, maxWidth: 340, width: '100%',
+        boxShadow: '0 0 60px rgba(0,180,180,0.08)'
+      }}>
+        {/* Cabecera */}
+        <div style={{ textAlign: 'center', marginBottom: 20 }}>
+          <div style={{ fontFamily: 'Orbitron, monospace', fontSize: 22, fontWeight: 900, color: 'var(--cyan)', letterSpacing: 2, marginBottom: 4 }}>
+            THE DRINK
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 1 }}>
+            {orden.fecha}{orden.hora ? ` · ${orden.hora}` : ''}
+          </div>
+          {orden.cliente_nombre && (
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-strong)', marginTop: 6 }}>
+              {orden.cliente_nombre}
+            </div>
+          )}
+        </div>
+
+        {/* Divisor */}
+        <div style={{ borderTop: '1px dashed rgba(255,255,255,0.12)', marginBottom: 16 }} />
+
+        {/* Items */}
+        {(orden.ventas || []).map((v, i) => (
+          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-strong)' }}>{v.receta_nombre}</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>{v.litros}L × {formatCLP(v.precio_venta)}</div>
+            </div>
+            <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)' }}>
+              {formatCLP(v.litros * v.precio_venta)}
+            </div>
+          </div>
+        ))}
+
+        {/* Divisor */}
+        <div style={{ borderTop: '1px dashed rgba(255,255,255,0.12)', marginTop: 12, marginBottom: 12 }} />
+
+        {/* Totales */}
+        {orden.delivery > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: 13, color: 'var(--muted)' }}>
+            <span>Subtotal</span>
+            <span>{formatCLP(total)}</span>
+          </div>
+        )}
+        {orden.delivery > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: 13, color: 'var(--muted)' }}>
+            <span>Uber Eats</span>
+            <span style={{ color: 'var(--pink)' }}>-{formatCLP(orden.delivery)}</span>
+          </div>
+        )}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>TOTAL</span>
+          <span style={{ fontWeight: 900, fontSize: 22, color: 'var(--green)' }}>
+            {formatCLP(orden.delivery > 0 ? neto : total)}
+          </span>
+        </div>
+
+        {/* Medio de pago */}
+        {orden.medio_pago && (
+          <div style={{ textAlign: 'center', marginTop: 12, fontSize: 12, color: 'var(--muted)' }}>
+            {medioPagoLabel[orden.medio_pago] || orden.medio_pago}
+          </div>
+        )}
+
+        {orden.nota && (
+          <div style={{ textAlign: 'center', marginTop: 6, fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>
+            {orden.nota}
+          </div>
+        )}
+
+        {/* Divisor */}
+        <div style={{ borderTop: '1px dashed rgba(255,255,255,0.12)', marginTop: 16, marginBottom: 16 }} />
+
+        <div style={{ textAlign: 'center', fontSize: 10, color: 'rgba(255,255,255,0.2)', letterSpacing: 1 }}>
+          🍹 GRACIAS POR TU PEDIDO
+        </div>
+
+        <button onClick={onCerrar}
+          style={{
+            marginTop: 20, width: '100%', background: 'rgba(0,180,180,0.12)',
+            border: '1px solid rgba(0,180,180,0.3)', borderRadius: 10,
+            color: 'var(--cyan)', padding: '10px 0', cursor: 'pointer',
+            fontSize: 13, fontWeight: 600
+          }}>
+          Cerrar
+        </button>
+      </div>
+    </div>
+  )
+}
+
 const DESCUENTO_ENVASE = 1000
 
 const fechaHoy = () => {
@@ -254,6 +363,12 @@ export default function Ventas() {
   const [loading, setLoading] = useState(false)
   const [confirmar, setConfirmar] = useState(null)
   const [editando, setEditando] = useState(null)
+  const [ticket, setTicket] = useState(null)
+
+  // Filtros del historial
+  const [filtroCliente, setFiltroCliente] = useState('')
+  const [filtroPeriodo, setFiltroPeriodo] = useState('todo') // 'todo' | '7d' | '30d' | '90d'
+  const [filtroReceta, setFiltroReceta] = useState('')
 
   // Formulario de orden nueva
   const [fecha, setFecha] = useState(fechaHoy())
@@ -456,6 +571,10 @@ export default function Ventas() {
         />
       )}
 
+      {ticket && (
+        <TicketModal orden={ticket} onCerrar={() => setTicket(null)} />
+      )}
+
       <div className="page-title">Registrar pedido</div>
       <form onSubmit={handleSubmit}>
         <div className="card">
@@ -580,10 +699,73 @@ export default function Ventas() {
         </div>
       </form>
 
-      <div className="section-divider">Historial de pedidos ({ordenes.length})</div>
-      <div className="card">
-        {ordenes.length === 0 && <div style={{ color:'var(--muted)', textAlign:'center', padding:20 }}>Sin pedidos</div>}
-        {ordenes.map(o => {
+      {/* ── Filtros del historial ── */}
+      {ordenes.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          {/* Búsqueda por cliente */}
+          <input
+            type="text"
+            className="form-input"
+            value={filtroCliente}
+            placeholder="Buscar cliente o receta..."
+            onChange={e => setFiltroCliente(e.target.value)}
+            style={{ marginBottom: 8 }}
+          />
+          {/* Filtro período */}
+          <div className="toggle-row">
+            {[
+              { key: 'todo', label: 'Todo' },
+              { key: '7d',   label: '7 días' },
+              { key: '30d',  label: '30 días' },
+              { key: '90d',  label: '90 días' },
+            ].map(p => (
+              <button key={p.key}
+                className={`toggle-btn ${filtroPeriodo === p.key ? 'active-entrada' : ''}`}
+                onClick={() => setFiltroPeriodo(p.key)}
+                style={{ fontSize: 12 }}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {(() => {
+        // Aplicar filtros
+        const hoy = new Date()
+        const ordenesFiltradas = ordenes.filter(o => {
+          // Filtro período
+          if (filtroPeriodo !== 'todo') {
+            const dias = filtroPeriodo === '7d' ? 7 : filtroPeriodo === '30d' ? 30 : 90
+            const corte = new Date(hoy); corte.setDate(hoy.getDate() - dias)
+            const [y, m, d] = o.fecha.split('-').map(Number)
+            if (new Date(y, m-1, d) < corte) return false
+          }
+          // Filtro cliente + receta (texto libre)
+          if (filtroCliente.trim()) {
+            const q = filtroCliente.toLowerCase()
+            const matchCliente = (o.cliente_nombre || '').toLowerCase().includes(q)
+            const matchReceta = (o.ventas || []).some(v => v.receta_nombre.toLowerCase().includes(q))
+            if (!matchCliente && !matchReceta) return false
+          }
+          return true
+        })
+
+        return (
+          <>
+            <div className="section-divider">
+              Historial de pedidos
+              {ordenesFiltradas.length !== ordenes.length
+                ? ` (${ordenesFiltradas.length} de ${ordenes.length})`
+                : ` (${ordenes.length})`}
+            </div>
+            <div className="card">
+              {ordenesFiltradas.length === 0 && (
+                <div style={{ color:'var(--muted)', textAlign:'center', padding:20 }}>
+                  {ordenes.length === 0 ? 'Sin pedidos' : 'No hay pedidos que coincidan con el filtro'}
+                </div>
+              )}
+              {ordenesFiltradas.map(o => {
           const totalOrden = (o.ventas || []).reduce((s, v) => s + (v.litros||1) * (v.precio_venta||0), 0)
           const nItems = (o.ventas || []).length
           const oc = origenColor(o.origen)
@@ -614,6 +796,16 @@ export default function Ventas() {
                   <div style={{ fontWeight:700, fontSize:15 }}>{formatCLP(totalOrden)}</div>
                   {o.delivery > 0 && <div style={{ fontSize:11, color:'var(--pink)' }}>-{formatCLP(o.delivery)} Uber</div>}
                 </div>
+                {/* Ticket siempre disponible */}
+                <button onClick={() => setTicket(o)}
+                  style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)', padding:4 }}
+                  title="Ver ticket">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M20 12V22H4V12"/><path d="M22 7H2v5h20V7z"/>
+                    <path d="M12 22V7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/>
+                    <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/>
+                  </svg>
+                </button>
                 {/* Editar y eliminar solo para órdenes reales */}
                 {o._tipo !== 'huerfana' && (<>
                 <button onClick={() => setEditando(o)}
@@ -635,9 +827,12 @@ export default function Ventas() {
                 </>)}
               </div>
             </div>
-          )
-        })}
-      </div>
+              )
+            })}
+          </div>
+        </>
+      )
+      })()}
     </div>
   )
 }

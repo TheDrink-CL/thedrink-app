@@ -472,26 +472,253 @@ function HorasActivas({ ordenes }) {
   )
 }
 
+// ─── Bloque: Proyección de demanda y compras sugeridas ───────────────────────
+
+// ─── Bloque: Proyección de demanda y compras sugeridas ───────────────────────
+
+function ProyeccionDemanda({ ventas, recetaIngredientes, insumos }) {
+  const [expandido, setExpandido] = useState(false)
+
+  if (!ventas || ventas.length === 0) return null
+
+  const hoy = new Date()
+  const hace8sem = new Date(hoy); hace8sem.setDate(hoy.getDate() - 56)
+  const vtsPeriodo = ventas.filter(v => parseFecha(v.fecha) >= hace8sem)
+
+  if (vtsPeriodo.length === 0) return null
+
+  const semanas = Math.max(1, Math.ceil((hoy - hace8sem) / (7 * 24 * 60 * 60 * 1000)))
+
+  const porReceta = {}
+  vtsPeriodo.forEach(v => {
+    if (!porReceta[v.receta_nombre]) porReceta[v.receta_nombre] = 0
+    porReceta[v.receta_nombre] += v.litros
+  })
+  const promedioSemanal = {}
+  Object.entries(porReceta).forEach(([r, total]) => { promedioSemanal[r] = total / semanas })
+
+  const insumosNecesarios = {}
+  const MERMA = 0.08
+  Object.entries(promedioSemanal).forEach(([receta, litros]) => {
+    const ings = (recetaIngredientes || []).filter(i => i.receta_nombre === receta && i.insumo_nombre !== 'ENVASE')
+    ings.forEach(ing => {
+      const usado = ing.cantidad * litros * (1 + MERMA)
+      insumosNecesarios[ing.insumo_nombre] = (insumosNecesarios[ing.insumo_nombre] || 0) + usado
+    })
+  })
+
+  const insumoMap = {}
+  ;(insumos || []).forEach(i => { insumoMap[i.nombre] = i })
+
+  const comprasSugeridas = Object.entries(insumosNecesarios)
+    .map(([nombre, necesario]) => {
+      const ins = insumoMap[nombre]
+      const stockActual = ins?.stock_actual ?? 0
+      const faltante = Math.max(0, necesario - stockActual)
+      const unidad = ins?.unidad || ''
+      const costoPPP = ins?.costo_ppp || 0
+      return { nombre, necesario, stockActual, faltante, unidad, costoPPP, costoEstimado: faltante * costoPPP }
+    })
+    .filter(i => i.necesario > 0)
+    .sort((a, b) => b.costoEstimado - a.costoEstimado)
+
+  const hayFaltantes = comprasSugeridas.some(i => i.faltante > 0)
+  const costoTotalEstimado = comprasSugeridas.reduce((s, i) => s + i.costoEstimado, 0)
+  const litrosTotalesProyectados = Object.values(promedioSemanal).reduce((s, v) => s + v, 0)
+
+  return (
+    <div className="card">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div className="card-title" style={{ margin: 0 }}>📦 Proyección próxima semana</div>
+        <button onClick={() => setExpandido(e => !e)}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--cyan)', fontSize: 12 }}>
+          {expandido ? 'Ver menos' : 'Ver detalle'}
+        </button>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+        <div style={{ background: 'rgba(0,180,180,0.07)', borderRadius: 8, padding: '10px 12px', textAlign: 'center' }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Litros proyectados</div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--cyan)' }}>{litrosTotalesProyectados.toFixed(1)}L</div>
+          <div style={{ fontSize: 10, color: 'var(--muted)' }}>prom. últimas {semanas} sem.</div>
+        </div>
+        <div style={{ background: hayFaltantes ? 'rgba(196,0,90,0.07)' : 'rgba(34,197,94,0.07)', borderRadius: 8, padding: '10px 12px', textAlign: 'center' }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Compras sugeridas</div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: hayFaltantes ? 'var(--pink)' : 'var(--green)' }}>
+            {hayFaltantes ? formatCLP(costoTotalEstimado) : '✓ Stock OK'}
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--muted)' }}>estimado</div>
+        </div>
+      </div>
+
+      <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: 700, marginBottom: 8 }}>
+        Producción estimada
+      </div>
+      {Object.entries(promedioSemanal).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([receta, litros]) => (
+        <div key={receta} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 13 }}>
+          <span style={{ color: 'var(--text-strong)' }}>{receta}</span>
+          <span style={{ color: 'var(--cyan)', fontWeight: 600 }}>{litros.toFixed(1)}L</span>
+        </div>
+      ))}
+
+      {expandido && comprasSugeridas.length > 0 && (
+        <div style={{ borderTop: '1px solid var(--border)', marginTop: 12, paddingTop: 12 }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: 700, marginBottom: 8 }}>
+            Lista de compras sugeridas
+          </div>
+          {comprasSugeridas.map(i => (
+            <div key={i.nombre} style={{ marginBottom: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: i.faltante > 0 ? 'var(--text-strong)' : 'var(--muted)' }}>
+                  {i.nombre}
+                  {i.faltante === 0 && <span style={{ fontSize: 11, color: 'var(--green)', marginLeft: 6 }}>✓</span>}
+                </span>
+                <span style={{ fontSize: 12, color: i.faltante > 0 ? 'var(--pink)' : 'var(--green)', fontWeight: 700 }}>
+                  {i.faltante > 0 ? `Comprar ${i.faltante.toFixed(0)} ${i.unidad}` : 'Stock suficiente'}
+                </span>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', justifyContent: 'space-between' }}>
+                <span>Necesita {i.necesario.toFixed(0)} · Stock {i.stockActual.toFixed(0)} {i.unidad}</span>
+                {i.costoEstimado > 0 && <span style={{ color: 'var(--text)' }}>{formatCLP(i.costoEstimado)} est.</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Bloque: Evolución del costo de insumos ──────────────────────────────────
+
+function EvolucionCostos({ compras }) {
+  const [insumoSel, setInsumoSel] = useState(null)
+
+  const cmpValidas = (compras || []).filter(c =>
+    c.insumo_nombre && c.cantidad > 0 && c.precio_total > 0 && !c.es_inversion
+  )
+  if (cmpValidas.length === 0) return null
+
+  const conteo = {}
+  cmpValidas.forEach(c => { conteo[c.insumo_nombre] = (conteo[c.insumo_nombre] || 0) + 1 })
+  const insumos = Object.entries(conteo).sort((a, b) => b[1] - a[1]).map(([n]) => n)
+  if (insumos.length === 0) return null
+
+  const insActivo = insumoSel || insumos[0]
+
+  const porMes = {}
+  cmpValidas.filter(c => c.insumo_nombre === insActivo).forEach(c => {
+    const mes = c.fecha.slice(0, 7)
+    if (!porMes[mes]) porMes[mes] = { totalPeso: 0, totalCosto: 0 }
+    porMes[mes].totalPeso += c.cantidad
+    porMes[mes].totalCosto += c.precio_total
+  })
+
+  const meses = Object.entries(porMes).sort((a, b) => a[0].localeCompare(b[0])).map(([mes, d]) => ({
+    mes, ppp: d.totalCosto / d.totalPeso,
+    label: (() => {
+      const [y, m] = mes.split('-')
+      const nombres = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+      return `${nombres[parseInt(m,10)-1]} ${y.slice(2)}`
+    })()
+  }))
+  if (meses.length === 0) return null
+
+  const maxPPP = Math.max(...meses.map(m => m.ppp), 1)
+  const minPPP = Math.min(...meses.map(m => m.ppp))
+  const variacion = meses[0].ppp > 0 ? (meses[meses.length-1].ppp - meses[0].ppp) / meses[0].ppp : 0
+  const subio = variacion > 0.02
+  const bajo = variacion < -0.02
+
+  return (
+    <div className="card">
+      <div className="card-title">Evolución de costos</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>Precio por unidad (PPP mensual)</div>
+
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
+        {insumos.slice(0, 6).map(ins => (
+          <button key={ins} onClick={() => setInsumoSel(ins)}
+            style={{
+              padding: '4px 10px', borderRadius: 20, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600,
+              background: insActivo === ins ? 'var(--cyan)' : 'rgba(255,255,255,0.06)',
+              color: insActivo === ins ? '#000' : 'var(--muted)',
+            }}>
+            {ins}
+          </button>
+        ))}
+      </div>
+
+      {meses.length > 1 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, padding: '8px 12px', borderRadius: 8,
+          background: subio ? 'rgba(196,0,90,0.07)' : bajo ? 'rgba(34,197,94,0.07)' : 'rgba(255,255,255,0.04)'
+        }}>
+          <span style={{ fontSize: 20 }}>{subio ? '📈' : bajo ? '📉' : '〰️'}</span>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: subio ? 'var(--pink)' : bajo ? 'var(--green)' : 'var(--text)' }}>
+              {subio ? `+${(variacion*100).toFixed(1)}% más caro` : bajo ? `${(variacion*100).toFixed(1)}% más barato` : 'Precio estable'}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+              {meses[0].label} → {meses[meses.length-1].label} · de {formatCLP(meses[0].ppp)} a {formatCLP(meses[meses.length-1].ppp)} por unidad
+            </div>
+          </div>
+        </div>
+      )}
+
+      {meses.map(m => {
+        const pct = maxPPP > 0 ? m.ppp / maxPPP : 0
+        const esMasCaro = m.ppp === maxPPP
+        const esMasBarato = m.ppp === minPPP && meses.length > 1
+        return (
+          <div key={m.mes} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+            <div style={{ width: 44, fontSize: 11, color: esMasCaro ? 'var(--pink)' : 'var(--muted)', fontWeight: esMasCaro ? 700 : 400, flexShrink: 0 }}>
+              {m.label}
+            </div>
+            <div style={{ flex: 1, background: 'rgba(255,255,255,0.06)', borderRadius: 4, height: 7, overflow: 'hidden' }}>
+              <div style={{
+                height: '100%', borderRadius: 4, width: `${pct*100}%`,
+                background: esMasCaro ? 'linear-gradient(90deg,var(--pink),#ff6b9d)' : esMasBarato ? 'linear-gradient(90deg,var(--green),#4ade80)' : 'rgba(0,180,180,0.45)',
+                transition: 'width 0.4s'
+              }} />
+            </div>
+            <div style={{ width: 64, fontSize: 12, textAlign: 'right', flexShrink: 0, color: esMasCaro ? 'var(--pink)' : 'var(--text)', fontWeight: esMasCaro ? 700 : 400 }}>
+              {formatCLP(m.ppp)}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ─── Página principal ────────────────────────────────────────────────────────
 
 export default function Analisis() {
   const [ventas, setVentas] = useState([])
   const [ordenes, setOrdenes] = useState([])
   const [gastosPub, setGastosPub] = useState([])
+  const [comprasDetalle, setComprasDetalle] = useState([])
+  const [recetaIngredientes, setRecetaIngredientes] = useState([])
+  const [insumos, setInsumos] = useState([])
   const [margenBruto, setMargenBruto] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [periodo, setPeriodo] = useState('todo') // 'todo' | '90d' | '30d'
+  const [periodo, setPeriodo] = useState('todo')
 
   useEffect(() => {
     async function load() {
-      const [{ data: vts }, { data: cja }, { data: cmp }, { data: ords }] = await Promise.all([
-        supabase.from('ventas').select('fecha, litros, precio_venta, origen').order('fecha', { ascending: false }),
+      const [{ data: vts }, { data: cja }, { data: cmp }, { data: ords }, { data: recIng }, { data: ins }] = await Promise.all([
+        supabase.from('ventas').select('fecha, litros, precio_venta, origen, receta_nombre').order('fecha', { ascending: false }),
         supabase.from('caja').select('fecha, monto, categoria, tipo').eq('tipo', 'salida'),
-        supabase.from('compras').select('precio_total, es_inversion'),
+        supabase.from('compras').select('fecha, insumo_nombre, cantidad, precio_total, es_inversion').order('fecha'),
         supabase.from('ordenes').select('fecha, hora').order('fecha', { ascending: false }),
+        supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad, unidad'),
+        supabase.from('insumos').select('nombre, stock_actual, costo_ppp, unidad'),
       ])
       setVentas(vts || [])
       setOrdenes(ords || [])
+      setComprasDetalle(cmp || [])
+      setRecetaIngredientes(recIng || [])
+      setInsumos(ins || [])
       setGastosPub((cja || []).filter(m => m.categoria === 'Publicidad'))
       const totalVtsBruto = (vts || []).reduce((s, v) => s + v.litros * v.precio_venta, 0)
       const totalCmpOp = (cmp || []).filter(c => !c.es_inversion).reduce((s, c) => s + c.precio_total, 0)
@@ -503,7 +730,6 @@ export default function Analisis() {
 
   if (loading) return <div className="loading">Cargando...</div>
 
-  // Filtrar ventas según período
   const hoy = new Date()
   const ventasFiltradas = ventas.filter(v => {
     if (periodo === 'todo') return true
@@ -516,10 +742,8 @@ export default function Analisis() {
     <div className="page">
       <div className="page-title">Análisis</div>
 
-      {/* Semáforo de publicidad — siempre con datos completos */}
       <SemaforoPub ventas={ventas} gastosPub={gastosPub} margenBruto={margenBruto} />
 
-      {/* Selector de período */}
       <div className="toggle-row" style={{ marginBottom: 16 }}>
         {[
           { key: '30d', label: '30 días' },
@@ -547,6 +771,9 @@ export default function Analisis() {
           <TendenciaSemanal ventas={ventasFiltradas} />
         </>
       )}
+
+      <ProyeccionDemanda ventas={ventas} recetaIngredientes={recetaIngredientes} insumos={insumos} />
+      <EvolucionCostos compras={comprasDetalle} />
     </div>
   )
 }

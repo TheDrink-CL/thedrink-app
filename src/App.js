@@ -7,6 +7,7 @@ import Analisis from './pages/Analisis'
 import Proyectos from './pages/Proyectos'
 import Cuentas from './pages/Cuentas'
 import Catalogo from './pages/Catalogo'
+import Stock from './pages/Stock'
 
 const TABS_MAIN = [
   { id: 'dashboard', label: 'Inicio', icon: (
@@ -61,6 +62,12 @@ const TABS_MAS = [
       <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
     </svg>
   )},
+  { id: 'stock', label: 'Stock', icon: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M20 7H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/>
+      <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
+    </svg>
+  )},
 ]
 
 const ALL_TABS = [...TABS_MAIN, ...TABS_MAS]
@@ -86,6 +93,7 @@ export default function App() {
       {tab === 'proyectos'  && <Proyectos />}
       {tab === 'cuentas'    && <Cuentas />}
       {tab === 'catalogo'   && <Catalogo />}
+      {tab === 'stock'      && <Stock />}
 
       {/* Menú "Más" desplegable */}
       {menuMas && (
