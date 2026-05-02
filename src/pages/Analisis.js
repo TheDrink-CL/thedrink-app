@@ -595,7 +595,7 @@ function EvolucionCostos({ compras }) {
   const [insumoSel, setInsumoSel] = useState(null)
 
   const cmpValidas = (compras || []).filter(c =>
-    c.insumo_nombre && c.cantidad > 0 && c.precio_total > 0 && !c.es_inversion
+    c.fecha && c.insumo_nombre && c.cantidad > 0 && c.precio_total > 0 && !c.es_inversion
   )
   if (cmpValidas.length === 0) return null
 
@@ -697,10 +697,10 @@ function ReporteMensual({ ventas, ordenes, compras, gastosCaja, recetaIngredient
   const ahora = new Date()
   const [mesSel, setMesSel] = useState(`${ahora.getFullYear()}-${String(ahora.getMonth()+1).padStart(2,'0')}`)
 
-  // Lista de meses con datos
+  // Lista de meses con datos (defensivo contra fecha null)
   const mesesDisponibles = [...new Set([
-    ...ventas.map(v => v.fecha.slice(0, 7)),
-    ...compras.map(c => c.fecha.slice(0, 7)),
+    ...ventas.filter(v => v.fecha).map(v => v.fecha.slice(0, 7)),
+    ...compras.filter(c => c.fecha).map(c => c.fecha.slice(0, 7)),
   ])].sort().reverse()
 
   if (mesesDisponibles.length === 0) {
@@ -711,10 +711,10 @@ function ReporteMensual({ ventas, ordenes, compras, gastosCaja, recetaIngredient
     )
   }
 
-  // Datos del mes seleccionado
-  const ventasMes = ventas.filter(v => v.fecha.startsWith(mesSel))
+  // Datos del mes seleccionado (defensivo contra fecha null)
+  const ventasMes = ventas.filter(v => v.fecha && v.fecha.startsWith(mesSel))
   const ordenesMes = ordenes.filter(o => o.fecha && o.fecha.startsWith(mesSel))
-  const comprasMes = compras.filter(c => c.fecha.startsWith(mesSel) && !c.es_inversion && c.tipo !== 'activo_fijo')
+  const comprasMes = compras.filter(c => c.fecha && c.fecha.startsWith(mesSel) && !c.es_inversion && c.tipo !== 'activo_fijo')
   const gastosMes = gastosCaja.filter(g => g.fecha && g.fecha.startsWith(mesSel))
 
   // KPIs del mes
@@ -938,42 +938,75 @@ export default function Analisis() {
   const [periodo, setPeriodo] = useState('todo')
   const [vista, setVista] = useState('tendencias')
 
+  const [errorCarga, setErrorCarga] = useState(null)
+
   useEffect(() => {
     async function load() {
-      const [{ data: vts }, { data: cja }, { data: cmp }, { data: ords }, { data: recIng }, { data: ins }, { data: cfg }] = await Promise.all([
-        supabase.from('ventas').select('id, fecha, litros, precio_venta, origen, receta_nombre, orden_id').order('fecha', { ascending: false }),
-        supabase.from('caja').select('fecha, monto, categoria, tipo').eq('tipo', 'salida'),
-        supabase.from('compras').select('fecha, insumo_nombre, cantidad, precio_total, es_inversion, tipo').order('fecha'),
-        supabase.from('ordenes').select('id, fecha, hora, medio_pago, delivery, delivery_tipo').order('fecha', { ascending: false }),
-        supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad, unidad'),
-        supabase.from('insumos').select('nombre, stock_actual, costo_ppp, unidad'),
-        supabase.from('config').select('*'),
-      ])
-      setVentas(vts || [])
-      setOrdenes(ords || [])
-      setComprasDetalle(cmp || [])
-      setRecetaIngredientes(recIng || [])
-      setInsumos(ins || [])
-      setGastosCaja(cja || [])
-      setGastosPub((cja || []).filter(m => m.categoria === 'Publicidad'))
-      const c = {}
-      cfg?.forEach(x => { c[x.clave] = parseFloat(x.valor) || x.valor })
-      setConfig({
-        merma_pct: c.merma_pct ?? 0.08,
-        costo_envase: c.costo_envase ?? 794.6,
-      })
-      const totalVtsBruto = (vts || []).reduce((s, v) => s + v.litros * v.precio_venta, 0)
-      const totalCmpOp = (cmp || []).filter(c => !c.es_inversion).reduce((s, c) => s + c.precio_total, 0)
-      setMargenBruto(totalVtsBruto > 0 ? (totalVtsBruto - totalCmpOp) / totalVtsBruto : null)
-      setLoading(false)
+      try {
+        const results = await Promise.all([
+          supabase.from('ventas').select('id, fecha, litros, precio_venta, origen, receta_nombre, orden_id').order('fecha', { ascending: false }),
+          supabase.from('caja').select('fecha, monto, categoria, tipo').eq('tipo', 'salida'),
+          supabase.from('compras').select('fecha, insumo_nombre, cantidad, precio_total, es_inversion, tipo').order('fecha'),
+          supabase.from('ordenes').select('id, fecha, hora, medio_pago, delivery, delivery_tipo').order('fecha', { ascending: false }),
+          supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad, unidad'),
+          supabase.from('insumos').select('nombre, stock_actual, costo_ppp, unidad'),
+          supabase.from('config').select('*'),
+        ])
+        // Detectar si alguna query devolvió error
+        const errores = results.map((r, i) => r.error ? { idx: i, msg: r.error.message } : null).filter(Boolean)
+        if (errores.length > 0) {
+          const tablas = ['ventas','caja','compras','ordenes','receta_ingredientes','insumos','config']
+          const detalle = errores.map(e => `${tablas[e.idx]}: ${e.msg}`).join(' · ')
+          throw new Error(detalle)
+        }
+        const [{ data: vts }, { data: cja }, { data: cmp }, { data: ords }, { data: recIng }, { data: ins }, { data: cfg }] = results
+        setVentas(vts || [])
+        setOrdenes(ords || [])
+        setComprasDetalle(cmp || [])
+        setRecetaIngredientes(recIng || [])
+        setInsumos(ins || [])
+        setGastosCaja(cja || [])
+        setGastosPub((cja || []).filter(m => m.categoria === 'Publicidad'))
+        const cfgMap = {}
+        cfg?.forEach(x => { cfgMap[x.clave] = parseFloat(x.valor) || x.valor })
+        setConfig({
+          merma_pct: cfgMap.merma_pct ?? 0.08,
+          costo_envase: cfgMap.costo_envase ?? 794.6,
+        })
+        const totalVtsBruto = (vts || []).reduce((s, v) => s + v.litros * v.precio_venta, 0)
+        const totalCmpOp = (cmp || []).filter(x => !x.es_inversion).reduce((s, x) => s + x.precio_total, 0)
+        setMargenBruto(totalVtsBruto > 0 ? (totalVtsBruto - totalCmpOp) / totalVtsBruto : null)
+      } catch (err) {
+        console.error('Análisis - error al cargar datos:', err)
+        setErrorCarga(err.message || String(err))
+      } finally {
+        setLoading(false)
+      }
     }
     load()
   }, [])
 
   if (loading) return <div className="loading">Cargando...</div>
+  if (errorCarga) {
+    return (
+      <div className="page">
+        <div className="page-title">Análisis</div>
+        <div className="card" style={{ borderColor: 'rgba(196,0,90,0.4)' }}>
+          <div className="card-title" style={{ color: 'var(--pink)' }}>Error al cargar</div>
+          <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6, marginBottom: 10 }}>
+            {errorCarga}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
+            Si el error menciona una columna o tabla que no existe, verifica en Supabase que el SQL del schema upgrade haya corrido correctamente.
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   const hoy = new Date()
   const ventasFiltradas = ventas.filter(v => {
+    if (!v.fecha) return false
     if (periodo === 'todo') return true
     const dias = periodo === '90d' ? 90 : 30
     const corte = new Date(hoy); corte.setDate(hoy.getDate() - dias)
@@ -992,6 +1025,54 @@ export default function Analisis() {
       </div>
 
       {vista === 'reporte' ? (
+        <ReporteMensual
+          ventas={ventas}
+          ordenes={ordenes}
+          compras={comprasDetalle}
+          gastosCaja={gastosCaja}
+          recetaIngredientes={recetaIngredientes}
+          insumos={insumos}
+          config={config}
+        />
+      ) : (
+        <>
+          <SemaforoPub ventas={ventas} gastosPub={gastosPub} margenBruto={margenBruto} />
+
+          <div className="toggle-row" style={{ marginBottom: 16 }}>
+            {[
+              { key: '30d', label: '30 días' },
+              { key: '90d', label: '90 días' },
+              { key: 'todo', label: 'Todo' },
+            ].map(p => (
+              <button key={p.key}
+                className={`toggle-btn ${periodo === p.key ? 'active-entrada' : ''}`}
+                onClick={() => setPeriodo(p.key)}
+                style={{ fontSize: 13 }}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          {ventasFiltradas.length === 0 ? (
+            <div className="card" style={{ textAlign: 'center', padding: 32, color: 'var(--muted)' }}>
+              Sin ventas en el período seleccionado
+            </div>
+          ) : (
+            <>
+              <OrigenVentas ventas={ventasFiltradas} gastosPub={gastosPub} />
+              <HorasActivas ordenes={ordenes} />
+              <VentasPorDia ventas={ventasFiltradas} />
+              <TendenciaSemanal ventas={ventasFiltradas} />
+            </>
+          )}
+
+          <ProyeccionDemanda ventas={ventas} recetaIngredientes={recetaIngredientes} insumos={insumos} />
+          <EvolucionCostos compras={comprasDetalle} />
+        </>
+      )}
+    </div>
+  )
+}
         <ReporteMensual
           ventas={ventas}
           ordenes={ordenes}
