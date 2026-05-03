@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import Dashboard from './pages/Dashboard'
 import Ventas from './pages/Ventas'
 import Compras from './pages/Compras'
@@ -8,6 +8,9 @@ import Proyectos from './pages/Proyectos'
 import Cuentas from './pages/Cuentas'
 import Catalogo from './pages/Catalogo'
 import Stock from './pages/Stock'
+import DeliveryLogin from './pages/DeliveryLogin'
+import DeliveryPanel from './pages/DeliveryPanel'
+import { supabase } from './lib/supabase'
 
 const TABS_MAIN = [
   { id: 'dashboard', label: 'Inicio', icon: (
@@ -72,11 +75,47 @@ const TABS_MAS = [
 
 const ALL_TABS = [...TABS_MAIN, ...TABS_MAS]
 
+// Detectar si la URL es /delivery
+const isDeliveryRoute = () => {
+  const path = window.location.pathname
+  return path === '/delivery' || path.startsWith('/delivery/')
+}
+
 export default function App() {
   const [tab, setTab] = useState('dashboard')
   const [menuMas, setMenuMas] = useState(false)
+  const [deliveryUser, setDeliveryUser] = useState(null)
+  const [deliveryChecked, setDeliveryChecked] = useState(false)
 
   const isEnMas = TABS_MAS.some(t => t.id === tab)
+
+  // En ruta /delivery: verificar si ya hay sesión activa
+  useEffect(() => {
+    if (!isDeliveryRoute()) { setDeliveryChecked(true); return }
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        const role = session.user.user_metadata?.role
+        if (role === 'delivery' || role === 'admin') {
+          setDeliveryUser(session.user)
+        }
+      }
+      setDeliveryChecked(true)
+    })
+  }, [])
+
+  // Modo delivery: pantalla separada sin nav principal
+  if (isDeliveryRoute()) {
+    if (!deliveryChecked) return null // evitar flash
+    if (!deliveryUser) {
+      return <DeliveryLogin onLogin={(u) => setDeliveryUser(u)} />
+    }
+    return (
+      <DeliveryPanel
+        user={deliveryUser}
+        onLogout={() => setDeliveryUser(null)}
+      />
+    )
+  }
 
   const handleNavClick = (id) => {
     setTab(id)

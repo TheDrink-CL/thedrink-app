@@ -425,6 +425,8 @@ export default function Ventas() {
   const [fecha, setFecha] = useState(fechaHoy())
   const [hora, setHora] = useState(horaAhora())
   const [cliente, setCliente] = useState('')
+  const [clienteTelefono, setClienteTelefono] = useState('')
+  const [clienteDireccion, setClienteDireccion] = useState('')
   const [origen, setOrigen] = useState('')
   const [medioPago, setMedioPago] = useState('transferencia')
   const [delivery, setDelivery] = useState('')
@@ -531,16 +533,20 @@ export default function Ventas() {
     }
     setLoading(true)
 
+    const esDeliveryDomicilio = deliveryTipo && deliveryTipo !== 'retiro'
     const { data: orden, error: errOrden } = await supabase.from('ordenes').insert({
       fecha,
       hora: hora || null,
       cliente_nombre: cliente || null,
+      cliente_telefono: clienteTelefono || null,
+      cliente_direccion: esDeliveryDomicilio ? (clienteDireccion || null) : null,
       origen: origen || null,
       medio_pago: medioPago,
       nota: nota || null,
       delivery: parseFloat(delivery) || 0,
       delivery_tipo: (parseFloat(delivery) > 0 || deliveryTipo === 'retiro' || deliveryTipo === 'propio') ? (deliveryTipo || null) : null,
       distancia_km: (deliveryTipo && deliveryTipo !== 'retiro' && distanciaKm !== '') ? parseFloat(distanciaKm) : null,
+      estado_delivery: esDeliveryDomicilio ? 'pendiente' : null,
     }).select().single()
 
     console.log('orden result:', orden, 'error:', errOrden)
@@ -582,6 +588,8 @@ export default function Ventas() {
     setFecha(fechaHoy())
     setHora(horaAhora())
     setCliente('')
+    setClienteTelefono('')
+    setClienteDireccion('')
     setOrigen('')
     setMedioPago('transferencia')
     setDelivery('')
@@ -649,6 +657,19 @@ export default function Ventas() {
             <label className="form-label">Cliente — opcional</label>
             <input type="text" className="form-input" value={cliente} placeholder="ej: Juan Pérez"
               onChange={e => setCliente(e.target.value)} />
+          </div>
+
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+            <div className="form-group">
+              <label className="form-label">Teléfono — opcional</label>
+              <input type="tel" className="form-input" value={clienteTelefono} placeholder="+56 9 ..."
+                onChange={e => setClienteTelefono(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Dirección — opcional</label>
+              <input type="text" className="form-input" value={clienteDireccion} placeholder="Calle N°, comuna"
+                onChange={e => setClienteDireccion(e.target.value)} />
+            </div>
           </div>
 
           <div className="form-group">
@@ -872,6 +893,12 @@ export default function Ventas() {
                           <span key={i} style={{ fontSize:11, color:'var(--muted)' }}>{v.receta_nombre}</span>
                         ))}
                       </div>
+                      {o.cliente_direccion && (
+                        <div style={{ fontSize:11, color:'var(--cyan)', marginTop:2 }}>📍 {o.cliente_direccion}</div>
+                      )}
+                      {o.cliente_telefono && (
+                        <div style={{ fontSize:11, color:'var(--muted)', marginTop:1 }}>📞 {o.cliente_telefono}</div>
+                      )}
                       {o.nota && <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>{o.nota}</div>}
                     </div>
                     <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
