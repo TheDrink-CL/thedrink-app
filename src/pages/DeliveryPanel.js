@@ -370,9 +370,12 @@ function DeliveryCard({ orden, onEstadoChange }) {
 }
 
 export default function DeliveryPanel({ onLogout }) {
-  const [ordenes, setOrdenes] = useState([])
+  const [ordenes, setOrdenes] = useState([])       // activos (no archivados)
+  const [historial, setHistorial] = useState([])   // archivados
   const [loading, setLoading] = useState(true)
   const [filtroEstado, setFiltroEstado] = useState('pendiente')
+  const [verHistorial, setVerHistorial] = useState(false)
+  const [archivando, setArchivando] = useState(false)
   const [toast, setToast] = useState('')
 
   const showToast = (msg) => {
@@ -380,48 +383,69 @@ export default function DeliveryPanel({ onLogout }) {
     setTimeout(() => setToast(''), 2600)
   }
 
+  const cargarVentas = async (ids) => {
+    if (!ids.length) return {}
+    const { data: vts } = await supabase.from('ventas').select('*').in('orden_id', ids)
+    const map = {}
+    ;(vts || []).forEach(v => {
+      if (!map[v.orden_id]) map[v.orden_id] = []
+      map[v.orden_id].push(v)
+    })
+    return map
+  }
+
   const load = useCallback(async () => {
     setLoading(true)
-    const { data: ords } = await supabase
+
+    // Activos: no archivados
+    const { data: activos } = await supabase
       .from('ordenes')
       .select('*')
       .not('estado_delivery', 'is', null)
+      .eq('delivery_archivado', false)
       .order('fecha', { ascending: false })
       .order('hora', { ascending: false })
 
-    const { data: vts } = await supabase
-      .from('ventas')
-      .select('*')
-
-    const ventasPorOrden = {}
-    ;(vts || []).forEach(v => {
-      if (!v.orden_id) return
-      if (!ventasPorOrden[v.orden_id]) ventasPorOrden[v.orden_id] = []
-      ventasPorOrden[v.orden_id].push(v)
-    })
-
-    const ordenesConVentas = (ords || []).map(o => ({
-      ...o,
-      ventas: ventasPorOrden[o.id] || [],
-    }))
-
-    setOrdenes(ordenesConVentas)
+    const ventasActivos = await cargarVentas((activos || []).map(o => o.id))
+    setOrdenes((activos || []).map(o => ({ ...o, ventas: ventasActivos[o.id] || [] })))
     setLoading(false)
   }, [])
 
-  useEffect(() => { load() }, [load])
+  const loadHistorial = useCallback(async () => {
+    const { data: arch } = await supabase
+      .from('ordenes')
+      .select('*')
+      .not('estado_delivery', 'is', null)
+      .eq('delivery_archivado', true)
+      .order('fecha', { ascending: false })
+      .order('hora', { ascending: false })
+      .limit(50)
 
-  const handleLogout = () => {
-    onLogout()
+    const ventasArch = await cargarVentas((arch || []).map(o => o.id))
+    setHistorial((arch || []).map(o => ({ ...o, ventas: ventasArch[o.id] || [] })))
+  }, [])
+
+  useEffect(() => { load() }, [load])
+  useEffect(() => { if (verHistorial) loadHistorial() }, [verHistorial, loadHistorial])
+
+  // Archivar todos los entregados del día actual (o todos los entregados)
+  const handleArchivarDia = async () => {
+    const entregados = ordenes.filter(o => o.estado_delivery === 'entregado')
+    if (entregados.length === 0) { showToast('No hay entregados para archivar'); return }
+    setArchivando(true)
+    await supabase
+      .from('ordenes')
+      .update({ delivery_archivado: true })
+      .in('id', entregados.map(o => o.id))
+    await load()
+    showToast(`${entregados.length} pedido${entregados.length > 1 ? 's' : ''} archivado${entregados.length > 1 ? 's' : ''} ✓`)
+    setArchivando(false)
   }
 
-  const ordenesFiltradas = ordenes.filter(o => {
-    const estado = o.estado_delivery || 'pendiente'
-    return estado === filtroEstado
-  })
+  const ordenesFiltradas = ordenes.filter(o => o.estado_delivery === filtroEstado)
 
   const conteos = {
-    pendiente: ordenes.filter(o => (o.estado_delivery || 'pendiente') === 'pendiente').length,
+    pendiente: ordenes.filter(o => o.estado_delivery === 'pendiente').length,
     en_camino: ordenes.filter(o => o.estado_delivery === 'en_camino').length,
     entregado: ordenes.filter(o => o.estado_delivery === 'entregado').length,
   }
@@ -518,29 +542,64 @@ export default function DeliveryPanel({ onLogout }) {
           ))}
         </div>
 
-        {/* Botón refrescar */}
-        <button
-          onClick={() => { load(); showToast('Actualizado ✓') }}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            background: 'none',
-            border: '1px solid var(--border)',
-            borderRadius: 8,
-            color: 'var(--muted)',
-            fontSize: 12,
-            padding: '6px 12px',
-            cursor: 'pointer',
-            marginBottom: 16,
-          }}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-          </svg>
-          Actualizar pedidos
-        </button>
+        {/* Fila: refrescar + archivar */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+          <button
+            onClick={() => { load(); showToast('Actualizado ✓') }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              background: 'none', border: '1px solid var(--border)',
+              borderRadius: 8, color: 'var(--muted)',
+              fontSize: 12, padding: '6px 12px', cursor: 'pointer',
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+            Actualizar
+          </button>
+
+          {conteos.entregado > 0 && (
+            <button
+              onClick={handleArchivarDia}
+              disabled={archivando}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                background: 'rgba(107,114,128,0.12)',
+                border: '1px solid rgba(107,114,128,0.3)',
+                borderRadius: 8, color: 'var(--muted)',
+                fontSize: 12, padding: '6px 12px',
+                cursor: archivando ? 'default' : 'pointer',
+                opacity: archivando ? 0.6 : 1,
+              }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/>
+                <line x1="10" y1="12" x2="14" y2="12"/>
+              </svg>
+              {archivando ? 'Archivando...' : `Archivar entregados (${conteos.entregado})`}
+            </button>
+          )}
+
+          <button
+            onClick={() => setVerHistorial(v => !v)}
+            style={{
+              marginLeft: 'auto',
+              display: 'flex', alignItems: 'center', gap: 5,
+              background: verHistorial ? 'rgba(0,180,180,0.1)' : 'none',
+              border: `1px solid ${verHistorial ? 'rgba(0,180,180,0.3)' : 'var(--border)'}`,
+              borderRadius: 8,
+              color: verHistorial ? 'var(--cyan)' : 'var(--muted)',
+              fontSize: 12, padding: '6px 12px', cursor: 'pointer',
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/>
+            </svg>
+            Historial
+          </button>
+        </div>
 
         {/* Lista de drops */}
         {loading ? (
@@ -575,6 +634,67 @@ export default function DeliveryPanel({ onLogout }) {
               onEstadoChange={() => { load(); showToast('Estado actualizado ✓') }}
             />
           ))
+        )}
+
+        {/* ── Historial archivado ── */}
+        {verHistorial && (
+          <div style={{ marginTop: 8 }}>
+            <div style={{
+              fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase',
+              letterSpacing: 1, fontWeight: 700, marginBottom: 12,
+              borderTop: '1px solid var(--border)', paddingTop: 16,
+            }}>
+              Historial archivado
+            </div>
+            {historial.length === 0 ? (
+              <div style={{ textAlign: 'center', color: 'var(--muted)', padding: '24px 0', fontSize: 13 }}>
+                Sin pedidos archivados aún
+              </div>
+            ) : (
+              historial.map(o => {
+                const totalPrecio = (o.ventas || []).reduce((s, v) => s + (parseFloat(v.litros)||1) * (parseFloat(v.precio_venta)||0), 0)
+                return (
+                  <div key={o.id} style={{
+                    background: 'rgba(255,255,255,0.02)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 12,
+                    padding: '12px 14px',
+                    marginBottom: 8,
+                    opacity: 0.7,
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>
+                          {o.cliente_nombre || 'Cliente anónimo'}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+                          {o.fecha}{o.hora ? ` · ${o.hora}` : ''}
+                        </div>
+                        {o.cliente_direccion && (
+                          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+                            📍 {o.cliente_direccion}
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                          {(o.ventas || []).map((v, i) => (
+                            <span key={i} style={{ fontSize: 11, color: 'var(--muted)', background: 'rgba(255,255,255,0.04)', borderRadius: 6, padding: '2px 7px' }}>
+                              {v.litros}L · {v.receta_nombre}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--green)' }}>
+                          {formatCLP(totalPrecio)}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 2 }}>✅ Entregado</div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
         )}
       </div>
     </div>
