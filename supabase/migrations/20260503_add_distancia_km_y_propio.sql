@@ -16,8 +16,17 @@ create index if not exists idx_ordenes_distancia_km
   on public.ordenes (distancia_km)
   where distancia_km is not null;
 
--- 3. No requiere cambio de schema para soportar 'propio' en delivery_tipo
---    porque el campo ya es text libre. La app valida los valores permitidos.
+-- 3. Actualizar el CHECK constraint de delivery_tipo para incluir 'propio'
+--    (la tabla tenía un constraint que solo permitía uber/motoboy/retiro/otro)
+alter table public.ordenes
+  drop constraint if exists ordenes_delivery_tipo_check;
+
+alter table public.ordenes
+  add constraint ordenes_delivery_tipo_check
+  check (
+    delivery_tipo is null
+    or delivery_tipo = any (array['uber','motoboy','propio','retiro','otro']::text[])
+  );
 
 -- Rollback (manual si fuera necesario):
 -- alter table public.ordenes drop column distancia_km;
