@@ -1,39 +1,52 @@
 import React, { useState } from 'react'
-import { supabase } from '../lib/supabase'
+
+const PIN_DELIVERY = '085279'
+const SESSION_KEY = 'thedrink_delivery_unlocked'
+
+export function isDeliveryUnlocked() {
+  return sessionStorage.getItem(SESSION_KEY) === '1'
+}
+
+export function lockDelivery() {
+  sessionStorage.removeItem(SESSION_KEY)
+}
 
 export default function DeliveryLogin({ onLogin }) {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [pin, setPin] = useState('')
+  const [error, setError] = useState(false)
+  const [shake, setShake] = useState(false)
 
-  const handleLogin = async (e) => {
-    e.preventDefault()
-    setError('')
-    setLoading(true)
+  const handleDigito = (d) => {
+    if (pin.length >= 6) return
+    const nuevo = pin + d
+    setPin(nuevo)
+    setError(false)
 
-    const { data, error: authError } = await supabase.auth.signInWithPassword({
-      email: email.trim().toLowerCase(),
-      password,
-    })
-
-    if (authError) {
-      setError('Credenciales incorrectas. Revisá el email y contraseña.')
-      setLoading(false)
-      return
+    if (nuevo.length === 6) {
+      setTimeout(() => {
+        if (nuevo === PIN_DELIVERY) {
+          sessionStorage.setItem(SESSION_KEY, '1')
+          onLogin()
+        } else {
+          setError(true)
+          setShake(true)
+          setTimeout(() => { setPin(''); setShake(false) }, 600)
+        }
+      }, 120)
     }
-
-    const role = data.user?.user_metadata?.role
-    if (role !== 'delivery' && role !== 'admin') {
-      await supabase.auth.signOut()
-      setError('Tu usuario no tiene acceso al panel de delivery.')
-      setLoading(false)
-      return
-    }
-
-    onLogin(data.user)
-    setLoading(false)
   }
+
+  const handleBorrar = () => {
+    setPin(p => p.slice(0, -1))
+    setError(false)
+  }
+
+  const TECLADO = [
+    ['1','2','3'],
+    ['4','5','6'],
+    ['7','8','9'],
+    [null,'0','⌫'],
+  ]
 
   return (
     <div style={{
@@ -44,9 +57,10 @@ export default function DeliveryLogin({ onLogin }) {
       alignItems: 'center',
       justifyContent: 'center',
       padding: 24,
+      userSelect: 'none',
     }}>
       {/* Logo */}
-      <div style={{ marginBottom: 36, textAlign: 'center' }}>
+      <div style={{ marginBottom: 48, textAlign: 'center' }}>
         <div style={{
           fontFamily: 'Orbitron, monospace',
           fontSize: 28,
@@ -57,104 +71,104 @@ export default function DeliveryLogin({ onLogin }) {
         }}>
           THE DRINK
         </div>
-        <div style={{
-          fontSize: 12,
-          color: 'var(--muted)',
-          letterSpacing: 2,
-          textTransform: 'uppercase',
-        }}>
+        <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 2, textTransform: 'uppercase' }}>
           Panel de Delivery
         </div>
+        <div style={{ marginTop: 12, fontSize: 26 }}>🏍️</div>
       </div>
 
-      {/* Card de login */}
+      {/* Puntos del PIN */}
       <div style={{
-        background: 'var(--card)',
-        border: '1px solid var(--border)',
-        borderRadius: 18,
-        padding: 28,
-        width: '100%',
-        maxWidth: 360,
-        boxShadow: '0 0 60px rgba(0,180,180,0.06)',
+        display: 'flex',
+        gap: 14,
+        marginBottom: 36,
+        animation: shake ? 'shake 0.5s ease' : 'none',
       }}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          marginBottom: 24,
-        }}>
-          {/* Ícono moto */}
-          <div style={{
-            width: 48,
-            height: 48,
+        {[0,1,2,3,4,5].map(i => (
+          <div key={i} style={{
+            width: 14,
+            height: 14,
             borderRadius: '50%',
-            background: 'rgba(0,180,180,0.12)',
-            border: '1px solid rgba(0,180,180,0.3)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: 22,
-          }}>
-            🏍️
-          </div>
-        </div>
-
-        <form onSubmit={handleLogin}>
-          <div className="form-group" style={{ marginBottom: 14 }}>
-            <label className="form-label">Email</label>
-            <input
-              type="email"
-              className="form-input"
-              value={email}
-              placeholder="tu@email.com"
-              autoComplete="email"
-              onChange={e => setEmail(e.target.value)}
-              required
-            />
-          </div>
-
-          <div className="form-group" style={{ marginBottom: 20 }}>
-            <label className="form-label">Contraseña</label>
-            <input
-              type="password"
-              className="form-input"
-              value={password}
-              placeholder="••••••••"
-              autoComplete="current-password"
-              onChange={e => setPassword(e.target.value)}
-              required
-            />
-          </div>
-
-          {error && (
-            <div style={{
-              background: 'rgba(196,0,90,0.12)',
-              border: '1px solid rgba(196,0,90,0.3)',
-              borderRadius: 10,
-              padding: '10px 14px',
-              fontSize: 13,
-              color: 'var(--pink)',
-              marginBottom: 16,
-              lineHeight: 1.4,
-            }}>
-              {error}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={loading}
-            style={{ width: '100%' }}
-          >
-            {loading ? 'Ingresando...' : 'Ingresar'}
-          </button>
-        </form>
+            border: `2px solid ${error ? 'var(--pink)' : 'rgba(0,180,180,0.5)'}`,
+            background: i < pin.length
+              ? (error ? 'var(--pink)' : 'var(--cyan)')
+              : 'transparent',
+            transition: 'background 0.15s, border-color 0.15s',
+          }} />
+        ))}
       </div>
 
-      <div style={{ marginTop: 20, fontSize: 11, color: 'rgba(255,255,255,0.15)', letterSpacing: 1 }}>
+      {/* Mensaje error */}
+      <div style={{
+        height: 20,
+        marginBottom: 24,
+        fontSize: 13,
+        color: 'var(--pink)',
+        fontWeight: 600,
+        opacity: error ? 1 : 0,
+        transition: 'opacity 0.2s',
+      }}>
+        PIN incorrecto
+      </div>
+
+      {/* Teclado numérico */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {TECLADO.map((fila, fi) => (
+          <div key={fi} style={{ display: 'flex', gap: 12 }}>
+            {fila.map((d, di) => (
+              <button
+                key={di}
+                onClick={() => {
+                  if (d === null) return
+                  if (d === '⌫') handleBorrar()
+                  else handleDigito(d)
+                }}
+                style={{
+                  width: 72,
+                  height: 72,
+                  borderRadius: '50%',
+                  border: d === null ? 'none' : '1px solid var(--border)',
+                  background: d === null
+                    ? 'transparent'
+                    : d === '⌫'
+                    ? 'rgba(255,255,255,0.04)'
+                    : 'rgba(255,255,255,0.06)',
+                  color: d === '⌫' ? 'var(--muted)' : 'var(--text)',
+                  fontSize: d === '⌫' ? 20 : 24,
+                  fontFamily: 'Rajdhani, sans-serif',
+                  fontWeight: 600,
+                  cursor: d === null ? 'default' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'background 0.1s, transform 0.1s',
+                  WebkitTapHighlightColor: 'transparent',
+                }}
+                onMouseDown={e => { if (d !== null) e.currentTarget.style.transform = 'scale(0.93)' }}
+                onMouseUp={e => { e.currentTarget.style.transform = 'scale(1)' }}
+                onTouchStart={e => { if (d !== null) e.currentTarget.style.transform = 'scale(0.93)' }}
+                onTouchEnd={e => { e.currentTarget.style.transform = 'scale(1)' }}
+              >
+                {d}
+              </button>
+            ))}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ marginTop: 32, fontSize: 11, color: 'rgba(255,255,255,0.12)', letterSpacing: 1 }}>
         ACCESO RESTRINGIDO
       </div>
+
+      <style>{`
+        @keyframes shake {
+          0%, 100% { transform: translateX(0); }
+          20% { transform: translateX(-8px); }
+          40% { transform: translateX(8px); }
+          60% { transform: translateX(-6px); }
+          80% { transform: translateX(6px); }
+        }
+      `}</style>
     </div>
   )
 }

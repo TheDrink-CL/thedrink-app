@@ -8,10 +8,9 @@ import Proyectos from './pages/Proyectos'
 import Cuentas from './pages/Cuentas'
 import Catalogo from './pages/Catalogo'
 import Stock from './pages/Stock'
-import DeliveryLogin from './pages/DeliveryLogin'
+import DeliveryLogin, { isDeliveryUnlocked } from './pages/DeliveryLogin'
 import DeliveryPanel from './pages/DeliveryPanel'
 import PinLock, { isPinUnlocked } from './pages/PinLock'
-import { supabase } from './lib/supabase'
 
 const TABS_MAIN = [
   { id: 'dashboard', label: 'Inicio', icon: (
@@ -84,36 +83,21 @@ export default function App() {
   const [tab, setTab] = useState('dashboard')
   const [menuMas, setMenuMas] = useState(false)
   const [desbloqueado, setDesbloqueado] = useState(isPinUnlocked())
-
-  // ── Delivery auth ──────────────────────────────────────────────────────────
-  const [deliveryUser, setDeliveryUser] = useState(null)
-  const [deliveryChecked, setDeliveryChecked] = useState(false)
+  const [deliveryDesbloqueado, setDeliveryDesbloqueado] = useState(isDeliveryUnlocked())
 
   const isEnMas = TABS_MAS.some(t => t.id === tab)
 
-  useEffect(() => {
-    if (!isDeliveryRoute()) { setDeliveryChecked(true); return }
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        const role = session.user.user_metadata?.role
-        if (role === 'delivery' || role === 'admin') {
-          setDeliveryUser(session.user)
-        }
-      }
-      setDeliveryChecked(true)
-    })
-  }, [])
-
-  // ── Ruta /delivery ─────────────────────────────────────────────────────────
+  // ── Ruta /delivery — solo PIN ──────────────────────────────────────────────
   if (isDeliveryRoute()) {
-    if (!deliveryChecked) return null
-    if (!deliveryUser) {
-      return <DeliveryLogin onLogin={(u) => setDeliveryUser(u)} />
+    if (!deliveryDesbloqueado) {
+      return <DeliveryLogin onLogin={() => setDeliveryDesbloqueado(true)} />
     }
     return (
       <DeliveryPanel
-        user={deliveryUser}
-        onLogout={() => setDeliveryUser(null)}
+        onLogout={() => {
+          sessionStorage.removeItem('thedrink_delivery_unlocked')
+          setDeliveryDesbloqueado(false)
+        }}
       />
     )
   }

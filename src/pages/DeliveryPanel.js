@@ -369,7 +369,7 @@ function DeliveryCard({ orden, onEstadoChange }) {
   )
 }
 
-export default function DeliveryPanel({ user, onLogout }) {
+export default function DeliveryPanel({ onLogout }) {
   const [ordenes, setOrdenes] = useState([])
   const [loading, setLoading] = useState(true)
   const [filtroEstado, setFiltroEstado] = useState('pendiente')
@@ -385,7 +385,7 @@ export default function DeliveryPanel({ user, onLogout }) {
     const { data: ords } = await supabase
       .from('ordenes')
       .select('*')
-      .in('delivery_tipo', ['motoboy', 'propio', 'uber', 'otro'])
+      .not('estado_delivery', 'is', null)
       .order('fecha', { ascending: false })
       .order('hora', { ascending: false })
 
@@ -411,8 +411,7 @@ export default function DeliveryPanel({ user, onLogout }) {
 
   useEffect(() => { load() }, [load])
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
+  const handleLogout = () => {
     onLogout()
   }
 
