@@ -948,7 +948,7 @@ export default function Analisis() {
           supabase.from('ventas').select('id, fecha, litros, precio_venta, origen, receta_nombre, orden_id').order('fecha', { ascending: false }),
           supabase.from('caja').select('fecha, monto, categoria, tipo').eq('tipo', 'salida'),
           supabase.from('compras').select('fecha, insumo_nombre, cantidad, precio_total, es_inversion, tipo').order('fecha'),
-          supabase.from('ordenes').select('id, fecha, hora, medio_pago, delivery, delivery_tipo').order('fecha', { ascending: false }),
+          supabase.from('ordenes').select('id, fecha, hora, medio_pago, delivery, delivery_tipo, distancia_km').order('fecha', { ascending: false }),
           supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad, unidad'),
           supabase.from('insumos').select('nombre, stock_actual, costo_ppp, unidad'),
           supabase.from('config').select('*'),

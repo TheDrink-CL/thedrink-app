@@ -88,6 +88,15 @@ function TicketModal({ orden, onCerrar }) {
           </div>
         )}
 
+        {/* Delivery propio o info de distancia */}
+        {(orden.delivery_tipo === 'propio' || orden.distancia_km) && (
+          <div style={{ textAlign: 'center', marginTop: 6, fontSize: 11, color: 'var(--muted)' }}>
+            {orden.delivery_tipo === 'propio' ? '⚡ Entrega propia (EV)' :
+             orden.delivery_tipo === 'retiro' ? '🚶 Retiro' : ''}
+            {orden.distancia_km ? ` · ${orden.distancia_km} km` : ''}
+          </div>
+        )}
+
         {orden.nota && (
           <div style={{ textAlign: 'center', marginTop: 6, fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>
             {orden.nota}
@@ -139,6 +148,7 @@ const MEDIOS_PAGO = [
 const TIPOS_DELIVERY = [
   { id: 'uber',    label: '🛵 Uber Eats' },
   { id: 'motoboy', label: '🏍️ Motoboy' },
+  { id: 'propio',  label: '⚡ Propio (EV)' },
   { id: 'retiro',  label: '🚶 Retiro' },
   { id: 'otro',    label: '· Otro' },
 ]
@@ -165,6 +175,7 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
   const [medioPago, setMedioPago] = useState(orden.medio_pago || 'transferencia')
   const [delivery, setDelivery] = useState(orden.delivery || '')
   const [deliveryTipo, setDeliveryTipo] = useState(orden.delivery_tipo || '')
+  const [distanciaKm, setDistanciaKm] = useState(orden.distancia_km ?? '')
   const [nota, setNota] = useState(orden.nota || '')
   const [items, setItems] = useState(
     (orden.ventas || []).map(v => ({
@@ -197,7 +208,8 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
       medio_pago: medioPago,
       nota: nota || null,
       delivery: parseFloat(delivery) || 0,
-      delivery_tipo: (parseFloat(delivery) > 0 || deliveryTipo === 'retiro') ? (deliveryTipo || null) : null,
+      delivery_tipo: (parseFloat(delivery) > 0 || deliveryTipo === 'retiro' || deliveryTipo === 'propio') ? (deliveryTipo || null) : null,
+      distancia_km: (deliveryTipo && deliveryTipo !== 'retiro' && distanciaKm !== '') ? parseFloat(distanciaKm) : null,
     }).eq('id', orden.id)
 
     // Borrar ventas antiguas e insertar nuevas
@@ -306,21 +318,29 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
           </div>
         </div>
 
-        <div style={{ display:'grid', gridTemplateColumns: deliveryTipo && deliveryTipo !== 'retiro' ? '1fr 1fr' : '1fr', gap:12, marginBottom:16 }}>
-          {deliveryTipo && deliveryTipo !== 'retiro' && (
+        {deliveryTipo && deliveryTipo !== 'retiro' && (
+          <div style={{ display:'grid', gridTemplateColumns: deliveryTipo === 'propio' ? '1fr' : '1fr 1fr', gap:12, marginBottom:12 }}>
+            {deliveryTipo !== 'propio' && (
+              <div className="form-group">
+                <label className="form-label">
+                  {deliveryTipo === 'uber' ? 'Costo Uber' :
+                   deliveryTipo === 'motoboy' ? 'Pago motoboy' :
+                   'Costo entrega'}
+                </label>
+                <input type="number" className="form-input" value={delivery} placeholder="ej: 2500" onChange={e => setDelivery(e.target.value)} />
+              </div>
+            )}
             <div className="form-group">
-              <label className="form-label">
-                {deliveryTipo === 'uber' ? 'Costo Uber' :
-                 deliveryTipo === 'motoboy' ? 'Pago motoboy' :
-                 'Costo entrega'}
-              </label>
-              <input type="number" className="form-input" value={delivery} placeholder="ej: 2500" onChange={e => setDelivery(e.target.value)} />
+              <label className="form-label">Distancia (km)</label>
+              <input type="number" step="0.1" className="form-input" value={distanciaKm} placeholder="ej: 6.5"
+                onChange={e => setDistanciaKm(e.target.value)} />
             </div>
-          )}
-          <div className="form-group">
-            <label className="form-label">Nota</label>
-            <input type="text" className="form-input" value={nota} placeholder="opcional" onChange={e => setNota(e.target.value)} />
           </div>
+        )}
+
+        <div className="form-group" style={{ marginBottom:16 }}>
+          <label className="form-label">Nota</label>
+          <input type="text" className="form-input" value={nota} placeholder="opcional" onChange={e => setNota(e.target.value)} />
         </div>
 
         {total > 0 && (
@@ -409,6 +429,7 @@ export default function Ventas() {
   const [medioPago, setMedioPago] = useState('transferencia')
   const [delivery, setDelivery] = useState('')
   const [deliveryTipo, setDeliveryTipo] = useState('')
+  const [distanciaKm, setDistanciaKm] = useState('')
   const [nota, setNota] = useState('')
   const [items, setItems] = useState([itemVacio()])
 
@@ -518,7 +539,8 @@ export default function Ventas() {
       medio_pago: medioPago,
       nota: nota || null,
       delivery: parseFloat(delivery) || 0,
-      delivery_tipo: (parseFloat(delivery) > 0 || deliveryTipo === 'retiro') ? (deliveryTipo || null) : null,
+      delivery_tipo: (parseFloat(delivery) > 0 || deliveryTipo === 'retiro' || deliveryTipo === 'propio') ? (deliveryTipo || null) : null,
+      distancia_km: (deliveryTipo && deliveryTipo !== 'retiro' && distanciaKm !== '') ? parseFloat(distanciaKm) : null,
     }).select().single()
 
     console.log('orden result:', orden, 'error:', errOrden)
@@ -564,6 +586,7 @@ export default function Ventas() {
     setMedioPago('transferencia')
     setDelivery('')
     setDeliveryTipo('')
+    setDistanciaKm('')
     setNota('')
     setItems([itemVacio()])
     load()
@@ -721,21 +744,31 @@ export default function Ventas() {
                 <button key={t.id} type="button" className={`chip ${deliveryTipo === t.id ? 'selected' : ''}`}
                   onClick={() => {
                     setDeliveryTipo(d => d === t.id ? '' : t.id)
-                    if (t.id === 'retiro') setDelivery('')
+                    if (t.id === 'retiro') { setDelivery(''); setDistanciaKm('') }
+                    if (t.id === 'propio') setDelivery('')
                   }}>{t.label}</button>
               ))}
             </div>
           </div>
 
           {deliveryTipo && deliveryTipo !== 'retiro' && (
-            <div className="form-group">
-              <label className="form-label">
-                {deliveryTipo === 'uber' ? 'Costo Uber Eats' :
-                 deliveryTipo === 'motoboy' ? 'Pago al motoboy' :
-                 'Costo entrega'}
-              </label>
-              <input type="number" className="form-input" value={delivery} placeholder="ej: 2500"
-                onChange={e => setDelivery(e.target.value)} />
+            <div style={{ display:'grid', gridTemplateColumns: deliveryTipo === 'propio' ? '1fr' : '1fr 1fr', gap:12 }}>
+              {deliveryTipo !== 'propio' && (
+                <div className="form-group">
+                  <label className="form-label">
+                    {deliveryTipo === 'uber' ? 'Costo Uber Eats' :
+                     deliveryTipo === 'motoboy' ? 'Pago al motoboy' :
+                     'Costo entrega'}
+                  </label>
+                  <input type="number" className="form-input" value={delivery} placeholder="ej: 2500"
+                    onChange={e => setDelivery(e.target.value)} />
+                </div>
+              )}
+              <div className="form-group">
+                <label className="form-label">Distancia (km)</label>
+                <input type="number" step="0.1" className="form-input" value={distanciaKm} placeholder="ej: 6.5"
+                  onChange={e => setDistanciaKm(e.target.value)} />
+              </div>
             </div>
           )}
 
