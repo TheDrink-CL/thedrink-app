@@ -432,6 +432,7 @@ export default function Ventas() {
   const [delivery, setDelivery] = useState('')
   const [deliveryTipo, setDeliveryTipo] = useState('')
   const [distanciaKm, setDistanciaKm] = useState('')
+  const [enviarADelivery, setEnviarADelivery] = useState(false)
   const [nota, setNota] = useState('')
   const [items, setItems] = useState([itemVacio()])
 
@@ -533,20 +534,19 @@ export default function Ventas() {
     }
     setLoading(true)
 
-    const esDeliveryDomicilio = deliveryTipo && deliveryTipo !== 'retiro'
     const { data: orden, error: errOrden } = await supabase.from('ordenes').insert({
       fecha,
       hora: hora || null,
       cliente_nombre: cliente || null,
       cliente_telefono: clienteTelefono || null,
-      cliente_direccion: esDeliveryDomicilio ? (clienteDireccion || null) : null,
+      cliente_direccion: enviarADelivery ? (clienteDireccion || null) : null,
       origen: origen || null,
       medio_pago: medioPago,
       nota: nota || null,
       delivery: parseFloat(delivery) || 0,
       delivery_tipo: (parseFloat(delivery) > 0 || deliveryTipo === 'retiro' || deliveryTipo === 'propio') ? (deliveryTipo || null) : null,
       distancia_km: (deliveryTipo && deliveryTipo !== 'retiro' && distanciaKm !== '') ? parseFloat(distanciaKm) : null,
-      estado_delivery: esDeliveryDomicilio ? 'pendiente' : null,
+      estado_delivery: enviarADelivery ? 'pendiente' : null,
     }).select().single()
 
     console.log('orden result:', orden, 'error:', errOrden)
@@ -595,6 +595,7 @@ export default function Ventas() {
     setDelivery('')
     setDeliveryTipo('')
     setDistanciaKm('')
+    setEnviarADelivery(false)
     setNota('')
     setItems([itemVacio()])
     load()
@@ -764,12 +765,75 @@ export default function Ventas() {
               {TIPOS_DELIVERY.map(t => (
                 <button key={t.id} type="button" className={`chip ${deliveryTipo === t.id ? 'selected' : ''}`}
                   onClick={() => {
-                    setDeliveryTipo(d => d === t.id ? '' : t.id)
-                    if (t.id === 'retiro') { setDelivery(''); setDistanciaKm('') }
+                    const nuevo = deliveryTipo === t.id ? '' : t.id
+                    setDeliveryTipo(nuevo)
+                    if (t.id === 'retiro') { setDelivery(''); setDistanciaKm(''); setEnviarADelivery(false) }
                     if (t.id === 'propio') setDelivery('')
+                    // Auto-activar toggle si es motoboy o propio
+                    if (nuevo === 'motoboy' || nuevo === 'propio') setEnviarADelivery(true)
+                    if (nuevo === '' || nuevo === 'retiro' || nuevo === 'uber' || nuevo === 'otro') setEnviarADelivery(false)
                   }}>{t.label}</button>
               ))}
             </div>
+
+            {/* Toggle: enviar al panel de delivery */}
+            {(deliveryTipo === 'motoboy' || deliveryTipo === 'propio') && (
+              <button
+                type="button"
+                onClick={() => setEnviarADelivery(v => !v)}
+                style={{
+                  marginTop: 10,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  width: '100%',
+                  background: enviarADelivery
+                    ? 'rgba(0,180,180,0.1)'
+                    : 'rgba(255,255,255,0.03)',
+                  border: `1px solid ${enviarADelivery ? 'rgba(0,180,180,0.4)' : 'var(--border)'}`,
+                  borderRadius: 10,
+                  padding: '11px 14px',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {/* Switch visual */}
+                <div style={{
+                  width: 36,
+                  height: 20,
+                  borderRadius: 10,
+                  background: enviarADelivery ? 'var(--cyan)' : 'rgba(255,255,255,0.15)',
+                  position: 'relative',
+                  flexShrink: 0,
+                  transition: 'background 0.2s',
+                }}>
+                  <div style={{
+                    position: 'absolute',
+                    top: 3,
+                    left: enviarADelivery ? 19 : 3,
+                    width: 14,
+                    height: 14,
+                    borderRadius: '50%',
+                    background: '#fff',
+                    transition: 'left 0.2s',
+                  }} />
+                </div>
+                <div style={{ textAlign: 'left' }}>
+                  <div style={{
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: enviarADelivery ? 'var(--cyan)' : 'var(--muted)',
+                  }}>
+                    📦 Enviar al panel de delivery
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>
+                    {enviarADelivery
+                      ? 'El repartidor verá este pedido'
+                      : 'No aparecerá en el panel del repartidor'}
+                  </div>
+                </div>
+              </button>
+            )}
           </div>
 
           {deliveryTipo && deliveryTipo !== 'retiro' && (

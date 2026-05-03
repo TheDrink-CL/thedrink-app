@@ -1,6 +1,66 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatCLP } from '../lib/calculos'
+
+// ─── Timer de espera ─────────────────────────────────────────────────────────
+function useTiempoEspera(fecha, hora) {
+  const [minutos, setMinutos] = useState(0)
+
+  useEffect(() => {
+    if (!fecha) return
+    const calcular = () => {
+      const base = hora ? `${fecha}T${hora}:00` : `${fecha}T00:00:00`
+      const creado = new Date(base)
+      const ahora = new Date()
+      const diff = Math.floor((ahora - creado) / 60000) // minutos
+      setMinutos(Math.max(0, diff))
+    }
+    calcular()
+    const id = setInterval(calcular, 60000)
+    return () => clearInterval(id)
+  }, [fecha, hora])
+
+  return minutos
+}
+
+function TimerEspera({ fecha, hora, estado }) {
+  const minutos = useTiempoEspera(fecha, hora)
+  if (estado === 'entregado') return null
+
+  const horas = Math.floor(minutos / 60)
+  const mins = minutos % 60
+  const texto = horas > 0 ? `${horas}h ${mins}m` : `${mins}m`
+
+  // Color según urgencia
+  const color = minutos < 30 ? 'var(--green)'
+    : minutos < 60 ? '#F59E0B'
+    : 'var(--pink)'
+
+  const bgColor = minutos < 30 ? 'rgba(34,197,94,0.1)'
+    : minutos < 60 ? 'rgba(245,158,11,0.1)'
+    : 'rgba(196,0,90,0.12)'
+
+  return (
+    <div style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 5,
+      background: bgColor,
+      border: `1px solid ${color}44`,
+      borderRadius: 20,
+      padding: '3px 10px',
+      fontSize: 12,
+      color,
+      fontWeight: 700,
+    }}>
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+        <circle cx="12" cy="12" r="10"/>
+        <polyline points="12 6 12 12 16 14"/>
+      </svg>
+      {texto} esperando
+    </div>
+  )
+}
 
 const ESTADOS = [
   { id: 'pendiente',  label: 'Pendiente',  emoji: '🕐', color: 'var(--pink)' },
@@ -104,6 +164,11 @@ function DeliveryCard({ orden, onEstadoChange }) {
         }}>
           {cfg.emoji} {cfg.label}
         </div>
+      </div>
+
+      {/* Timer de espera */}
+      <div style={{ marginBottom: 10 }}>
+        <TimerEspera fecha={orden.fecha} hora={orden.hora} estado={orden.estado_delivery} />
       </div>
 
       {/* Dirección */}
