@@ -442,6 +442,8 @@ export default function DeliveryPanel({ onLogout }) {
     setArchivando(false)
   }
 
+  const handleLogout = () => { onLogout() }
+
   const ordenesFiltradas = ordenes.filter(o => o.estado_delivery === filtroEstado)
 
   const conteos = {
