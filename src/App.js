@@ -10,6 +10,7 @@ import Catalogo from './pages/Catalogo'
 import Stock from './pages/Stock'
 import DeliveryLogin from './pages/DeliveryLogin'
 import DeliveryPanel from './pages/DeliveryPanel'
+import PinLock, { isPinUnlocked } from './pages/PinLock'
 import { supabase } from './lib/supabase'
 
 const TABS_MAIN = [
@@ -73,8 +74,6 @@ const TABS_MAS = [
   )},
 ]
 
-const ALL_TABS = [...TABS_MAIN, ...TABS_MAS]
-
 // Detectar si la URL es /delivery
 const isDeliveryRoute = () => {
   const path = window.location.pathname
@@ -84,12 +83,14 @@ const isDeliveryRoute = () => {
 export default function App() {
   const [tab, setTab] = useState('dashboard')
   const [menuMas, setMenuMas] = useState(false)
+  const [desbloqueado, setDesbloqueado] = useState(isPinUnlocked())
+
+  // ── Delivery auth ──────────────────────────────────────────────────────────
   const [deliveryUser, setDeliveryUser] = useState(null)
   const [deliveryChecked, setDeliveryChecked] = useState(false)
 
   const isEnMas = TABS_MAS.some(t => t.id === tab)
 
-  // En ruta /delivery: verificar si ya hay sesión activa
   useEffect(() => {
     if (!isDeliveryRoute()) { setDeliveryChecked(true); return }
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -103,9 +104,9 @@ export default function App() {
     })
   }, [])
 
-  // Modo delivery: pantalla separada sin nav principal
+  // ── Ruta /delivery ─────────────────────────────────────────────────────────
   if (isDeliveryRoute()) {
-    if (!deliveryChecked) return null // evitar flash
+    if (!deliveryChecked) return null
     if (!deliveryUser) {
       return <DeliveryLogin onLogin={(u) => setDeliveryUser(u)} />
     }
@@ -115,6 +116,11 @@ export default function App() {
         onLogout={() => setDeliveryUser(null)}
       />
     )
+  }
+
+  // ── PIN lock app principal ─────────────────────────────────────────────────
+  if (!desbloqueado) {
+    return <PinLock onUnlock={() => setDesbloqueado(true)} />
   }
 
   const handleNavClick = (id) => {
@@ -142,7 +148,7 @@ export default function App() {
           <div style={{
             position:'fixed', bottom:70, right:12, zIndex:100,
             background:'var(--card)', border:'1px solid var(--border)',
-            borderRadius:14, padding:8, minWidth:170,
+            borderRadius:14, padding:8, minWidth:180,
             boxShadow:'0 8px 32px rgba(0,0,0,0.5)'
           }}>
             {TABS_MAS.map(t => (
@@ -158,6 +164,25 @@ export default function App() {
                 {t.label}
               </button>
             ))}
+
+            {/* Divisor */}
+            <div style={{ borderTop:'1px solid var(--border)', margin:'6px 0' }} />
+
+            {/* Acceso a Delivery */}
+            <button
+              onClick={() => window.open('/delivery', '_blank')}
+              style={{
+                display:'flex', alignItems:'center', gap:12,
+                width:'100%', background:'none',
+                border:'none', borderRadius:10, padding:'10px 14px',
+                color:'var(--muted)',
+                cursor:'pointer', fontSize:14, fontWeight:400
+              }}>
+              <span style={{ width:20, height:20, display:'flex', alignItems:'center', justifyContent:'center', fontSize:16 }}>
+                🏍️
+              </span>
+              Panel Delivery
+            </button>
           </div>
         </>
       )}
