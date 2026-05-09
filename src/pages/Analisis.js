@@ -923,6 +923,89 @@ function ReporteMensual({ ventas, ordenes, compras, gastosCaja, recetaIngredient
   )
 }
 
+// ─── Bloque: Métricas de distancia ──────────────────────────────────────────
+
+function MetricasDistancia({ ordenes }) {
+  const conDist = ordenes.filter(o => o.distancia_km != null && o.distancia_km > 0)
+  if (conDist.length === 0) return null
+
+  const dists = conDist.map(o => o.distancia_km).sort((a, b) => a - b)
+  const promedio = dists.reduce((s, d) => s + d, 0) / dists.length
+  const mid = Math.floor(dists.length / 2)
+  const mediana = dists.length % 2 !== 0 ? dists[mid] : (dists[mid - 1] + dists[mid]) / 2
+  const maxima = dists[dists.length - 1]
+
+  const TRAMOS = [
+    { label: '0–5 km',  min: 0,  max: 5  },
+    { label: '5–8 km',  min: 5,  max: 8  },
+    { label: '8–12 km', min: 8,  max: 12 },
+    { label: '12–15 km',min: 12, max: 15 },
+    { label: '+15 km',  min: 15, max: Infinity },
+  ]
+  const colores = ['var(--cyan)', '#00c896', '#f59e0b', '#f97316', 'var(--pink)']
+
+  const conteos = TRAMOS.map(t =>
+    conDist.filter(o => o.distancia_km >= t.min && o.distancia_km < t.max).length
+  )
+  const maxConteo = Math.max(...conteos, 1)
+
+  const pct05  = Math.round(conteos[0] / conDist.length * 100)
+  const pct15p = Math.round(conteos[4] / conDist.length * 100)
+
+  return (
+    <div className="card">
+      <div className="card-title">Distribución por distancia</div>
+
+      {/* KPIs */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 16 }}>
+        {[
+          { label: 'Promedio',  val: `${promedio.toFixed(1)} km` },
+          { label: 'Mediana',   val: `${mediana.toFixed(1)} km` },
+          { label: 'Máxima',    val: `${maxima} km` },
+          { label: 'Con distancia', val: conDist.length },
+        ].map(k => (
+          <div key={k.label} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: '10px 8px', textAlign: 'center' }}>
+            <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>{k.label}</div>
+            <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--cyan)' }}>{k.val}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Badges rápidos */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 12, background: 'rgba(0,180,180,0.1)', color: 'var(--cyan)', borderRadius: 8, padding: '3px 10px', fontWeight: 700 }}>
+          {pct05}% pedidos ≤5 km
+        </span>
+        <span style={{ fontSize: 12, background: 'rgba(196,0,90,0.1)', color: 'var(--pink)', borderRadius: 8, padding: '3px 10px', fontWeight: 700 }}>
+          {pct15p}% pedidos +15 km
+        </span>
+      </div>
+
+      {/* Barras por tramo */}
+      {TRAMOS.map((t, i) => {
+        const n = conteos[i]
+        const pct = maxConteo > 0 ? n / maxConteo : 0
+        return (
+          <div key={t.label} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+            <div style={{ width: 56, fontSize: 11, color: 'var(--muted)', textAlign: 'right', flexShrink: 0 }}>{t.label}</div>
+            <div style={{ flex: 1, height: 20, background: 'rgba(255,255,255,0.05)', borderRadius: 4, overflow: 'hidden' }}>
+              <div style={{
+                height: '100%',
+                width: `${pct * 100}%`,
+                background: colores[i],
+                borderRadius: 4,
+                transition: 'width 0.4s',
+                minWidth: n > 0 ? 4 : 0,
+              }} />
+            </div>
+            <div style={{ width: 20, fontSize: 12, fontWeight: 700, color: 'var(--text)', flexShrink: 0 }}>{n}</div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ─── Página principal ────────────────────────────────────────────────────────
 
 export default function Analisis() {
@@ -1067,6 +1150,7 @@ export default function Analisis() {
             </>
           )}
 
+          <MetricasDistancia ordenes={ordenes} />
           <ProyeccionDemanda ventas={ventas} recetaIngredientes={recetaIngredientes} insumos={insumos} />
           <EvolucionCostos compras={comprasDetalle} />
         </>

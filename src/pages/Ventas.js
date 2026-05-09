@@ -425,6 +425,7 @@ export default function Ventas() {
   const [fecha, setFecha] = useState(fechaHoy())
   const [hora, setHora] = useState(horaAhora())
   const [cliente, setCliente] = useState('')
+  const [clienteSugerencias, setClienteSugerencias] = useState([])
   const [clienteTelefono, setClienteTelefono] = useState('')
   const [clienteDireccion, setClienteDireccion] = useState('')
   const [origen, setOrigen] = useState('')
@@ -492,6 +493,38 @@ export default function Ventas() {
   }
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2800) }
+
+  // Busca clientes anteriores que coincidan con el texto escrito
+  const buscarSugerencias = (texto) => {
+    if (!texto || texto.length < 2) { setClienteSugerencias([]); return }
+    const q = texto.toLowerCase().trim()
+    const vistos = {}
+    const sugs = []
+    ordenes
+      .filter(o => o._tipo === 'orden' && o.cliente_nombre)
+      .forEach(o => {
+        const nombre = o.cliente_nombre.trim()
+        const key = nombre.toLowerCase()
+        if (!key.includes(q)) return
+        if (vistos[key]) return
+        vistos[key] = true
+        sugs.push({
+          nombre,
+          telefono: o.cliente_telefono || '',
+          direccion: o.cliente_direccion || '',
+          distancia: o.distancia_km || '',
+        })
+      })
+    setClienteSugerencias(sugs.slice(0, 5))
+  }
+
+  const aplicarSugerencia = (sug) => {
+    setCliente(sug.nombre)
+    setClienteTelefono(sug.telefono)
+    setClienteDireccion(sug.direccion)
+    if (sug.distancia) setDistanciaKm(String(sug.distancia))
+    setClienteSugerencias([])
+  }
 
   const getPrecioSugerido = (nombre) => {
     const r = recetas.find(x => x.nombre === nombre)
@@ -588,6 +621,7 @@ export default function Ventas() {
     setFecha(fechaHoy())
     setHora(horaAhora())
     setCliente('')
+    setClienteSugerencias([])
     setClienteTelefono('')
     setClienteDireccion('')
     setOrigen('')
@@ -654,10 +688,36 @@ export default function Ventas() {
               <input type="time" className="form-input" value={hora} onChange={e => setHora(e.target.value)} />
             </div>
           </div>
-          <div className="form-group">
+          <div className="form-group" style={{ position: 'relative' }}>
             <label className="form-label">Cliente — opcional</label>
             <input type="text" className="form-input" value={cliente} placeholder="ej: Juan Pérez"
-              onChange={e => setCliente(e.target.value)} />
+              onChange={e => { setCliente(e.target.value); buscarSugerencias(e.target.value) }}
+              onBlur={() => setTimeout(() => setClienteSugerencias([]), 180)}
+              autoComplete="off"
+            />
+            {clienteSugerencias.length > 0 && (
+              <div style={{
+                position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100,
+                background: 'var(--card)', border: '1px solid var(--border)',
+                borderRadius: 10, marginTop: 4, overflow: 'hidden',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.5)'
+              }}>
+                {clienteSugerencias.map((sug, i) => (
+                  <button key={i} type="button"
+                    onMouseDown={() => aplicarSugerencia(sug)}
+                    style={{
+                      display: 'block', width: '100%', textAlign: 'left',
+                      background: 'none', border: 'none', borderBottom: i < clienteSugerencias.length - 1 ? '1px solid var(--border)' : 'none',
+                      padding: '10px 14px', cursor: 'pointer', color: 'var(--text)'
+                    }}>
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>{sug.nombre}</div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+                      {[sug.direccion, sug.telefono, sug.distancia ? `${sug.distancia} km` : ''].filter(Boolean).join(' · ')}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
