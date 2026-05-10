@@ -495,28 +495,26 @@ export default function Ventas() {
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2800) }
 
-  // Busca clientes anteriores que coincidan con el texto escrito
+  // Busca clientes desde la tabla clientes (maestro)
+  const [clientesMaestro, setClientesMaestro] = useState([])
+  useEffect(() => {
+    supabase.from('clientes').select('*').order('nombre').then(({ data }) => setClientesMaestro(data || []))
+  }, [])
+
   const buscarSugerencias = (texto) => {
     if (!texto || texto.length < 2) { setClienteSugerencias([]); return }
     const q = texto.toLowerCase().trim()
-    const vistos = {}
-    const sugs = []
-    ordenes
-      .filter(o => o._tipo === 'orden' && o.cliente_nombre)
-      .forEach(o => {
-        const nombre = o.cliente_nombre.trim()
-        const key = nombre.toLowerCase()
-        if (!key.includes(q)) return
-        if (vistos[key]) return
-        vistos[key] = true
-        sugs.push({
-          nombre,
-          telefono: o.cliente_telefono || '',
-          direccion: o.cliente_direccion || '',
-          distancia: o.distancia_km || '',
-        })
-      })
-    setClienteSugerencias(sugs.slice(0, 5))
+    const sugs = clientesMaestro
+      .filter(c => c.nombre.toLowerCase().includes(q))
+      .slice(0, 5)
+      .map(c => ({
+        id: c.id,
+        nombre: c.nombre,
+        telefono: c.telefono || '',
+        direccion: c.direccion || '',
+        distancia: c.distancia_km || '',
+      }))
+    setClienteSugerencias(sugs)
   }
 
   const aplicarSugerencia = (sug) => {
@@ -568,10 +566,40 @@ export default function Ventas() {
     }
     setLoading(true)
 
+    // Buscar o crear cliente en tabla maestro
+    let clienteId = null
+    if (cliente.trim()) {
+      const nombreKey = cliente.trim().toLowerCase()
+      const existente = clientesMaestro.find(c => c.nombre.trim().toLowerCase() === nombreKey)
+      if (existente) {
+        clienteId = existente.id
+        // Actualizar datos si se completaron campos nuevos
+        const updates = {}
+        if (clienteTelefono && !existente.telefono) updates.telefono = clienteTelefono
+        if (clienteDireccion && !existente.direccion) updates.direccion = clienteDireccion
+        if (distanciaKm && !existente.distancia_km) updates.distancia_km = parseFloat(distanciaKm)
+        if (origen && !existente.origen) updates.origen = origen
+        if (Object.keys(updates).length > 0) {
+          await supabase.from('clientes').update(updates).eq('id', clienteId)
+        }
+      } else {
+        // Cliente nuevo — crear en maestro
+        const { data: nuevoCliente } = await supabase.from('clientes').insert({
+          nombre: cliente.trim(),
+          telefono: clienteTelefono || null,
+          direccion: clienteDireccion || null,
+          distancia_km: distanciaKm ? parseFloat(distanciaKm) : null,
+          origen: origen || null,
+        }).select().single()
+        if (nuevoCliente) clienteId = nuevoCliente.id
+      }
+    }
+
     const { data: orden, error: errOrden } = await supabase.from('ordenes').insert({
       fecha,
       hora: hora || null,
       cliente_nombre: cliente || null,
+      cliente_id: clienteId,
       cliente_telefono: clienteTelefono || null,
       cliente_direccion: enviarADelivery ? (clienteDireccion || null) : null,
       origen: origen || null,
