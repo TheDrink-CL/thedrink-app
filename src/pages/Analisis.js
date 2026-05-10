@@ -25,32 +25,57 @@ function labelSemana(yyyymm, sem) {
 // ─── Bloque: Ventas por día de la semana ────────────────────────────────────
 
 function VentasPorDia({ ventas }) {
-  // Acumula ingreso y frecuencia por día (0=Dom … 6=Sáb)
-  const porDia = Array(7).fill(null).map(() => ({ ingreso: 0, ventas: 0 }))
+  // Acumula ingreso, frecuencia y cuenta de días únicos por día de semana
+  const porDia = Array(7).fill(null).map(() => ({ ingreso: 0, ventas: 0, diasUnicos: new Set() }))
   ventas.forEach(v => {
     const dia = parseFecha(v.fecha).getDay()
     porDia[dia].ingreso += v.litros * v.precio_venta
     porDia[dia].ventas += 1
+    porDia[dia].diasUnicos.add(v.fecha)
   })
 
-  const maxIngreso = Math.max(...porDia.map(d => d.ingreso), 1)
+  // Promedio por ocurrencia del día (más honesto que el total acumulado)
+  const conPromedio = porDia.map(d => ({
+    ...d,
+    nDias: d.diasUnicos.size,
+    promedio: d.diasUnicos.size > 0 ? d.ingreso / d.diasUnicos.size : 0
+  }))
 
-  // Ordenar Lun→Dom para mejor lectura
+  const [modo, setModo] = React.useState('promedio') // 'promedio' | 'total'
+  const vals = conPromedio.map(d => modo === 'promedio' ? d.promedio : d.ingreso)
+  const maxVal = Math.max(...vals, 1)
+
+  // Ordenar Lun→Dom
   const orden = [1, 2, 3, 4, 5, 6, 0]
+  const mejorIdx = orden.reduce((best, idx) => vals[idx] > vals[best] ? idx : best, orden[0])
 
   return (
     <div className="card">
-      <div className="card-title">Ventas por día de la semana</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div className="card-title" style={{ margin: 0 }}>Ventas por día de la semana</div>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {[{ k: 'promedio', l: 'Promedio' }, { k: 'total', l: 'Total' }].map(t => (
+            <button key={t.k} onClick={() => setModo(t.k)} style={{
+              padding: '3px 9px', borderRadius: 20, border: 'none', cursor: 'pointer',
+              fontSize: 11, fontWeight: 600,
+              background: modo === t.k ? 'var(--cyan)' : 'rgba(255,255,255,0.06)',
+              color: modo === t.k ? '#000' : 'var(--muted)'
+            }}>{t.l}</button>
+          ))}
+        </div>
+      </div>
+
       {ventas.length === 0 && (
         <div style={{ color: 'var(--muted)', fontSize: 13, textAlign: 'center', padding: 12 }}>Sin datos</div>
       )}
+
       {ventas.length > 0 && orden.map(idx => {
-        const d = porDia[idx]
-        const pct = maxIngreso > 0 ? d.ingreso / maxIngreso : 0
-        const esMejor = d.ingreso === maxIngreso && d.ingreso > 0
+        const d = conPromedio[idx]
+        const val = modo === 'promedio' ? d.promedio : d.ingreso
+        const pct = maxVal > 0 ? val / maxVal : 0
+        const esMejor = idx === mejorIdx && val > 0
         return (
           <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-            {/* Etiqueta día */}
             <div style={{
               width: 32, fontSize: 12, fontWeight: 700,
               color: esMejor ? 'var(--cyan)' : 'var(--muted)',
@@ -58,51 +83,74 @@ function VentasPorDia({ ventas }) {
             }}>
               {DIAS[idx]}
             </div>
-            {/* Barra */}
             <div style={{ flex: 1, background: 'rgba(255,255,255,0.06)', borderRadius: 4, height: 8, overflow: 'hidden' }}>
               <div style={{
                 height: '100%', borderRadius: 4,
-                background: esMejor
-                  ? 'linear-gradient(90deg, var(--cyan), #00e5e5)'
-                  : 'rgba(0,180,180,0.4)',
-                width: (pct * 100) + '%',
-                transition: 'width 0.4s ease'
+                background: esMejor ? 'linear-gradient(90deg, var(--cyan), #00e5e5)' : 'rgba(0,180,180,0.4)',
+                width: (pct * 100) + '%', transition: 'width 0.4s ease'
               }} />
             </div>
-            {/* Monto */}
             <div style={{
-              width: 72, fontSize: 12, textAlign: 'right', flexShrink: 0,
-              color: esMejor ? 'var(--cyan)' : 'var(--text)',
-              fontWeight: esMejor ? 700 : 400
+              width: 76, fontSize: 12, textAlign: 'right', flexShrink: 0,
+              color: esMejor ? 'var(--cyan)' : 'var(--text)', fontWeight: esMejor ? 700 : 400
             }}>
-              {d.ingreso > 0 ? formatCLP(d.ingreso) : '—'}
+              {val > 0 ? formatCLP(Math.round(val)) : '—'}
             </div>
-            {/* Nº ventas */}
-            <div style={{ width: 24, fontSize: 11, color: 'var(--muted)', textAlign: 'right', flexShrink: 0 }}>
-              {d.ventas > 0 ? `×${d.ventas}` : ''}
+            <div style={{ width: 32, fontSize: 10, color: 'var(--muted)', textAlign: 'right', flexShrink: 0 }}>
+              {d.nDias > 0 ? `${d.nDias}×` : ''}
             </div>
           </div>
         )
       })}
-      {ventas.length > 0 && (() => {
-        const mejorIdx = porDia.reduce((best, d, i) => d.ingreso > porDia[best].ingreso ? i : best, 0)
-        const peorIdx = porDia.reduce((worst, d, i) => (d.ingreso > 0 && d.ingreso < porDia[worst].ingreso) || porDia[worst].ingreso === 0 ? i : worst, porDia.findIndex(d => d.ingreso > 0))
-        return (
-          <div style={{ marginTop: 12, padding: '10px 12px', background: 'rgba(0,180,180,0.05)', borderRadius: 8, fontSize: 12, color: 'var(--muted)', lineHeight: 1.7 }}>
-            🏆 Mejor día: <span style={{ color: 'var(--cyan)', fontWeight: 700 }}>{DIAS[mejorIdx]}</span>
-            {' · '}
-            {peorIdx >= 0 && <>Más flojo: <span style={{ color: 'var(--muted)' }}>{DIAS[peorIdx]}</span></>}
-          </div>
-        )
-      })()}
+
+      {ventas.length > 0 && (
+        <div style={{ marginTop: 12, padding: '10px 12px', background: 'rgba(0,180,180,0.05)', borderRadius: 8, fontSize: 12, color: 'var(--muted)', lineHeight: 1.7 }}>
+          🏆 Mejor día (promedio): <span style={{ color: 'var(--cyan)', fontWeight: 700 }}>{DIAS[mejorIdx]}</span>
+          {' · '}
+          <span style={{ fontSize: 11 }}>El n× indica cuántas veces cayó ese día en el período.</span>
+        </div>
+      )}
     </div>
   )
 }
 
 // ─── Bloque: Tendencia semanal (últimas 8 semanas) ──────────────────────────
 
+// Detecta si una semana (por sus fechas de ventas) tuvo contexto especial
+function contextoSemana(ventas, key) {
+  // key = 'YYYY-MM-Sn', semana del mes
+  const FERIADOS = ['2026-05-01', '2026-03-28', '2026-05-21', '2026-09-18', '2026-09-19']
+  const fechasSem = ventas
+    .filter(v => {
+      const fecha = parseFecha(v.fecha)
+      const yyyymm = v.fecha.slice(0, 7)
+      const sem = semanaDelMes(fecha)
+      return `${yyyymm}-S${sem}` === key
+    })
+    .map(v => v.fecha)
+
+  const tieneFeriado = fechasSem.some(f => FERIADOS.includes(f))
+  const tieneQuincena = fechasSem.some(f => {
+    const dia = parseInt(f.slice(8, 10), 10)
+    return dia === 15 || dia === 16
+  })
+  const tieneFinMes = fechasSem.some(f => {
+    const dia = parseInt(f.slice(8, 10), 10)
+    return dia >= 28
+  })
+  const tieneInicioMes = fechasSem.some(f => {
+    const dia = parseInt(f.slice(8, 10), 10)
+    return dia <= 5
+  })
+
+  if (tieneFeriado) return { label: 'Feriado', color: 'var(--purple)' }
+  if (tieneInicioMes) return { label: 'Inicio mes', color: 'var(--green)' }
+  if (tieneFinMes) return { label: 'Fin mes', color: '#10b981' }
+  if (tieneQuincena) return { label: 'Quincena', color: '#f59e0b' }
+  return null
+}
+
 function TendenciaSemanal({ ventas }) {
-  // Agrupa por YYYY-MM + semana del mes
   const porSemana = {}
   ventas.forEach(v => {
     const fecha = parseFecha(v.fecha)
@@ -116,33 +164,70 @@ function TendenciaSemanal({ ventas }) {
 
   const semanas = Object.entries(porSemana)
     .sort((a, b) => a[0].localeCompare(b[0]))
-    .slice(-8) // últimas 8 semanas
+    .slice(-8)
 
   if (semanas.length === 0) return null
 
   const maxIngreso = Math.max(...semanas.map(([, d]) => d.ingreso), 1)
+  const promedioSem = semanas.reduce((s, [, d]) => s + d.ingreso, 0) / semanas.length
+
+  // Delta: última semana vs promedio
+  const ultimaSem = semanas[semanas.length - 1]
+  const deltaUltima = promedioSem > 0 ? (ultimaSem[1].ingreso - promedioSem) / promedioSem : null
 
   return (
     <div className="card">
-      <div className="card-title">Tendencia semanal (últimas semanas)</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div className="card-title" style={{ margin: 0 }}>Tendencia semanal</div>
+        {deltaUltima !== null && (
+          <div style={{ fontSize: 12, fontWeight: 700, color: deltaUltima >= 0 ? 'var(--green)' : 'var(--pink)' }}>
+            {deltaUltima >= 0 ? '↑' : '↓'} {Math.abs(Math.round(deltaUltima * 100))}% vs prom.
+          </div>
+        )}
+      </div>
+
       {semanas.map(([key, d]) => {
         const pct = d.ingreso / maxIngreso
+        const ctx = contextoSemana(ventas, key)
+        const esPeak = d.ingreso === maxIngreso
+        const esUltima = key === semanas[semanas.length - 1][0]
         return (
           <div key={key} style={{ marginBottom: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-              <div style={{ fontSize: 12, color: 'var(--muted)' }}>{d.label}</div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-strong)' }}>{formatCLP(d.ingreso)}</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ fontSize: 12, color: esUltima ? 'var(--text)' : 'var(--muted)', fontWeight: esUltima ? 700 : 400 }}>
+                  {d.label}
+                  {esUltima && <span style={{ fontSize: 10, color: 'var(--cyan)', marginLeft: 4 }}>← actual</span>}
+                </div>
+                {ctx && (
+                  <span style={{ fontSize: 10, fontWeight: 700, color: ctx.color, background: ctx.color + '18', borderRadius: 4, padding: '1px 5px' }}>
+                    {ctx.label}
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: esPeak ? 'var(--cyan)' : 'var(--text-strong)' }}>
+                {formatCLP(d.ingreso)}
+              </div>
             </div>
             <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 4, height: 6, overflow: 'hidden' }}>
               <div style={{
                 height: '100%', borderRadius: 4,
-                background: 'linear-gradient(90deg, var(--purple), var(--cyan))',
+                background: esPeak
+                  ? 'linear-gradient(90deg, var(--cyan), #00e5e5)'
+                  : ctx
+                  ? 'linear-gradient(90deg, var(--purple), var(--cyan))'
+                  : 'rgba(127,119,221,0.5)',
                 width: (pct * 100) + '%'
               }} />
             </div>
           </div>
         )
       })}
+
+      <div style={{ padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, fontSize: 11, color: 'var(--muted)', lineHeight: 1.7, marginTop: 4 }}>
+        Promedio semanal: <span style={{ color: 'var(--text)', fontWeight: 700 }}>{formatCLP(Math.round(promedioSem))}</span>
+        {' · '}Las etiquetas muestran si la semana tuvo feriado, quincena o zona de pagos.
+      </div>
     </div>
   )
 }

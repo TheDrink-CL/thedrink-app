@@ -44,7 +44,7 @@ function labelMes(yyyymm) {
   return meses[parseInt(m, 10) - 1] + ' ' + y
 }
 
-function TabPublicidad({ movimientos, ventas }) {
+function TabPublicidad({ movimientos, ventas, ordenes }) {
   const gastosPub = movimientos.filter(m => m.tipo === 'salida' && m.categoria === 'Publicidad')
   const totalPub = gastosPub.reduce((s, m) => s + m.monto, 0)
 
@@ -55,6 +55,28 @@ function TabPublicidad({ movimientos, ventas }) {
 
   const totalVentas = ventas.reduce((s, v) => s + (v.litros * v.precio_venta), 0)
   const roiGlobal = totalPub > 0 ? totalVentas / totalPub : null
+
+  // CAC: gasto pub / clientes nuevos atribuidos a Instagram
+  const ventasIG = ventas.filter(v => v.origen === 'Instagram')
+  const ordenesIG = (ordenes || []).filter(o => o.origen === 'Instagram')
+  const clientesIGUnicos = new Set(ordenesIG.map(o => o.cliente_nombre?.trim().toLowerCase()).filter(Boolean)).size
+  const cacEstimado = clientesIGUnicos > 0 && totalPub > 0 ? totalPub / clientesIGUnicos : null
+  const ingresoIG = ventasIG.reduce((s, v) => s + v.litros * v.precio_venta, 0)
+
+  // % del margen gastado en publicidad
+  // Margen bruto estimado ≈ 35% de ventas (dato real del negocio)
+  const margenEstimadoPesos = totalVentas * 0.354
+  const pctPubMargen = margenEstimadoPesos > 0 ? totalPub / margenEstimadoPesos : null
+
+  // Canal referido vs Instagram: comparativa de eficiencia
+  const ventasRef = ventas.filter(v => v.origen === 'Referido')
+  const ingresoRef = ventasRef.reduce((s, v) => s + v.litros * v.precio_venta, 0)
+
+  // Delta mensual publicidad
+  const mesesOrdenados = todosLosMeses.slice(0, 2)
+  const pubMesAct = mesesOrdenados[0] ? (pubPorMes[mesesOrdenados[0]] || 0) : 0
+  const pubMesAnt = mesesOrdenados[1] ? (pubPorMes[mesesOrdenados[1]] || 0) : 0
+  const deltaPub = pubMesAnt > 0 ? (pubMesAct - pubMesAnt) / pubMesAnt : null
 
   if (gastosPub.length === 0) {
     return (
@@ -69,40 +91,81 @@ function TabPublicidad({ movimientos, ventas }) {
 
   return (
     <div>
+      {/* KPIs principales */}
       <div className="kpi-grid" style={{ marginBottom: 12 }}>
         <div className="kpi-card">
           <div className="kpi-label">Total en publicidad</div>
           <div className="kpi-value" style={{ color: 'var(--pink)', fontSize: 22 }}>{formatCLP(totalPub)}</div>
-          <div className="kpi-sub">acumulado</div>
+          <div className="kpi-sub">
+            {pctPubMargen != null && (
+              <span style={{ color: pctPubMargen > 0.25 ? 'var(--pink)' : pctPubMargen > 0.15 ? '#f59e0b' : 'var(--green)', fontWeight: 700 }}>
+                {Math.round(pctPubMargen * 100)}% del margen bruto
+              </span>
+            )}
+            {pctPubMargen == null && 'acumulado'}
+          </div>
         </div>
         <div className="kpi-card">
-          <div className="kpi-label">Ventas por $1 en ads</div>
-          <div className="kpi-value" style={{ color: roiGlobal >= 5 ? 'var(--green)' : roiGlobal >= 2 ? 'var(--cyan)' : 'var(--pink)', fontSize: 22 }}>
-            {roiGlobal != null ? ('$' + roiGlobal.toFixed(1)) : '—'}
+          <div className="kpi-label">ROI Instagram</div>
+          <div className="kpi-value" style={{ color: roiGlobal >= 3.9 ? 'var(--green)' : roiGlobal >= 2 ? 'var(--cyan)' : 'var(--pink)', fontSize: 22 }}>
+            {roiGlobal != null ? (roiGlobal.toFixed(1) + 'x') : '—'}
           </div>
-          <div className="kpi-sub">ROI publicidad</div>
+          <div className="kpi-sub">{formatCLP(ingresoIG)} en ventas IG</div>
         </div>
       </div>
 
-      <div style={{ background: 'rgba(0,180,180,0.05)', border: '1px solid var(--border)', borderRadius: 10, padding: 12, marginBottom: 12 }}>
-        <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.7 }}>
-          {roiGlobal != null && roiGlobal >= 5 && '✅ Buen retorno — por cada $1 en publicidad generas más de $5 en ventas.'}
-          {roiGlobal != null && roiGlobal >= 2 && roiGlobal < 5 && '🔸 Retorno moderado — considera optimizar campañas o subir el ticket promedio.'}
-          {roiGlobal != null && roiGlobal < 2 && '⚠ Retorno bajo — las ventas no cubren bien el gasto en publicidad. Evalúa pausar o redirigir.'}
+      <div className="kpi-grid" style={{ marginBottom: 12 }}>
+        <div className="kpi-card">
+          <div className="kpi-label">CAC estimado</div>
+          <div className="kpi-value" style={{ fontSize: 20 }}>
+            {cacEstimado != null ? formatCLP(cacEstimado) : '—'}
+          </div>
+          <div className="kpi-sub">por cliente nuevo de IG · {clientesIGUnicos} clientes</div>
+        </div>
+        <div className="kpi-card" style={{ background: 'rgba(34,197,94,0.06)', borderColor: 'rgba(34,197,94,0.2)' }}>
+          <div className="kpi-label">Referidos (gratis)</div>
+          <div className="kpi-value" style={{ color: 'var(--green)', fontSize: 20 }}>{formatCLP(ingresoRef)}</div>
+          <div className="kpi-sub">$0 invertido · {ventasRef.length} ventas</div>
         </div>
       </div>
 
+      {/* Semáforo de % del margen */}
+      {pctPubMargen != null && (
+        <div style={{
+          padding: '10px 14px', borderRadius: 10, marginBottom: 12,
+          background: pctPubMargen > 0.25 ? 'rgba(196,0,90,0.06)' : pctPubMargen > 0.15 ? 'rgba(245,158,11,0.06)' : 'rgba(34,197,94,0.06)',
+          border: `1px solid ${pctPubMargen > 0.25 ? 'rgba(196,0,90,0.3)' : pctPubMargen > 0.15 ? 'rgba(245,158,11,0.3)' : 'rgba(34,197,94,0.3)'}`,
+          fontSize: 12, lineHeight: 1.7, color: 'var(--muted)'
+        }}>
+          {pctPubMargen > 0.25 && <><span style={{ color: 'var(--pink)', fontWeight: 700 }}>⚠ {Math.round(pctPubMargen * 100)}% del margen en publicidad</span> — sobre el límite del 25%. El canal referido ({formatCLP(ingresoRef)}) genera ingresos sin costo; prioriza activarlo antes de escalar pauta.</>}
+          {pctPubMargen > 0.15 && pctPubMargen <= 0.25 && <><span style={{ color: '#f59e0b', fontWeight: 700 }}>🔸 {Math.round(pctPubMargen * 100)}% del margen en publicidad</span> — zona de vigilancia (15–25%). Monitorea si cada pauta convierte bien antes de subir el presupuesto.</>}
+          {pctPubMargen <= 0.15 && <><span style={{ color: 'var(--green)', fontWeight: 700 }}>✅ {Math.round(pctPubMargen * 100)}% del margen en publicidad</span> — saludable. Con ROI de {roiGlobal?.toFixed(1)}x tienes margen para escalar si la demanda lo soporta.</>}
+          {cacEstimado != null && <div style={{ marginTop: 4 }}>💡 Tu costo de adquirir un cliente nuevo por Instagram es {formatCLP(cacEstimado)} — si ese cliente vuelve 2 veces, el CAC se divide a la mitad.</div>}
+        </div>
+      )}
+
+      {/* Publicidad vs Ventas por mes con delta */}
       <div className="card">
-        <div className="card-title">Publicidad vs Ventas por mes</div>
-        {todosLosMeses.map(mes => {
+        <div className="card-title">Publicidad vs ventas por mes</div>
+        {todosLosMeses.map((mes, idx) => {
           const pub = pubPorMes[mes] || 0
           const vtas = ventasPorMes[mes] || 0
           const roi = pub > 0 ? vtas / pub : null
           const maxVal = Math.max(pub, vtas) || 1
+          const esMesActual = idx === 0
+          const pubMesAnterior = todosLosMeses[1] ? (pubPorMes[todosLosMeses[1]] || 0) : null
+          const delta = esMesActual && pubMesAnterior > 0 ? (pub - pubMesAnterior) / pubMesAnterior : null
           return (
             <div key={mes} style={{ paddingBottom: 14, marginBottom: 14, borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-strong)' }}>{labelMes(mes)}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-strong)' }}>{labelMes(mes)}</div>
+                  {esMesActual && delta !== null && (
+                    <div style={{ fontSize: 11, color: delta > 0 ? 'var(--pink)' : 'var(--green)', fontWeight: 700 }}>
+                      {delta > 0 ? `↑ +${Math.round(delta * 100)}%` : `↓ ${Math.round(delta * 100)}%`} pub
+                    </div>
+                  )}
+                </div>
                 {roi != null && (
                   <div style={{ fontSize: 12, color: roi >= 5 ? 'var(--green)' : roi >= 2 ? 'var(--cyan)' : 'var(--pink)', fontWeight: 700 }}>
                     ROI {roi.toFixed(1)}x
@@ -115,7 +178,7 @@ function TabPublicidad({ movimientos, ventas }) {
                   <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 4, height: 6, overflow: 'hidden' }}>
                     <div style={{ height: '100%', borderRadius: 4, background: 'var(--pink)', width: (pub / maxVal * 100) + '%' }} />
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--pink)', marginTop: 3, fontWeight: 600 }}>{formatCLP(pub)}</div>
+                  <div style={{ fontSize: 12, color: 'var(--pink)', marginTop: 3, fontWeight: 600 }}>{pub > 0 ? formatCLP(pub) : '—'}</div>
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: 0.5 }}>Ventas</div>
@@ -149,6 +212,7 @@ function TabPublicidad({ movimientos, ventas }) {
 export default function Caja() {
   const [movimientos, setMovimientos] = useState([])
   const [ventas, setVentas] = useState([])
+  const [ordenes, setOrdenes] = useState([])
   const [saldo, setSaldo] = useState(0)
   const [form, setForm] = useState({
     fecha: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` })(),
@@ -166,14 +230,16 @@ export default function Caja() {
   useEffect(() => { loadData() }, [])
 
   async function loadData() {
-    const [{ data: mov }, { data: vts }, { data: compras }] = await Promise.all([
+    const [{ data: mov }, { data: vts }, { data: compras }, { data: ords }] = await Promise.all([
       supabase.from('caja').select('*').order('fecha', { ascending: false }),
-      supabase.from('ventas').select('litros, precio_venta, delivery, fecha'),
+      supabase.from('ventas').select('litros, precio_venta, delivery, fecha, origen'),
       supabase.from('compras').select('precio_total, es_inversion'),
+      supabase.from('ordenes').select('id, cliente_nombre, origen'),
     ])
 
     setMovimientos(mov || [])
     setVentas(vts || [])
+    setOrdenes(ords || [])
 
     const totalVentas = (vts || []).reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0)
     const totalCompras = (compras || []).reduce((s, c) => s + (c.es_inversion ? 0 : c.precio_total), 0)
@@ -267,7 +333,7 @@ export default function Caja() {
       </div>
 
       {vistaTab === 'publicidad' && (
-        <TabPublicidad movimientos={movimientos} ventas={ventas} />
+        <TabPublicidad movimientos={movimientos} ventas={ventas} ordenes={ordenes} />
       )}
 
       {vistaTab === 'movimientos' && (

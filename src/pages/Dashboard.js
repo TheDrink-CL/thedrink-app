@@ -150,6 +150,40 @@ export default function Dashboard() {
       const pctRecurrentes = totalClientesNombrados > 0 ? clientesRecurrentes.length / totalClientesNombrados : 0
       const topRecurrentes = clientesRecurrentes.sort((a, b) => b.pedidos - a.pedidos).slice(0, 3)
 
+      // Semana actual vs semana anterior
+      const hoyDate = new Date()
+      const hace7 = new Date(hoyDate); hace7.setDate(hoyDate.getDate() - 7)
+      const hace14 = new Date(hoyDate); hace14.setDate(hoyDate.getDate() - 14)
+      const ingresoSemAct = (vts || []).filter(v => new Date(v.fecha) >= hace7).reduce((s, v) => s + v.litros * v.precio_venta, 0)
+      const ingresoSemAnt = (vts || []).filter(v => new Date(v.fecha) >= hace14 && new Date(v.fecha) < hace7).reduce((s, v) => s + v.litros * v.precio_venta, 0)
+      const deltaSem = ingresoSemAnt > 0 ? (ingresoSemAct - ingresoSemAnt) / ingresoSemAnt : null
+
+      // Canal más activo (desde que se registra origen)
+      const porOrigen = {}
+      ;(vts || []).filter(v => v.origen).forEach(v => {
+        porOrigen[v.origen] = (porOrigen[v.origen] || 0) + v.litros * v.precio_venta
+      })
+      const canalTop = Object.entries(porOrigen).sort((a, b) => b[1] - a[1])[0] || null
+
+      // Próximo evento de alta venta
+      const EVENTOS_PROX = [
+        { fecha: '2026-05-15', label: 'Quincena mayo', tipo: 'pago' },
+        { fecha: '2026-05-21', label: 'Gloria Navales', tipo: 'feriado' },
+        { fecha: '2026-05-30', label: 'Fin de mes', tipo: 'pago' },
+        { fecha: '2026-06-15', label: 'Quincena junio', tipo: 'pago' },
+        { fecha: '2026-06-29', label: 'San Pedro y San Pablo', tipo: 'feriado' },
+        { fecha: '2026-07-16', label: 'Virgen del Carmen', tipo: 'feriado' },
+        { fecha: '2026-09-18', label: 'Fiestas Patrias', tipo: 'feriado' },
+      ]
+      const hoyStr = hoyDate.toISOString().slice(0, 10)
+      const proximoEvento = EVENTOS_PROX.find(e => e.fecha > hoyStr) || null
+      let diasHastaEvento = null
+      if (proximoEvento) {
+        const [ey, em, ed] = proximoEvento.fecha.split('-').map(Number)
+        const evDate = new Date(ey, em - 1, ed)
+        diasHastaEvento = Math.ceil((evDate - hoyDate) / (1000 * 60 * 60 * 24))
+      }
+
       const porReceta = {}
       vts?.forEach(v => {
         if (!porReceta[v.receta_nombre]) porReceta[v.receta_nombre] = { litros: 0, ingreso: 0, costo: 0 }
@@ -172,7 +206,7 @@ export default function Dashboard() {
       const transferencias = (ordenes || []).filter(o => o.medio_pago === 'transferencia' && o.fecha >= inicioMes).length
       setTransferenciasMes(transferencias)
 
-      setData({ inversion, ingresoTotal, litrosTotales, costoTotalReal, saldoCaja, ingresoMes, ticketPromedio, ticketMediana, totalOrdenes, clientesRecurrentes: clientesRecurrentes.length, totalClientesNombrados, pctRecurrentes, topRecurrentes, totalActivosFijos })
+      setData({ inversion, ingresoTotal, litrosTotales, costoTotalReal, saldoCaja, ingresoMes, ticketPromedio, ticketMediana, totalOrdenes, clientesRecurrentes: clientesRecurrentes.length, totalClientesNombrados, pctRecurrentes, topRecurrentes, totalActivosFijos, ingresoSemAct, ingresoSemAnt, deltaSem, canalTop, proximoEvento, diasHastaEvento })
       setVentas({ topRecetas, topPorGanancia, recientes: vts?.slice(0, 5) || [] })
       setLoading(false)
     }
@@ -334,6 +368,47 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Semana actual vs anterior */}
+      <div className="kpi-grid">
+        <div className="kpi-card">
+          <div className="kpi-label">Esta semana</div>
+          <div className="kpi-value cyan">{formatCLP(data.ingresoSemAct)}</div>
+          <div className="kpi-sub" style={{ color: data.deltaSem === null ? 'var(--muted)' : data.deltaSem >= 0 ? 'var(--green)' : 'var(--pink)' }}>
+            {data.deltaSem === null ? 'sin semana anterior'
+              : data.deltaSem >= 0
+              ? `↑ ${(data.deltaSem * 100).toFixed(0)}% vs semana pasada`
+              : `↓ ${Math.abs((data.deltaSem * 100).toFixed(0))}% vs semana pasada`}
+          </div>
+        </div>
+        <div className="kpi-card">
+          <div className="kpi-label">Semana anterior</div>
+          <div className="kpi-value">{formatCLP(data.ingresoSemAnt)}</div>
+          <div className="kpi-sub">últimos 7–14 días</div>
+        </div>
+      </div>
+
+      {/* Canal top + próximo evento */}
+      {(data.canalTop || data.proximoEvento) && (
+        <div className="kpi-grid">
+          {data.canalTop && (
+            <div className="kpi-card">
+              <div className="kpi-label">Canal top</div>
+              <div className="kpi-value" style={{ fontSize: 18 }}>
+                {data.canalTop[0] === 'Instagram' ? '📱' : data.canalTop[0] === 'Referido' ? '🤝' : data.canalTop[0] === 'Cliente habitual' ? '⭐' : '•'} {data.canalTop[0]}
+              </div>
+              <div className="kpi-sub">{formatCLP(data.canalTop[1])} acumulado</div>
+            </div>
+          )}
+          {data.proximoEvento && (
+            <div className="kpi-card" style={{ background: data.proximoEvento.tipo === 'feriado' ? 'rgba(127,119,221,0.08)' : 'rgba(16,185,129,0.08)', borderColor: data.proximoEvento.tipo === 'feriado' ? 'rgba(127,119,221,0.3)' : 'rgba(16,185,129,0.3)' }}>
+              <div className="kpi-label">{data.proximoEvento.tipo === 'feriado' ? '🎉 Próximo feriado' : '💵 Próximo pico'}</div>
+              <div className="kpi-value" style={{ fontSize: 18, color: data.proximoEvento.tipo === 'feriado' ? '#AFA9EC' : '#10b981' }}>{data.proximoEvento.label}</div>
+              <div className="kpi-sub">en {data.diasHastaEvento} días · pautar antes</div>
+            </div>
+          )}
+        </div>
+      )}
 
       {data.topRecurrentes.length > 0 && (
         <div className="card">

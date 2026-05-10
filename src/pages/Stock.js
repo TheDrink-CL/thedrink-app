@@ -43,6 +43,7 @@ function EditModal({ insumo, onSave, onCancel }) {
 
 export default function Stock() {
   const [insumos, setInsumos] = useState([])
+  const [consumoDiario, setConsumoDiario] = useState({})
   const [loading, setLoading] = useState(true)
   const [editando, setEditando] = useState(null)
   const [toast, setToast] = useState('')
@@ -50,8 +51,43 @@ export default function Stock() {
   useEffect(() => { loadData() }, [])
 
   async function loadData() {
-    const { data } = await supabase.from('insumos').select('*').order('nombre')
-    setInsumos(data || [])
+    const [{ data: ins }, { data: vts }, { data: recIng }] = await Promise.all([
+      supabase.from('insumos').select('*').order('nombre'),
+      supabase.from('ventas').select('fecha, receta_nombre, litros').order('fecha', { ascending: false }).limit(200),
+      supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad'),
+    ])
+    setInsumos(ins || [])
+
+    // Calcular consumo diario promedio por insumo (últimos 14 días)
+    const hoy = new Date()
+    const hace14 = new Date(hoy); hace14.setDate(hoy.getDate() - 14)
+    const vtsPeriodo = (vts || []).filter(v => {
+      const [y, m, d] = (v.fecha || '').split('-').map(Number)
+      return new Date(y, m - 1, d) >= hace14
+    })
+
+    // Agrupar ventas por receta en el período
+    const litrosPorReceta = {}
+    vtsPeriodo.forEach(v => {
+      litrosPorReceta[v.receta_nombre] = (litrosPorReceta[v.receta_nombre] || 0) + v.litros
+    })
+
+    // Calcular consumo total de insumos en el período
+    const consumoTotal = {}
+    const MERMA = 0.08
+    ;(recIng || []).forEach(ing => {
+      if (!litrosPorReceta[ing.receta_nombre]) return
+      const litros = litrosPorReceta[ing.receta_nombre]
+      const usado = ing.cantidad * litros * (1 + MERMA)
+      consumoTotal[ing.insumo_nombre] = (consumoTotal[ing.insumo_nombre] || 0) + usado
+    })
+
+    // Convertir a consumo diario (÷ 14 días)
+    const cd = {}
+    Object.entries(consumoTotal).forEach(([nombre, total]) => {
+      cd[nombre] = total / 14
+    })
+    setConsumoDiario(cd)
     setLoading(false)
   }
 
@@ -131,31 +167,66 @@ export default function Stock() {
       <div className="card">
         {insumos.map(ins => {
           const estado = getEstado(ins)
+          const cdIns = consumoDiario[ins.nombre] || null
+          const diasRestantes = cdIns > 0 && ins.stock_actual != null
+            ? Math.floor(ins.stock_actual / cdIns)
+            : null
+          const alertaDias = diasRestantes !== null && diasRestantes <= 3
+          const advDias = diasRestantes !== null && diasRestantes > 3 && diasRestantes <= 7
+
           return (
-            <div className="list-item" key={ins.nombre}
+            <div key={ins.nombre}
               onClick={() => setEditando(ins)}
-              style={{ cursor: 'pointer' }}>
+              style={{
+                cursor: 'pointer',
+                display: 'flex', alignItems: 'flex-start', gap: 10,
+                padding: '10px 0',
+                borderBottom: '1px solid rgba(255,255,255,0.05)'
+              }}>
               <div style={{ flex: 1 }}>
                 <div className="list-item-name">{ins.nombre}</div>
                 <div className="list-item-sub">
                   {ins.stock_actual != null
-                    ? `${ins.stock_actual} ${ins.unidad}`
+                    ? `${Math.round(ins.stock_actual)} ${ins.unidad}`
                     : `Sin datos · ${ins.unidad}`}
                   {ins.stock_minimo != null && ` · Mín: ${ins.stock_minimo} ${ins.unidad}`}
+                  {diasRestantes !== null && (
+                    <span style={{
+                      marginLeft: 6, fontWeight: 700,
+                      color: alertaDias ? 'var(--pink)' : advDias ? '#f59e0b' : 'var(--muted)'
+                    }}>
+                      · ~{diasRestantes}d
+                    </span>
+                  )}
                 </div>
+                {/* Barra de stock visual */}
+                {ins.stock_actual != null && ins.stock_minimo != null && ins.stock_minimo > 0 && (
+                  <div style={{ marginTop: 5, height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%', borderRadius: 2,
+                      width: Math.min(100, (ins.stock_actual / (ins.stock_minimo * 3)) * 100) + '%',
+                      background: estadoColor[estado],
+                      transition: 'width 0.4s'
+                    }} />
+                  </div>
+                )}
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, marginTop: 2 }}>
                 <div style={{
-                  fontSize: 11, fontWeight: 700, color: estadoColor[estado],
+                  fontSize: 11, fontWeight: 700, color: alertaDias ? 'var(--pink)' : estadoColor[estado],
                   textTransform: 'uppercase', letterSpacing: 0.5
                 }}>
-                  {estadoLabel[estado]}
+                  {alertaDias ? '¡Comprar!' : estadoLabel[estado]}
                 </div>
-                <div style={{ width: 8, height: 8, borderRadius: '50%', background: estadoColor[estado] }} />
+                <div style={{ width: 8, height: 8, borderRadius: '50%', background: alertaDias ? 'var(--pink)' : estadoColor[estado] }} />
               </div>
             </div>
           )
         })}
+      </div>
+
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, lineHeight: 1.6, padding: '0 4px' }}>
+        Los días (~Xd) son una estimación basada en el consumo real de los últimos 14 días.
       </div>
     </div>
   )
