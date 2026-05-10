@@ -138,7 +138,7 @@ const horaAhora = () => {
 
 const itemVacio = () => ({ receta_nombre: '', litros: 1, precio_venta: '', devuelve_envase: false })
 
-const ORIGENES = ['Instagram', 'Referido', 'Cliente habitual', 'Evento', 'Otro']
+const ORIGENES = ['IG Orgánico', 'IG Pauta', 'Referido', 'Cliente habitual', 'Evento', 'Otro']
 const MEDIOS_PAGO = [
   { id: 'transferencia', label: '🏦 Transferencia' },
   { id: 'debito',        label: '💳 Débito' },
@@ -420,6 +420,7 @@ export default function Ventas() {
   const [filtroCliente, setFiltroCliente] = useState('')
   const [filtroPeriodo, setFiltroPeriodo] = useState('todo') // 'todo' | '7d' | '30d' | '90d'
   const [filtroReceta, setFiltroReceta] = useState('')
+  const [perfilCliente, setPerfilCliente] = useState(null) // nombre del cliente seleccionado para ver perfil
 
   // Formulario de orden nueva
   const [fecha, setFecha] = useState(fechaHoy())
@@ -645,14 +646,102 @@ export default function Ventas() {
   }
 
   const origenColor = (o) => {
-    if (o === 'Instagram') return { bg: 'rgba(196,0,90,0.15)', color: 'var(--pink)' }
+    if (o === 'IG Orgánico' || o === 'Instagram') return { bg: 'rgba(196,0,90,0.15)', color: 'var(--pink)' }
+    if (o === 'IG Pauta') return { bg: 'rgba(196,0,90,0.25)', color: '#ff4d9e' }
+    if (o === 'Referido') return { bg: 'rgba(16,185,129,0.12)', color: 'var(--green)' }
+    if (o === 'Cliente habitual') return { bg: 'rgba(245,158,11,0.12)', color: '#f59e0b' }
     return { bg: 'rgba(0,180,180,0.1)', color: 'var(--cyan)' }
   }
-  const origenIcon = (o) => ({ Instagram:'📱', Referido:'🤝', 'Cliente habitual':'⭐', Evento:'🎉' }[o] || '•')
+  const origenIcon = (o) => ({
+    'IG Orgánico': '📱', 'Instagram': '📱', 'IG Pauta': '🎯',
+    'Referido': '🤝', 'Cliente habitual': '⭐', 'Evento': '🎉'
+  }[o] || '•')
+
+  // Perfil de cliente: calcula stats de un cliente específico
+  const getPerfilClienteData = (nombre) => {
+    if (!nombre) return null
+    const key = nombre.trim().toLowerCase()
+    const ordenesCliente = ordenes.filter(o => (o.cliente_nombre || '').trim().toLowerCase() === key)
+    const totalGastado = ordenesCliente.reduce((s, o) => s + (o.ventas || []).reduce((ss, v) => ss + (v.litros||1)*(v.precio_venta||0), 0), 0)
+    const recetasFav = {}
+    ordenesCliente.forEach(o => (o.ventas||[]).forEach(v => { recetasFav[v.receta_nombre] = (recetasFav[v.receta_nombre]||0)+1 }))
+    const favSorted = Object.entries(recetasFav).sort((a,b)=>b[1]-a[1])
+    const ultOrd = ordenesCliente[0]
+    const origen = ordenesCliente.find(o=>o.origen)?.origen || null
+    const telefono = ordenesCliente.find(o=>o.cliente_telefono)?.cliente_telefono || null
+    const direccion = ordenesCliente.find(o=>o.cliente_direccion)?.cliente_direccion || null
+    return { nombre, pedidos: ordenesCliente.length, totalGastado, favSorted, ultOrd, origen, telefono, direccion }
+  }
 
   return (
     <div className="page">
       {toast && <div className="toast">{toast}</div>}
+
+      {/* Modal perfil cliente */}
+      {perfilCliente && (() => {
+        const p = getPerfilClienteData(perfilCliente)
+        if (!p) return null
+        const oc = origenColor(p.origen)
+        return (
+          <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.8)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:300, padding:24 }}>
+            <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:16, padding:24, maxWidth:360, width:'100%' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:16 }}>
+                <div>
+                  <div style={{ fontSize:18, fontWeight:800, color:'var(--text-strong)' }}>{p.nombre}</div>
+                  {p.origen && (
+                    <span style={{ fontSize:11, background:oc.bg, color:oc.color, borderRadius:10, padding:'2px 8px', fontWeight:600, marginTop:4, display:'inline-block' }}>
+                      {origenIcon(p.origen)} {p.origen}
+                    </span>
+                  )}
+                </div>
+                <button onClick={() => setPerfilCliente(null)}
+                  style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)', fontSize:22, lineHeight:1, padding:0 }}>×</button>
+              </div>
+
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:16 }}>
+                <div style={{ background:'rgba(0,180,180,0.07)', borderRadius:10, padding:'10px 12px', textAlign:'center' }}>
+                  <div style={{ fontSize:22, fontWeight:800, color:'var(--cyan)' }}>{p.pedidos}</div>
+                  <div style={{ fontSize:11, color:'var(--muted)' }}>pedido{p.pedidos!==1?'s':''}</div>
+                </div>
+                <div style={{ background:'rgba(16,185,129,0.07)', borderRadius:10, padding:'10px 12px', textAlign:'center' }}>
+                  <div style={{ fontSize:18, fontWeight:800, color:'var(--green)' }}>{formatCLP(p.totalGastado)}</div>
+                  <div style={{ fontSize:11, color:'var(--muted)' }}>gastado total</div>
+                </div>
+              </div>
+
+              {p.favSorted.length > 0 && (
+                <div style={{ marginBottom:12 }}>
+                  <div style={{ fontSize:11, color:'var(--muted)', textTransform:'uppercase', letterSpacing:1, fontWeight:700, marginBottom:6 }}>Receta favorita</div>
+                  {p.favSorted.slice(0,2).map(([rec, cnt]) => (
+                    <div key={rec} style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
+                      <span style={{ fontSize:13, color:'var(--text)' }}>{rec}</span>
+                      <span style={{ fontSize:13, color:'var(--cyan)', fontWeight:700 }}>{cnt}×</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {p.telefono && (
+                <div style={{ fontSize:12, color:'var(--muted)', marginBottom:4 }}>📞 {p.telefono}</div>
+              )}
+              {p.direccion && (
+                <div style={{ fontSize:12, color:'var(--cyan)', marginBottom:4 }}>📍 {p.direccion}</div>
+              )}
+              {p.ultOrd && (
+                <div style={{ fontSize:12, color:'var(--muted)', marginTop:8 }}>
+                  Último pedido: <strong style={{ color:'var(--text)' }}>{p.ultOrd.fecha}</strong>
+                </div>
+              )}
+
+              {p.pedidos >= 3 && (
+                <div style={{ marginTop:12, background:'rgba(245,158,11,0.08)', border:'1px solid rgba(245,158,11,0.25)', borderRadius:8, padding:'8px 12px', fontSize:12, color:'#f59e0b' }}>
+                  ⭐ Cliente VIP — considera ofrecerle beneficios o descuento fidelidad.
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      })()}
 
       {confirmar && (
         <ConfirmModal
@@ -1000,7 +1089,11 @@ export default function Ventas() {
                 return (
                   <div className="list-item" key={o.id} style={{ gap:8, alignItems:'flex-start' }}>
                     <div style={{ flex:1, minWidth:0 }}>
-                      <div className="list-item-name">{o.cliente_nombre || 'Cliente anónimo'}</div>
+                      <div className="list-item-name"
+                        onClick={o.cliente_nombre ? (e) => { e.stopPropagation(); setPerfilCliente(o.cliente_nombre) } : undefined}
+                        style={{ cursor: o.cliente_nombre ? 'pointer' : 'default', color: o.cliente_nombre ? 'var(--cyan)' : 'var(--text)' }}>
+                        {o.cliente_nombre || 'Cliente anónimo'}
+                      </div>
                       <div className="list-item-sub">{o.fecha}{o.hora ? ` · ${o.hora}` : ''} · {nItems} producto{nItems !== 1 ? 's' : ''}</div>
                       <div style={{ display:'flex', gap:6, marginTop:3, flexWrap:'wrap' }}>
                         {o.origen && (

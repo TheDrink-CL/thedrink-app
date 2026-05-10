@@ -66,6 +66,8 @@ function RecetasComparativo({ topVolumen, topGanancia }) {
   )
 }
 
+const META_SEMANAL_DEFAULT = 250000 // $250k por semana como meta base
+
 export default function Dashboard() {
   const [data, setData] = useState(null)
   const [ventas, setVentas] = useState([])
@@ -73,6 +75,12 @@ export default function Dashboard() {
   const [transferenciasMes, setTransferenciasMes] = useState(0)
   const [limiteTransferencias, setLimiteTransferencias] = useState(50)
   const [loading, setLoading] = useState(true)
+  const [metaSemanal, setMetaSemanal] = useState(() => {
+    const saved = localStorage.getItem('meta_semanal')
+    return saved ? parseInt(saved) : META_SEMANAL_DEFAULT
+  })
+  const [editandoMeta, setEditandoMeta] = useState(false)
+  const [metaInput, setMetaInput] = useState('')
 
   useEffect(() => {
     async function load() {
@@ -141,14 +149,17 @@ export default function Dashboard() {
       ;(ordenes || []).forEach(o => {
         if (!o.cliente_nombre) return
         const key = o.cliente_nombre.trim().toLowerCase()
-        if (!porCliente[key]) porCliente[key] = { nombre: o.cliente_nombre, pedidos: 0 }
+        if (!porCliente[key]) porCliente[key] = { nombre: o.cliente_nombre, pedidos: 0, gastado: 0 }
         porCliente[key].pedidos++
+        // sumar gasto de este pedido
+        const ventasOrden = (vts || []).filter(v => v.orden_id === o.id)
+        porCliente[key].gastado += ventasOrden.reduce((s, v) => s + v.litros * v.precio_venta, 0)
       })
       const clientesConNombre = Object.values(porCliente)
       const clientesRecurrentes = clientesConNombre.filter(c => c.pedidos > 1)
       const totalClientesNombrados = clientesConNombre.length
       const pctRecurrentes = totalClientesNombrados > 0 ? clientesRecurrentes.length / totalClientesNombrados : 0
-      const topRecurrentes = clientesRecurrentes.sort((a, b) => b.pedidos - a.pedidos).slice(0, 3)
+      const topRecurrentes = clientesRecurrentes.sort((a, b) => b.gastado - a.gastado).slice(0, 5)
 
       // Semana actual vs semana anterior
       const hoyDate = new Date()
@@ -369,6 +380,55 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Meta semanal */}
+      {(() => {
+        const pctMeta = metaSemanal > 0 ? Math.min(1, data.ingresoSemAct / metaSemanal) : 0
+        const colorMeta = pctMeta >= 1 ? 'var(--green)' : pctMeta >= 0.7 ? 'var(--cyan)' : pctMeta >= 0.4 ? '#f59e0b' : 'var(--pink)'
+        const falta = Math.max(0, metaSemanal - data.ingresoSemAct)
+        return (
+          <div style={{ background: 'rgba(0,180,180,0.05)', border: '1px solid rgba(0,180,180,0.18)', borderRadius: 12, padding: '12px 14px', marginBottom: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <div style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+                Meta semana
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ fontSize: 16, fontWeight: 800, color: colorMeta }}>
+                  {Math.round(pctMeta * 100)}%
+                </div>
+                {editandoMeta ? (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input type="number" value={metaInput}
+                      onChange={e => setMetaInput(e.target.value)}
+                      style={{ width: 90, background: 'rgba(255,255,255,0.08)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', padding: '3px 8px', fontSize: 12 }}
+                      placeholder="ej: 300000" />
+                    <button onClick={() => {
+                      const v = parseInt(metaInput)
+                      if (v > 0) { setMetaSemanal(v); localStorage.setItem('meta_semanal', v) }
+                      setEditandoMeta(false)
+                    }} style={{ background: 'var(--cyan)', border: 'none', borderRadius: 6, color: '#000', padding: '3px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>OK</button>
+                    <button onClick={() => setEditandoMeta(false)}
+                      style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 16, padding: 0 }}>×</button>
+                  </div>
+                ) : (
+                  <button onClick={() => { setMetaInput(String(metaSemanal)); setEditandoMeta(true) }}
+                    style={{ background: 'none', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: 'var(--muted)', cursor: 'pointer', fontSize: 11, padding: '2px 8px' }}>
+                    {formatCLP(metaSemanal)}
+                  </button>
+                )}
+              </div>
+            </div>
+            <div style={{ height: 6, background: 'rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden', marginBottom: 6 }}>
+              <div style={{ height: '100%', width: `${pctMeta * 100}%`, background: colorMeta, borderRadius: 3, transition: 'width 0.4s' }} />
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+              {pctMeta >= 1
+                ? `✅ Meta superada · ${formatCLP(data.ingresoSemAct - metaSemanal)} extra`
+                : `Faltan ${formatCLP(falta)} · ${data.deltaSem !== null ? (data.deltaSem >= 0 ? `↑ ${(data.deltaSem*100).toFixed(0)}% vs sem. ant.` : `↓ ${Math.abs(data.deltaSem*100).toFixed(0)}% vs sem. ant.`) : ''}`}
+            </div>
+          </div>
+        )
+      })()}
+
       {/* Semana actual vs anterior */}
       <div className="kpi-grid">
         <div className="kpi-card">
@@ -412,20 +472,20 @@ export default function Dashboard() {
 
       {data.topRecurrentes.length > 0 && (
         <div className="card">
-          <div className="card-title">Clientes frecuentes</div>
-          {data.topRecurrentes.map(c => (
+          <div className="card-title">Top clientes</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>Por gasto acumulado · Toca un nombre en Ventas para ver su perfil completo.</div>
+          {data.topRecurrentes.map((c, idx) => (
             <div className="list-item" key={c.nombre}>
-              <div>
-                <div className="list-item-name">{c.nombre}</div>
-                <div className="list-item-sub">{c.pedidos} pedidos</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+                <span style={{ width: 20, height: 20, borderRadius: '50%', background: idx === 0 ? 'var(--cyan)' : 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: idx === 0 ? '#000' : 'var(--muted)', flexShrink: 0 }}>{idx + 1}</span>
+                <div>
+                  <div className="list-item-name">{c.nombre}</div>
+                  <div className="list-item-sub">{c.pedidos} pedidos</div>
+                </div>
               </div>
               <div className="list-item-right">
-                <div style={{ display: 'flex', gap: 3 }}>
-                  {Array.from({ length: Math.min(c.pedidos, 5) }).map(function(_, idx) {
-                    return <div key={idx} style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--cyan)', opacity: 0.7 + idx * 0.06 }} />
-                  })}
-                  {c.pedidos > 5 && <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 2 }}>+{c.pedidos - 5}</span>}
-                </div>
+                <div className="list-item-value" style={{ color: idx === 0 ? 'var(--green)' : 'var(--text)' }}>{formatCLP(c.gastado)}</div>
+                {c.pedidos >= 3 && <div style={{ fontSize: 10, color: '#f59e0b' }}>⭐ VIP</div>}
               </div>
             </div>
           ))}

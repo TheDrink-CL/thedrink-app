@@ -47,6 +47,8 @@ export default function Stock() {
   const [loading, setLoading] = useState(true)
   const [editando, setEditando] = useState(null)
   const [toast, setToast] = useState('')
+  const [diasProyeccion, setDiasProyeccion] = useState(14)
+  const [tabStock, setTabStock] = useState('estado') // 'estado' | 'comprar'
 
   useEffect(() => { loadData() }, [])
 
@@ -133,7 +135,115 @@ export default function Stock() {
 
       <div className="page-title">Stock</div>
 
-      {(criticos.length > 0 || bajos.length > 0) && (
+      <div className="toggle-row" style={{ marginBottom: 12 }}>
+        <button className={`toggle-btn ${tabStock === 'estado' ? 'active-entrada' : ''}`} onClick={() => setTabStock('estado')}>Estado</button>
+        <button className={`toggle-btn ${tabStock === 'comprar' ? 'active-entrada' : ''}`} onClick={() => setTabStock('comprar')}>¿Qué comprar?</button>
+      </div>
+
+      {tabStock === 'comprar' && (
+        <div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.6 }}>
+            Basado en consumo real de los últimos 14 días. Ajusta el horizonte según cuántos días quieres cubrir.
+          </div>
+          {/* Selector de días */}
+          <div className="toggle-row" style={{ marginBottom: 14 }}>
+            {[7, 14, 21, 30].map(d => (
+              <button key={d} className={`toggle-btn ${diasProyeccion === d ? 'active-entrada' : ''}`}
+                onClick={() => setDiasProyeccion(d)}>{d}d</button>
+            ))}
+          </div>
+
+          {/* Lista de insumos que necesitan compra */}
+          {(() => {
+            const necesitan = insumos
+              .map(ins => {
+                const cd = consumoDiario[ins.nombre] || 0
+                if (cd <= 0) return null
+                const stockActual = ins.stock_actual || 0
+                const necesidadTotal = cd * diasProyeccion
+                const falta = Math.max(0, necesidadTotal - stockActual)
+                const diasRestantes = cd > 0 ? Math.floor(stockActual / cd) : null
+                return { ins, cd, stockActual, necesidadTotal, falta, diasRestantes }
+              })
+              .filter(Boolean)
+              .sort((a, b) => {
+                // Primero los que tienen stock crítico (días restantes < proyección)
+                const aUrgente = (a.diasRestantes !== null && a.diasRestantes < diasProyeccion) ? 0 : 1
+                const bUrgente = (b.diasRestantes !== null && b.diasRestantes < diasProyeccion) ? 0 : 1
+                if (aUrgente !== bUrgente) return aUrgente - bUrgente
+                return (a.diasRestantes || 999) - (b.diasRestantes || 999)
+              })
+
+            if (necesitan.length === 0) {
+              return (
+                <div className="card" style={{ textAlign: 'center', padding: 32 }}>
+                  <div style={{ fontSize: 14, color: 'var(--muted)' }}>Sin datos de consumo aún</div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>Registra ventas para calcular proyecciones.</div>
+                </div>
+              )
+            }
+
+            return (
+              <div className="card">
+                {necesitan.map(({ ins, cd, stockActual, necesidadTotal, falta, diasRestantes }) => {
+                  const necesitaCompra = falta > 0
+                  const urgente = diasRestantes !== null && diasRestantes <= 3
+                  const colorBorde = urgente ? 'rgba(196,0,90,0.3)' : necesitaCompra ? 'rgba(245,158,11,0.3)' : 'rgba(16,185,129,0.2)'
+                  const colorTexto = urgente ? 'var(--pink)' : necesitaCompra ? '#f59e0b' : 'var(--green)'
+
+                  return (
+                    <div key={ins.nombre} style={{
+                      padding: '10px 0',
+                      borderBottom: '1px solid rgba(255,255,255,0.05)'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: necesitaCompra ? colorTexto : 'var(--text)', marginBottom: 2 }}>
+                            {ins.nombre}
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
+                            Stock: {Math.round(stockActual)} {ins.unidad}
+                            {' '}· Consumo: ~{cd.toFixed(1)} {ins.unidad}/día
+                            {diasRestantes !== null && (
+                              <span style={{ color: urgente ? 'var(--pink)' : diasRestantes <= 7 ? '#f59e0b' : 'var(--muted)', fontWeight: 700, marginLeft: 4 }}>
+                                · ~{diasRestantes}d
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 12 }}>
+                          {necesitaCompra ? (
+                            <>
+                              <div style={{ fontSize: 15, fontWeight: 800, color: colorTexto }}>
+                                +{Math.ceil(falta)} {ins.unidad}
+                              </div>
+                              <div style={{ fontSize: 11, color: 'var(--muted)' }}>comprar</div>
+                            </>
+                          ) : (
+                            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--green)' }}>✓ OK</div>
+                          )}
+                        </div>
+                      </div>
+                      {necesitaCompra && (
+                        <div style={{ marginTop: 6, height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden' }}>
+                          <div style={{
+                            height: '100%', borderRadius: 2,
+                            width: Math.min(100, (stockActual / necesidadTotal) * 100) + '%',
+                            background: colorTexto,
+                            transition: 'width 0.4s'
+                          }} />
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })()}
+        </div>
+      )}
+
+      {tabStock === 'estado' && (criticos.length > 0 || bajos.length > 0) && (
         <div className="card" style={{ marginBottom: 12, border: `1px solid ${criticos.length > 0 ? 'rgba(196,0,90,0.4)' : 'rgba(245,158,11,0.4)'}` }}>
           <div className="card-title" style={{ color: criticos.length > 0 ? 'var(--pink)' : '#f59e0b' }}>
             ⚠ Alertas de stock
@@ -159,12 +269,12 @@ export default function Stock() {
         </div>
       )}
 
-      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.6 }}>
+      {tabStock === 'estado' && <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.6 }}>
         Toca cualquier insumo para actualizar el stock o configurar el nivel de alerta.
         El stock se actualiza automáticamente al registrar una compra.
-      </div>
+      </div>}
 
-      <div className="card">
+      {tabStock === 'estado' && <div className="card">
         {insumos.map(ins => {
           const estado = getEstado(ins)
           const cdIns = consumoDiario[ins.nombre] || null
@@ -223,11 +333,11 @@ export default function Stock() {
             </div>
           )
         })}
-      </div>
+      </div>}
 
-      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, lineHeight: 1.6, padding: '0 4px' }}>
+      {tabStock === 'estado' && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, lineHeight: 1.6, padding: '0 4px' }}>
         Los días (~Xd) son una estimación basada en el consumo real de los últimos 14 días.
-      </div>
+      </div>}
     </div>
   )
 }
