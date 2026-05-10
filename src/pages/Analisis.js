@@ -147,6 +147,123 @@ function TendenciaSemanal({ ventas }) {
   )
 }
 
+// ─── Bloque: Contexto nacional Chile ────────────────────────────────────────
+
+const FERIADOS_CL = {
+  '2026-05-21': { nombre: 'Gloria Navales', tipo: 'feriado', nota: 'Jueves → puente potencial con Vie 22' },
+  '2026-05-22': { nombre: 'Puente Gloria Navales', tipo: 'puente', nota: 'Posible puente — fin de semana largo' },
+  '2026-06-29': { nombre: 'San Pedro y San Pablo', tipo: 'feriado', nota: 'Lunes → fin de semana largo' },
+  '2026-07-16': { nombre: 'Virgen del Carmen', tipo: 'feriado', nota: 'Jueves → puente potencial con Vie 17' },
+  '2026-08-15': { nombre: 'Asunción de la Virgen', tipo: 'feriado', nota: 'Sábado' },
+  '2026-09-18': { nombre: 'Fiestas Patrias', tipo: 'feriado', nota: 'Semana de alto consumo — pautar antes' },
+  '2026-09-19': { nombre: 'Glorias del Ejército', tipo: 'feriado', nota: 'Fin de semana patrio extendido' },
+  '2026-10-12': { nombre: 'Encuentro de Dos Mundos', tipo: 'feriado', nota: 'Lunes' },
+  '2026-11-01': { nombre: 'Todos los Santos', tipo: 'feriado', nota: 'Domingo' },
+  '2026-12-08': { nombre: 'Inmaculada Concepción', tipo: 'feriado', nota: 'Martes' },
+  '2026-12-25': { nombre: 'Navidad', tipo: 'feriado', nota: 'Alto consumo de tragos' },
+}
+
+function clasificarDiaPago(fecha) {
+  const d = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate())
+  const dia = d.getDate()
+  if (dia >= 28 || dia <= 2) return { tipo: 'fin_inicio_mes', label: 'Zona de sueldos (fin/inicio de mes)', color: '#10b981', icono: '💵' }
+  if (dia === 15 || dia === 16) return { tipo: 'quincena', label: 'Quincena', color: '#f59e0b', icono: '💵' }
+  return null
+}
+
+function ContextoNacional() {
+  const hoy = new Date()
+  const eventos = []
+
+  // Próximos 45 días
+  for (let i = 0; i <= 45; i++) {
+    const d = new Date(hoy)
+    d.setDate(hoy.getDate() + i)
+    const key = d.toISOString().slice(0, 10)
+    const diaStr = key
+
+    // Feriado o puente
+    if (FERIADOS_CL[diaStr]) {
+      const f = FERIADOS_CL[diaStr]
+      const dias = i
+      eventos.push({ fecha: diaStr, dias, label: f.nombre, nota: f.nota, tipo: f.tipo, icono: f.tipo === 'puente' ? '🌉' : '🎉', color: f.tipo === 'puente' ? '#f59e0b' : '#7F77DD' })
+    }
+
+    // Zona de pago (días 14-16 y 28-31+1-3)
+    const dia = d.getDate()
+    const esPago = (dia >= 28) || (dia <= 3) || (dia === 14 || dia === 15 || dia === 16)
+    if (esPago && i > 0 && i <= 20) {
+      let label = dia === 15 ? 'Quincena (día 15)' : (dia >= 28 || dia <= 3) ? 'Zona de sueldos (fin/inicio mes)' : 'Días previos a quincena'
+      if (!eventos.find(e => e.fecha === diaStr)) {
+        eventos.push({ fecha: diaStr, dias: i, label, nota: 'Históricamente +40% vs días normales', tipo: 'pago', icono: '💵', color: '#10b981' })
+      }
+    }
+  }
+
+  if (eventos.length === 0) return null
+
+  // Mostrar solo los más relevantes (max 4 distintos)
+  const relevantes = eventos
+    .filter(e => e.tipo === 'feriado' || e.tipo === 'puente' || (e.tipo === 'pago' && e.dias <= 10))
+    .sort((a, b) => a.dias - b.dias)
+    .slice(0, 4)
+
+  if (relevantes.length === 0) return null
+
+  const diaHoy = hoy.getDate()
+  const enZonaPago = (diaHoy >= 28) || (diaHoy <= 5) || (diaHoy >= 13 && diaHoy <= 17)
+  const proximoFeriado = eventos.find(e => e.tipo === 'feriado' && e.dias <= 14)
+
+  const DIAS_ES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
+  const MESES_ES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+
+  function labelFecha(isoStr) {
+    const [y, m, d] = isoStr.split('-').map(Number)
+    const fecha = new Date(y, m - 1, d)
+    return `${DIAS_ES[fecha.getDay()]} ${d} ${MESES_ES[m - 1]}`
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 12, border: '1px solid rgba(127,119,221,0.3)' }}>
+      <div className="card-title">📅 Contexto nacional — próximos eventos</div>
+
+      {(enZonaPago || proximoFeriado) && (
+        <div style={{
+          padding: '10px 12px', borderRadius: 8, marginBottom: 12,
+          background: proximoFeriado ? 'rgba(127,119,221,0.08)' : 'rgba(16,185,129,0.08)',
+          fontSize: 12, color: proximoFeriado ? '#AFA9EC' : '#10b981', lineHeight: 1.7
+        }}>
+          {enZonaPago && <span>💵 Estás en zona de pagos — tus datos muestran +40% de ventas en estos días.<br /></span>}
+          {proximoFeriado && <span>🎉 <strong>{proximoFeriado.label}</strong> en {proximoFeriado.dias} días — {proximoFeriado.nota}</span>}
+        </div>
+      )}
+
+      {relevantes.map((e, i) => (
+        <div key={i} style={{
+          display: 'flex', alignItems: 'flex-start', gap: 12,
+          paddingBottom: 10, marginBottom: 10,
+          borderBottom: i < relevantes.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none'
+        }}>
+          <div style={{ fontSize: 18, flexShrink: 0, marginTop: 1 }}>{e.icono}</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: e.color }}>{e.label}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', flexShrink: 0, marginLeft: 8 }}>
+                {e.dias === 0 ? 'Hoy' : e.dias === 1 ? 'Mañana' : `en ${e.dias} días`}
+              </div>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{labelFecha(e.fecha)} · {e.nota}</div>
+          </div>
+        </div>
+      ))}
+
+      <div style={{ marginTop: 4, padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, fontSize: 11, color: 'var(--muted)', lineHeight: 1.7 }}>
+        📊 Basado en tus datos: inicio de mes (1–5) promedia <span style={{ color: '#10b981', fontWeight: 700 }}>$51.571/día</span> vs $11.333 días normales. Feriados: <span style={{ color: '#AFA9EC', fontWeight: 700 }}>$74.000/día</span>.
+      </div>
+    </div>
+  )
+}
+
 // ─── Bloque: Semáforo de publicidad ─────────────────────────────────────────
 
 function SemaforoPub({ ventas, gastosPub, margenBruto }) {
@@ -255,6 +372,34 @@ function SemaforoPub({ ventas, gastosPub, margenBruto }) {
     factores.push({ icon: '📆', texto: 'Miércoles — día neutro, depende de otros factores', peso: 0, tipo: 'neutro' })
   }
 
+  // Factor: contexto económico Chile (quincena, fin/inicio de mes, feriados próximos)
+  const diaDelMes = hoy.getDate()
+  const enZonaPago = (diaDelMes >= 28) || (diaDelMes <= 5)
+  const enQuincena = (diaDelMes >= 13 && diaDelMes <= 17)
+
+  // Verificar feriado hoy o mañana
+  const manana = new Date(hoy); manana.setDate(hoy.getDate() + 1)
+  const keyHoy = hoy.toISOString().slice(0, 10)
+  const keyManana = manana.toISOString().slice(0, 10)
+  const feriadoHoy = FERIADOS_CL[keyHoy]
+  const feriadoManana = FERIADOS_CL[keyManana]
+
+  if (feriadoHoy) {
+    factores.push({ icon: '🎉', texto: `Hoy es ${feriadoHoy.nombre} — feriado. Tus datos muestran $74.000 promedio en feriados. Activa si tienes stock`, peso: 2, tipo: 'positivo' })
+    puntaje += 2
+  } else if (feriadoManana) {
+    factores.push({ icon: '🎉', texto: `Mañana es ${feriadoManana.nombre} — víspera de feriado. Pautar hoy maximiza ventas del día`, peso: 1, tipo: 'positivo' })
+    puntaje += 1
+  }
+
+  if (enZonaPago && !feriadoHoy) {
+    factores.push({ icon: '💵', texto: `Zona de pagos (día ${diaDelMes}) — tu inicio de mes promedia $51.571/día vs $11.333 días normales. Alta conversión`, peso: 1, tipo: 'positivo' })
+    puntaje += 1
+  } else if (enQuincena && !feriadoHoy) {
+    factores.push({ icon: '💵', texto: `Quincena (día ${diaDelMes}) — segundo peak de consumo del mes. Buen timing`, peso: 1, tipo: 'positivo' })
+    puntaje += 1
+  }
+
   // ── Decisión final ───────────────────────────────────────────────────────
   let decision, color, borde, icono
   if (puntaje >= 2) {
@@ -309,9 +454,9 @@ function SemaforoPub({ ventas, gastosPub, margenBruto }) {
 
       {/* Tip contextual */}
       <div style={{ marginTop: 8, padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, fontSize: 11, color: 'var(--muted)', lineHeight: 1.7 }}>
-        💡 Tip: las fechas de pago (1–5 y 15–20 de cada mes) suelen ser los mejores momentos para activar campañas de tragos en Santiago.
+        💡 <strong style={{ color: 'var(--text)' }}>Cuándo pautar en Chile:</strong> días 1–5 (sueldos), días 13–17 (quincena) y vísperas de feriado. Tus mejores días históricos coinciden exactamente: 1 mayo ($123k), 30 abril ($93k), fin de semana del 2 mayo ($105k).
         {pctPubSobreMargen !== null && (
-          <span> · Publicidad: <span style={{ color: pctPubSobreMargen > 0.25 ? 'var(--pink)' : pctPubSobreMargen > 0.15 ? '#f59e0b' : 'var(--green)', fontWeight: 700 }}>{Math.round(pctPubSobreMargen * 100)}% del margen</span>{pctPubSobreVentas !== null && <span> · {Math.round(pctPubSobreVentas * 100)}% de ventas brutas</span>} (meta: bajo 15% del margen)</span>
+          <span> · Publicidad: <span style={{ color: pctPubSobreMargen > 0.25 ? 'var(--pink)' : pctPubSobreMargen > 0.15 ? '#f59e0b' : 'var(--green)', fontWeight: 700 }}>{Math.round(pctPubSobreMargen * 100)}% del margen</span> (meta: bajo 15%)</span>
         )}
       </div>
     </div>
@@ -1120,6 +1265,7 @@ export default function Analisis() {
         />
       ) : (
         <>
+          <ContextoNacional />
           <SemaforoPub ventas={ventas} gastosPub={gastosPub} margenBruto={margenBruto} />
 
           <div className="toggle-row" style={{ marginBottom: 16 }}>

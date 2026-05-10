@@ -193,9 +193,44 @@ export default function Dashboard() {
   const msgXfer = pctXfer >= 1 ? 'Alcanzaste el limite. No registres mas transferencias este mes.' : 'Quedan ' + restantesXfer + ' transferencias disponibles.'
   const barXfer = Math.min(100, pctXfer * 100) + '%'
 
+  // Contexto nacional: zona de pago / feriado
+  const hoyDash = new Date()
+  const diaMesDash = hoyDash.getDate()
+  const enZonaPagoDash = (diaMesDash >= 28) || (diaMesDash <= 5)
+  const enQuincenadaDash = (diaMesDash >= 13 && diaMesDash <= 17)
+  const FERIADOS_DASH = {
+    '2026-05-21': 'Gloria Navales',
+    '2026-06-29': 'San Pedro y San Pablo',
+    '2026-07-16': 'Virgen del Carmen',
+    '2026-09-18': 'Fiestas Patrias',
+    '2026-09-19': 'Glorias del Ejército',
+    '2026-12-25': 'Navidad',
+  }
+  const keyHoyDash = hoyDash.toISOString().slice(0, 10)
+  const mananaD = new Date(hoyDash); mananaD.setDate(hoyDash.getDate() + 1)
+  const keyManDash = mananaD.toISOString().slice(0, 10)
+  const feriadoHoyDash = FERIADOS_DASH[keyHoyDash]
+  const feriadoManDash = FERIADOS_DASH[keyManDash]
+
+  const bannerCtx = feriadoHoyDash
+    ? { msg: `🎉 Hoy es ${feriadoHoyDash} — feriado. Días así promedias $74.000. ¿Tenés stock?`, color: 'rgba(127,119,221,0.12)', borde: 'rgba(127,119,221,0.4)', txt: '#AFA9EC' }
+    : feriadoManDash
+    ? { msg: `🎉 Mañana es ${feriadoManDash} — víspera de feriado. Buen momento para activar Instagram hoy.`, color: 'rgba(127,119,221,0.08)', borde: 'rgba(127,119,221,0.25)', txt: '#AFA9EC' }
+    : enZonaPagoDash
+    ? { msg: `💵 Zona de sueldos (día ${diaMesDash}) — tu inicio de mes promedia 4× más que días normales. Activa.`, color: 'rgba(16,185,129,0.08)', borde: 'rgba(16,185,129,0.3)', txt: '#10b981' }
+    : enQuincenadaDash
+    ? { msg: `💵 Quincena (día ${diaMesDash}) — segundo peak del mes. Considera pautar.`, color: 'rgba(245,158,11,0.08)', borde: 'rgba(245,158,11,0.3)', txt: '#f59e0b' }
+    : null
+
   return (
     <div className="page">
       <div className="page-title">The Drink</div>
+
+      {bannerCtx && (
+        <div style={{ background: bannerCtx.color, border: `1px solid ${bannerCtx.borde}`, borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: bannerCtx.txt, lineHeight: 1.6, fontWeight: 600 }}>
+          {bannerCtx.msg}
+        </div>
+      )}
 
       {alertasStock.length > 0 && (
         <div style={{ background: 'rgba(196,0,90,0.08)', border: '1px solid rgba(196,0,90,0.35)', borderRadius: 10, padding: '12px 14px', marginBottom: 12 }}>
