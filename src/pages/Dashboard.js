@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { calcularCostoReceta, formatCLP, formatPct } from '../lib/calculos'
+import { calcularRentabilidad } from '../lib/rentabilidad'
 
 function RecetasComparativo({ topVolumen, topGanancia }) {
   const [tab, setTab] = useState('volumen')
@@ -66,6 +67,191 @@ function RecetasComparativo({ topVolumen, topGanancia }) {
   )
 }
 
+// ─── Tooltip cyberpunk reutilizable ─────────────────────────────────────────
+function InfoTip({ texto }) {
+  const [abierto, setAbierto] = useState(false)
+  return (
+    <span style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        onClick={() => setAbierto(a => !a)}
+        onBlur={() => setTimeout(() => setAbierto(false), 150)}
+        style={{
+          width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+          border: '1px solid var(--cyan-dim)', background: 'rgba(0,180,180,0.1)',
+          color: 'var(--cyan)', fontSize: 10, fontWeight: 700, cursor: 'pointer',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          lineHeight: 1, padding: 0,
+        }}
+        aria-label="Más información"
+      >i</button>
+      {abierto && (
+        <span style={{
+          position: 'absolute', bottom: '130%', right: -4, zIndex: 200,
+          width: 220, background: 'var(--bg2)', border: '1px solid var(--cyan-dim)',
+          borderRadius: 8, padding: '8px 10px', fontSize: 11, color: 'var(--text)',
+          lineHeight: 1.6, boxShadow: '0 6px 24px rgba(0,0,0,0.6)',
+          textTransform: 'none', letterSpacing: 0, fontWeight: 400,
+        }}>
+          {texto}
+        </span>
+      )}
+    </span>
+  )
+}
+
+// ─── Sección RENTABILIDAD: tres márgenes con label explicativo ──────────────
+function Rentabilidad({ r }) {
+  if (!r) return null
+  const filas = [
+    {
+      label: 'Margen bruto',
+      pct: r.margenBruto,
+      pesos: r.gananciaBruta,
+      color: 'var(--green)',
+      desc: 'Lo que queda después del costo de los insumos (COGS): receta, merma y envase. Es la rentabilidad pura del producto.',
+    },
+    {
+      label: 'Margen operativo',
+      pct: r.margenOperativo,
+      pesos: r.gananciaOperativa,
+      color: 'var(--cyan)',
+      desc: 'Margen bruto menos publicidad, transporte/delivery y otros gastos variables. Es lo que deja la operación del día a día.',
+    },
+    {
+      label: 'Margen neto',
+      pct: r.margenNeto,
+      pesos: r.gananciaNeta,
+      color: r.tieneCostoOportunidad ? 'var(--purple)' : 'var(--muted)',
+      desc: r.tieneCostoOportunidad
+        ? 'Margen operativo menos el costo de oportunidad de tu tiempo como operador. Es la ganancia real considerando tus horas.'
+        : 'Margen operativo menos el costo de oportunidad de tu tiempo. Aún no registras horas trabajadas — cuando lo hagas, este número se ajusta.',
+    },
+  ]
+  return (
+    <div className="card">
+      <div className="card-title">Rentabilidad</div>
+      {filas.map((f, i) => (
+        <div key={f.label} style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          paddingBottom: 10, marginBottom: 10,
+          borderBottom: i < filas.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none',
+        }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-strong)' }}>{f.label}</span>
+              <InfoTip texto={f.desc} />
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+              {formatCLP(f.pesos)} {f.pesos >= 0 ? 'de ganancia' : 'de pérdida'}
+            </div>
+          </div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: f.color, flexShrink: 0 }}>
+            {formatPct(f.pct)}
+          </div>
+        </div>
+      ))}
+      <div style={{
+        padding: '8px 12px', background: 'rgba(255,255,255,0.03)',
+        borderRadius: 8, fontSize: 11, color: 'var(--muted)', lineHeight: 1.7,
+      }}>
+        💡 El <strong style={{ color: 'var(--green)' }}>bruto</strong> mide tu producto,
+        el <strong style={{ color: 'var(--cyan)' }}>operativo</strong> mide tu operación,
+        el <strong style={{ color: 'var(--purple)' }}>neto</strong> mide tu negocio completo.
+      </div>
+    </div>
+  )
+}
+
+// ─── Rotación de capital de trabajo (antes mal llamado "ROI") ───────────────
+function RotacionCapital({ inversion, ingresoTotal, rotacion }) {
+  return (
+    <div className="kpi-grid">
+      <div className="kpi-card" style={{ gridColumn: '1 / -1', textAlign: 'left' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span className="kpi-label" style={{ marginBottom: 0 }}>Rotación de capital de trabajo</span>
+            <InfoTip texto={`Tu capital de trabajo (${formatCLP(inversion)}) ha rotado ${rotacion.toFixed(1)} veces, generando ingresos por ${formatCLP(ingresoTotal)}. No es ROI: mide cuántas veces tu capital "dio la vuelta", no la ganancia neta.`} />
+          </div>
+          <span style={{ fontSize: 24, fontWeight: 800, color: 'var(--cyan)' }}>
+            {rotacion.toFixed(1)}×
+          </span>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6, lineHeight: 1.6 }}>
+          {formatCLP(inversion)} de capital → {formatCLP(ingresoTotal)} en ingresos
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── PATRIMONIO NETO: pone la caja disponible en contexto ───────────────────
+function PatrimonioNeto({ data }) {
+  const caja = data.saldoCaja || 0
+  const inventario = data.inventarioRotable || 0
+  const capitalTrabajo = data.capitalTrabajoStock || 0
+  const activosFijos = data.totalActivosFijos || 0
+  const patrimonioNeto = caja + inventario + activosFijos
+  // "invertido" = lo que Ro puso de su bolsillo (capital de trabajo + equipos)
+  const invertido = capitalTrabajo + activosFijos
+
+  const componentes = [
+    { label: 'Caja disponible', valor: caja, color: 'var(--green)',
+      desc: 'Efectivo líquido disponible hoy.' },
+    { label: 'Inventario rotable', valor: inventario, color: 'var(--cyan)',
+      desc: 'Valor del stock actual de insumos a costo PPP — se convierte en ventas.' },
+    { label: 'Capital de trabajo', valor: capitalTrabajo, color: 'var(--text)',
+      desc: 'Envases y capital operativo inicial invertido en el negocio.' },
+    { label: 'Activos fijos', valor: activosFijos, color: 'var(--purple)',
+      desc: 'Equipos y utensilios — valor que no rota pero es tuyo.' },
+  ]
+
+  return (
+    <div className="card" style={{ border: '1px solid rgba(34,197,94,0.25)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
+        <div className="card-title" style={{ margin: 0 }}>Patrimonio neto</div>
+        <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--green)' }}>
+          {formatCLP(patrimonioNeto)}
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+        {componentes.map(c => (
+          <div key={c.label} style={{
+            background: 'rgba(255,255,255,0.03)', borderRadius: 8,
+            padding: '10px 12px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
+              <span style={{
+                fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase',
+                letterSpacing: 0.5,
+              }}>{c.label}</span>
+              <InfoTip texto={c.desc} />
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: c.color }}>
+              {formatCLP(c.valor)}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{
+        padding: '10px 12px', background: 'rgba(34,197,94,0.06)',
+        border: '1px solid rgba(34,197,94,0.2)', borderRadius: 8,
+        fontSize: 12, color: 'var(--text)', lineHeight: 1.7,
+      }}>
+        Has invertido <strong style={{ color: 'var(--text-strong)' }}>{formatCLP(invertido)}</strong> y
+        construido <strong style={{ color: 'var(--green)' }}>{formatCLP(patrimonioNeto)}</strong> de valor.
+        {invertido > 0 && patrimonioNeto > invertido && (
+          <span> Eso es <strong style={{ color: 'var(--green)' }}>{formatCLP(patrimonioNeto - invertido)}</strong> de valor creado por encima de lo que pusiste.</span>
+        )}
+        <span style={{ display: 'block', marginTop: 4, color: 'var(--muted)', fontSize: 11 }}>
+          La caja baja no significa pérdida: parte de tu dinero está en stock y equipos, no en efectivo.
+        </span>
+      </div>
+    </div>
+  )
+}
+
 const META_SEMANAL_DEFAULT = 250000 // $250k por semana como meta base
 
 export default function Dashboard() {
@@ -89,7 +275,7 @@ export default function Dashboard() {
         supabase.from('ventas').select('*').order('fecha', { ascending: false }),
         supabase.from('caja').select('*'),
         supabase.from('compras').select('precio_total, es_inversion, tipo'),
-        supabase.from('insumos').select('nombre, stock_actual, stock_minimo, unidad'),
+        supabase.from('insumos').select('nombre, stock_actual, stock_minimo, unidad, costo_ppp'),
         supabase.from('ordenes').select('id, fecha, medio_pago, cliente_nombre'),
         supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad, unidad'),
         supabase.from('insumos').select('nombre, costo_ppp'),
@@ -121,6 +307,29 @@ export default function Dashboard() {
         const cu = costoPorReceta[v.receta_nombre] || 0
         return s + cu * v.litros
       }, 0)
+
+      // ── Rentabilidad: tres márgenes desde el módulo central ──────────────
+      const gastosCajaSalida = (cja || []).filter(m => m.tipo === 'salida')
+      const horasTrabajadas = parseFloat(config.horas_trabajadas_total) || 0
+      const costoHora = parseFloat(config.costo_hora_operador) || 0
+      const rentabilidad = calcularRentabilidad({
+        ventas: vts || [],
+        recetaIngredientes: recIng || [],
+        insumosPPP: insumosConPPP || [],
+        gastosCaja: gastosCajaSalida,
+        config: { merma_pct: merma, costo_envase: costoEnvase },
+        horasTrabajadas,
+        costoHora,
+      })
+
+      // ── Inventario rotable: valor del stock actual de insumos a costo PPP ──
+      const inventarioRotable = (ins || []).reduce((s, i) => {
+        const stock = parseFloat(i.stock_actual) || 0
+        const ppp = parseFloat(i.costo_ppp) || 0
+        return s + stock * ppp
+      }, 0)
+      // capital de trabajo (envases / capital operativo) = misma `inversion`
+      const capitalTrabajoStock = inversion
 
       const totalVentas = vts?.reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0) || 0
       const totalCompras = cmp?.reduce((s, c) => s + (c.es_inversion ? 0 : c.precio_total), 0) || 0
@@ -217,7 +426,7 @@ export default function Dashboard() {
       const transferencias = (ordenes || []).filter(o => o.medio_pago === 'transferencia' && o.fecha >= inicioMes).length
       setTransferenciasMes(transferencias)
 
-      setData({ inversion, ingresoTotal, litrosTotales, costoTotalReal, saldoCaja, ingresoMes, ticketPromedio, ticketMediana, totalOrdenes, clientesRecurrentes: clientesRecurrentes.length, totalClientesNombrados, pctRecurrentes, topRecurrentes, totalActivosFijos, ingresoSemAct, ingresoSemAnt, deltaSem, canalTop, proximoEvento, diasHastaEvento })
+      setData({ inversion, ingresoTotal, litrosTotales, costoTotalReal, saldoCaja, ingresoMes, ticketPromedio, ticketMediana, totalOrdenes, clientesRecurrentes: clientesRecurrentes.length, totalClientesNombrados, pctRecurrentes, topRecurrentes, totalActivosFijos, ingresoSemAct, ingresoSemAnt, deltaSem, canalTop, proximoEvento, diasHastaEvento, rentabilidad, inventarioRotable, capitalTrabajoStock })
       setVentas({ topRecetas, topPorGanancia, recientes: vts?.slice(0, 5) || [] })
       setLoading(false)
     }
@@ -226,8 +435,9 @@ export default function Dashboard() {
 
   if (loading) return <div className="loading">Cargando...</div>
 
-  const margenPct = data.ingresoTotal > 0 ? (data.ingresoTotal - data.costoTotalReal) / data.ingresoTotal : 0
-  const roi = data.inversion > 0 ? (data.ingresoTotal * margenPct) / data.inversion : 0
+  // Rotación de capital de trabajo: cuántas veces el capital de trabajo
+  // "dio la vuelta" en ingresos. NO es ROI (no descuenta costos): es rotación.
+  const rotacionCapital = data.inversion > 0 ? data.ingresoTotal / data.inversion : 0
 
   const pctXfer = transferenciasMes / limiteTransferencias
   const restantesXfer = limiteTransferencias - transferenciasMes
@@ -315,43 +525,33 @@ export default function Dashboard() {
           <div className="kpi-value">{data.litrosTotales}L</div>
           <div className="kpi-sub">total</div>
         </div>
-        <div className="kpi-card">
-          <div className="kpi-label">Margen bruto</div>
-          <div className="kpi-value green">{formatPct(margenPct)}</div>
-          <div className="kpi-sub">sobre ventas</div>
-        </div>
-        <div className="kpi-card">
-          <div className="kpi-label">ROI capital trabajo</div>
-          <div className="kpi-value">{formatPct(roi)}</div>
-          <div className="kpi-sub">recuperado</div>
-        </div>
       </div>
+
+      {/* ── RENTABILIDAD: tres márgenes con explicación ──────────────────── */}
+      <Rentabilidad r={data.rentabilidad} />
+
+      {/* ── Rotación de capital de trabajo (antes "ROI capital trabajo") ─── */}
+      <RotacionCapital
+        inversion={data.inversion}
+        ingresoTotal={data.ingresoTotal}
+        rotacion={rotacionCapital}
+      />
+
+      {/* ── PATRIMONIO NETO: la caja en contexto ───────────────────────── */}
+      <PatrimonioNeto data={data} />
 
       <div className="kpi-grid">
         <div className="kpi-card">
-          <div className="kpi-label">Caja disponible</div>
-          <div className="kpi-value green">{formatCLP(data.saldoCaja)}</div>
-        </div>
-        <div className="kpi-card">
           <div className="kpi-label">Ultimos 30 dias</div>
           <div className="kpi-value cyan">{formatCLP(data.ingresoMes)}</div>
+          <div className="kpi-sub">ingresos del mes</div>
+        </div>
+        <div className="kpi-card">
+          <div className="kpi-label">Caja disponible</div>
+          <div className="kpi-value green">{formatCLP(data.saldoCaja)}</div>
+          <div className="kpi-sub">efectivo líquido hoy</div>
         </div>
       </div>
-
-      {data.totalActivosFijos > 0 && (
-        <div className="kpi-grid">
-          <div className="kpi-card">
-            <div className="kpi-label">Capital de trabajo</div>
-            <div className="kpi-value">{formatCLP(data.inversion)}</div>
-            <div className="kpi-sub">inversion inicial</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-label">Activos fijos</div>
-            <div className="kpi-value" style={{ color: 'var(--cyan)' }}>{formatCLP(data.totalActivosFijos)}</div>
-            <div className="kpi-sub">equipos y utensilios</div>
-          </div>
-        </div>
-      )}
 
       <div className="kpi-grid">
         <div className="kpi-card">

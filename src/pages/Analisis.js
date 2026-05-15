@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatCLP, calcularCostoReceta } from '../lib/calculos'
+import { calcularRentabilidad } from '../lib/rentabilidad'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -351,8 +352,16 @@ function ContextoNacional() {
 
 // ─── Bloque: Semáforo de publicidad ─────────────────────────────────────────
 
-function SemaforoPub({ ventas, gastosPub, margenBruto }) {
+function SemaforoPub({ ventas, gastosPub, margenBruto, roiIG }) {
   const hoy = new Date()
+
+  // ── Umbrales calibrados para The Drink (margen bruto ~72%) ────────────────
+  // Base: verde <20%, amarillo 20-30%, rojo >30% del margen bruto.
+  // Si el ROI de Instagram Ads es alto (>2.5x), el gasto se está pagando solo,
+  // así que se permite más holgura: verde <25%, amarillo 25-35%, rojo >35%.
+  const roiAlto = roiIG != null && roiIG > 2.5
+  const UMBRAL_VERDE = roiAlto ? 0.25 : 0.20
+  const UMBRAL_ROJO = roiAlto ? 0.35 : 0.30
 
   // 1. Días desde la última pauta
   const ultimaPauta = gastosPub.length > 0
@@ -391,18 +400,36 @@ function SemaforoPub({ ventas, gastosPub, margenBruto }) {
   const factores = []
   let puntaje = 0 // negativo = abstenerse, positivo = pautar
 
-  // Factor: % del margen bruto gastado en publicidad
+  // Factor: % del margen bruto gastado en publicidad (umbrales calibrados)
   if (pctPubSobreMargen !== null) {
     const pct = Math.round(pctPubSobreMargen * 100)
-    if (pctPubSobreMargen > 0.25) {
-      factores.push({ icon: '📊', texto: `Llevas ${pct}% de tu margen en publicidad — estás por encima del 25%. Antes de pautar más, espera que el margen crezca`, peso: -2, tipo: 'negativo' })
+    const verdeP = Math.round(UMBRAL_VERDE * 100)
+    const rojoP = Math.round(UMBRAL_ROJO * 100)
+    const notaRoi = roiAlto
+      ? ` (techo ampliado a ${rojoP}% porque tu ROI en Instagram es ${roiIG.toFixed(1)}x — el gasto se está pagando solo)`
+      : ''
+    if (pctPubSobreMargen > UMBRAL_ROJO) {
+      factores.push({ icon: '📊', texto: `Llevas ${pct}% de tu margen bruto en publicidad — por encima del ${rojoP}%${notaRoi}. Antes de pautar más, valida que las ventas respondan`, peso: -2, tipo: 'negativo' })
       puntaje -= 2
-    } else if (pctPubSobreMargen > 0.15) {
-      factores.push({ icon: '📊', texto: `Llevas ${pct}% de tu margen en publicidad — zona de vigilancia (15–25%). Monitorea si las ventas responden al gasto`, peso: -1, tipo: 'negativo' })
+    } else if (pctPubSobreMargen > UMBRAL_VERDE) {
+      factores.push({ icon: '📊', texto: `Llevas ${pct}% de tu margen bruto en publicidad — zona de vigilancia (${verdeP}–${rojoP}%)${notaRoi}. Monitorea el retorno`, peso: -1, tipo: 'negativo' })
       puntaje -= 1
     } else {
-      factores.push({ icon: '📊', texto: `Llevas ${pct}% de tu margen en publicidad — saludable (bajo 15%). Tienes espacio para pautar`, peso: 1, tipo: 'positivo' })
+      factores.push({ icon: '📊', texto: `Llevas ${pct}% de tu margen bruto en publicidad — saludable (bajo ${verdeP}%)${notaRoi}. Tienes espacio para pautar`, peso: 1, tipo: 'positivo' })
       puntaje += 1
+    }
+  }
+
+  // Factor: ROI de Instagram Ads — si es alto, contrarresta la cautela por %
+  if (roiIG != null) {
+    if (roiIG > 2.5) {
+      factores.push({ icon: '🚀', texto: `Tu ROI en Instagram Ads es ${roiIG.toFixed(1)}x — cada peso en pauta vuelve más que duplicado. El gasto está justificado`, peso: 1, tipo: 'positivo' })
+      puntaje += 1
+    } else if (roiIG >= 1.5) {
+      factores.push({ icon: '📈', texto: `ROI en Instagram Ads de ${roiIG.toFixed(1)}x — retorno razonable, sigue monitoreando`, peso: 0, tipo: 'neutro' })
+    } else {
+      factores.push({ icon: '📉', texto: `ROI en Instagram Ads de ${roiIG.toFixed(1)}x — las ventas de IG aún no cubren el gasto en ads. Optimiza targeting o creativo antes de subir presupuesto`, peso: -1, tipo: 'negativo' })
+      puntaje -= 1
     }
   }
 
@@ -541,7 +568,7 @@ function SemaforoPub({ ventas, gastosPub, margenBruto }) {
       <div style={{ marginTop: 8, padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, fontSize: 11, color: 'var(--muted)', lineHeight: 1.7 }}>
         💡 <strong style={{ color: 'var(--text)' }}>Cuándo pautar en Chile:</strong> días 1–5 (sueldos), días 13–17 (quincena) y vísperas de feriado. Tus mejores días históricos coinciden exactamente: 1 mayo ($123k), 30 abril ($93k), fin de semana del 2 mayo ($105k).
         {pctPubSobreMargen !== null && (
-          <span> · Publicidad: <span style={{ color: pctPubSobreMargen > 0.25 ? 'var(--pink)' : pctPubSobreMargen > 0.15 ? '#f59e0b' : 'var(--green)', fontWeight: 700 }}>{Math.round(pctPubSobreMargen * 100)}% del margen</span> (meta: bajo 15%)</span>
+          <span> · Publicidad: <span style={{ color: pctPubSobreMargen > UMBRAL_ROJO ? 'var(--pink)' : pctPubSobreMargen > UMBRAL_VERDE ? '#f59e0b' : 'var(--green)', fontWeight: 700 }}>{Math.round(pctPubSobreMargen * 100)}% del margen bruto</span> (meta: bajo {Math.round(UMBRAL_VERDE * 100)}%{roiAlto ? `, ampliado por ROI alto` : ''})</span>
         )}
       </div>
     </div>
@@ -1248,6 +1275,7 @@ export default function Analisis() {
   const [insumos, setInsumos] = useState([])
   const [config, setConfig] = useState({ merma_pct: 0.08, costo_envase: 794.6 })
   const [margenBruto, setMargenBruto] = useState(null)
+  const [roiIG, setRoiIG] = useState(null)
   const [loading, setLoading] = useState(true)
   const [periodo, setPeriodo] = useState('todo')
   const [vista, setVista] = useState('tendencias')
@@ -1258,7 +1286,7 @@ export default function Analisis() {
     async function load() {
       try {
         const results = await Promise.all([
-          supabase.from('ventas').select('id, fecha, litros, precio_venta, origen, receta_nombre, orden_id').order('fecha', { ascending: false }),
+          supabase.from('ventas').select('id, fecha, litros, precio_venta, origen, receta_nombre, orden_id, delivery').order('fecha', { ascending: false }),
           supabase.from('caja').select('fecha, monto, categoria, tipo').eq('tipo', 'salida'),
           supabase.from('compras').select('fecha, insumo_nombre, cantidad, precio_total, es_inversion, tipo').order('fecha'),
           supabase.from('ordenes').select('id, fecha, hora, medio_pago, delivery, delivery_tipo, distancia_km').order('fecha', { ascending: false }),
@@ -1287,9 +1315,29 @@ export default function Analisis() {
           merma_pct: cfgMap.merma_pct ?? 0.08,
           costo_envase: cfgMap.costo_envase ?? 794.6,
         })
-        const totalVtsBruto = (vts || []).reduce((s, v) => s + v.litros * v.precio_venta, 0)
-        const totalCmpOp = (cmp || []).filter(x => !x.es_inversion).reduce((s, x) => s + x.precio_total, 0)
-        setMargenBruto(totalVtsBruto > 0 ? (totalVtsBruto - totalCmpOp) / totalVtsBruto : null)
+        // ── Margen bruto REAL: solo COGS (insumos consumidos según recetas),
+        //    usando el módulo central para no diverger del Dashboard ─────────
+        const gastosCajaSalida = (cja || [])
+        const rent = calcularRentabilidad({
+          ventas: vts || [],
+          recetaIngredientes: recIng || [],
+          insumosPPP: ins || [],
+          gastosCaja: gastosCajaSalida,
+          config: {
+            merma_pct: cfgMap.merma_pct ?? 0.08,
+            costo_envase: cfgMap.costo_envase ?? 794.6,
+          },
+        })
+        setMargenBruto(rent.ingresos > 0 ? rent.margenBruto : null)
+
+        // ── ROI de Instagram Ads: ingreso atribuido a IG / gasto en pub ─────
+        // (se usa para que el semáforo sea coherente con el retorno real)
+        const gastosPubArr = (cja || []).filter(m => m.categoria === 'Publicidad')
+        const totalPubGlobal = gastosPubArr.reduce((s, m) => s + m.monto, 0)
+        const ingresoIGGlobal = (vts || [])
+          .filter(v => v.origen === 'Instagram')
+          .reduce((s, v) => s + v.litros * v.precio_venta, 0)
+        setRoiIG(totalPubGlobal > 0 && ingresoIGGlobal > 0 ? ingresoIGGlobal / totalPubGlobal : null)
       } catch (err) {
         console.error('Análisis - error al cargar datos:', err)
         setErrorCarga(err.message || String(err))
@@ -1351,7 +1399,7 @@ export default function Analisis() {
       ) : (
         <>
           <ContextoNacional />
-          <SemaforoPub ventas={ventas} gastosPub={gastosPub} margenBruto={margenBruto} />
+          <SemaforoPub ventas={ventas} gastosPub={gastosPub} margenBruto={margenBruto} roiIG={roiIG} />
 
           <div className="toggle-row" style={{ marginBottom: 16 }}>
             {[
