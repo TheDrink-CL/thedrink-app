@@ -1265,6 +1265,217 @@ function MetricasDistancia({ ordenes }) {
 
 // ─── Página principal ────────────────────────────────────────────────────────
 
+// ─── Bloque: Análisis profundo de recetas (P2.4) ────────────────────────────
+// 4 vistas: margen unitario absoluto, rotación, contribución a VIP, combinaciones.
+// Informa qué recetas deben estar en la carta del bar futuro.
+function AnalisisRecetas({ ventas, ordenes, recetaIngredientes, insumos, clientesData, config }) {
+  const [vista, setVista] = React.useState('margen') // margen | rotacion | vip | combos
+
+  // ── Costo unitario por receta (PPP + merma + envase) ──────────────────────
+  const merma = parseFloat(config.merma_pct) || 0.08
+  const costoEnvase = parseFloat(config.costo_envase) || 794.6
+  const costoPorReceta = {}
+  const recetasUnicas = [...new Set((recetaIngredientes || []).map(i => i.receta_nombre))]
+  recetasUnicas.forEach(nombre => {
+    const ings = (recetaIngredientes || []).filter(i => i.receta_nombre === nombre && i.insumo_nombre !== 'ENVASE')
+    costoPorReceta[nombre] = calcularCostoReceta(ings, insumos || [], merma, costoEnvase)
+  })
+
+  // ── Datos base por receta ─────────────────────────────────────────────────
+  const stats = {}
+  ;(ventas || []).forEach(v => {
+    if (!stats[v.receta_nombre]) {
+      stats[v.receta_nombre] = { unidades: 0, ingreso: 0, primeraFecha: v.fecha, ultimaFecha: v.fecha, nVentas: 0 }
+    }
+    const r = stats[v.receta_nombre]
+    r.unidades += v.litros || 1
+    r.ingreso += (v.litros || 1) * v.precio_venta
+    r.nVentas += 1
+    if (v.fecha < r.primeraFecha) r.primeraFecha = v.fecha
+    if (v.fecha > r.ultimaFecha) r.ultimaFecha = v.fecha
+  })
+
+  const hoy = new Date()
+  const recetas = Object.entries(stats).map(([nombre, r]) => {
+    const precioProm = r.unidades > 0 ? r.ingreso / r.unidades : 0
+    const costoUnit = costoPorReceta[nombre] || 0
+    const margenAbs = precioProm - costoUnit
+    const diasDesdePrimera = Math.max(1, Math.round((hoy - parseFecha(r.primeraFecha)) / (1000 * 60 * 60 * 24)) + 1)
+    const rotacion = r.unidades / diasDesdePrimera
+    return { nombre, ...r, precioProm, costoUnit, margenAbs, diasDesdePrimera, rotacion }
+  })
+
+  // ── c) Contribución a clientes VIP ────────────────────────────────────────
+  // VIP = cliente con tag que contenga "VIP" O cliente con 3+ pedidos
+  const pedidosPorCliente = {}
+  ;(ordenes || []).forEach(o => {
+    const key = (o.cliente_nombre || '').trim().toLowerCase()
+    if (!key) return
+    pedidosPorCliente[key] = (pedidosPorCliente[key] || 0) + 1
+  })
+  const tagPorCliente = {}
+  ;(clientesData || []).forEach(c => {
+    tagPorCliente[(c.nombre || '').trim().toLowerCase()] = c.tag || ''
+  })
+  const esVIP = (nombreKey) => {
+    const tag = (tagPorCliente[nombreKey] || '').toLowerCase()
+    if (tag.includes('vip')) return true
+    return (pedidosPorCliente[nombreKey] || 0) >= 3
+  }
+  // Para cada receta, contar clientes VIP únicos que la han pedido
+  const ventasPorOrden = {}
+  ;(ventas || []).forEach(v => {
+    if (!v.orden_id) return
+    if (!ventasPorOrden[v.orden_id]) ventasPorOrden[v.orden_id] = []
+    ventasPorOrden[v.orden_id].push(v)
+  })
+  const vipPorReceta = {}
+  ;(ordenes || []).forEach(o => {
+    const key = (o.cliente_nombre || '').trim().toLowerCase()
+    if (!key || !esVIP(key)) return
+    const items = ventasPorOrden[o.id] || []
+    const recetasEnOrden = [...new Set(items.map(v => v.receta_nombre))]
+    recetasEnOrden.forEach(rec => {
+      if (!vipPorReceta[rec]) vipPorReceta[rec] = new Set()
+      vipPorReceta[rec].add(key)
+    })
+  })
+  recetas.forEach(r => { r.clientesVIP = vipPorReceta[r.nombre] ? vipPorReceta[r.nombre].size : 0 })
+
+  // ── d) Combinaciones: pares de recetas que aparecen en la misma orden ─────
+  const combos = {}
+  Object.values(ventasPorOrden).forEach(items => {
+    const recs = [...new Set(items.map(v => v.receta_nombre))]
+    if (recs.length < 2) return
+    for (let i = 0; i < recs.length; i++) {
+      for (let j = i + 1; j < recs.length; j++) {
+        const par = [recs[i], recs[j]].sort()
+        const key = par.join(' + ')
+        combos[key] = (combos[key] || 0) + 1
+      }
+    }
+  })
+  const combosOrdenados = Object.entries(combos).sort((a, b) => b[1] - a[1]).slice(0, 6)
+
+  // ── Ordenar según vista activa ────────────────────────────────────────────
+  let ordenadas, maxVal, render
+  if (vista === 'margen') {
+    ordenadas = recetas.slice().sort((a, b) => b.margenAbs - a.margenAbs).slice(0, 8)
+    maxVal = Math.max(...ordenadas.map(r => Math.abs(r.margenAbs)), 1)
+    render = (r) => ({
+      valor: formatCLP(r.margenAbs) + '/u',
+      sub: `precio ${formatCLP(r.precioProm)} − costo ${formatCLP(r.costoUnit)}`,
+      pct: Math.abs(r.margenAbs) / maxVal,
+      color: r.margenAbs >= 0 ? 'var(--green)' : 'var(--pink)',
+    })
+  } else if (vista === 'rotacion') {
+    ordenadas = recetas.slice().sort((a, b) => b.rotacion - a.rotacion).slice(0, 8)
+    maxVal = Math.max(...ordenadas.map(r => r.rotacion), 0.01)
+    render = (r) => ({
+      valor: r.rotacion.toFixed(2) + ' u/día',
+      sub: `${Math.round(r.unidades)} u en ${r.diasDesdePrimera} días`,
+      pct: r.rotacion / maxVal,
+      color: 'var(--cyan)',
+    })
+  } else if (vista === 'vip') {
+    ordenadas = recetas.slice().sort((a, b) => b.clientesVIP - a.clientesVIP).slice(0, 8)
+    maxVal = Math.max(...ordenadas.map(r => r.clientesVIP), 1)
+    render = (r) => ({
+      valor: r.clientesVIP + ' VIP',
+      sub: r.clientesVIP > 0 ? 'clientes recurrentes la prefieren' : 'aún sin clientes VIP',
+      pct: r.clientesVIP / maxVal,
+      color: '#f59e0b',
+    })
+  }
+
+  return (
+    <div className="card">
+      <div className="card-title">🍸 Análisis profundo de recetas</div>
+
+      {/* Tabs de vista */}
+      <div style={{ display: 'flex', gap: 5, marginBottom: 14, flexWrap: 'wrap' }}>
+        {[
+          { k: 'margen', l: '$ Margen/u' },
+          { k: 'rotacion', l: 'Rotación' },
+          { k: 'vip', l: 'Clientes VIP' },
+          { k: 'combos', l: 'Combos' },
+        ].map(t => (
+          <button key={t.k} onClick={() => setVista(t.k)}
+            style={{
+              flex: '1 1 auto', padding: '6px 8px', borderRadius: 8, border: 'none', cursor: 'pointer',
+              fontSize: 11, fontWeight: 700,
+              background: vista === t.k ? 'var(--cyan)' : 'rgba(255,255,255,0.06)',
+              color: vista === t.k ? '#000' : 'var(--muted)',
+            }}>
+            {t.l}
+          </button>
+        ))}
+      </div>
+
+      {/* Vista de combos */}
+      {vista === 'combos' ? (
+        combosOrdenados.length === 0 ? (
+          <div style={{ color: 'var(--muted)', fontSize: 13, textAlign: 'center', padding: 16 }}>
+            Aún no hay pedidos con 2+ recetas distintas para detectar combinaciones.
+          </div>
+        ) : (
+          <>
+            {combosOrdenados.map(([par, cnt], i) => {
+              const maxC = combosOrdenados[0][1] || 1
+              return (
+                <div key={par} style={{ marginBottom: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-strong)' }}>{par}</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--purple)' }}>{cnt}×</span>
+                  </div>
+                  <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 4, height: 5, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', borderRadius: 4, width: (cnt / maxC * 100) + '%', background: 'linear-gradient(90deg, var(--purple), var(--cyan))' }} />
+                  </div>
+                </div>
+              )
+            })}
+            <div style={{ marginTop: 6, padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, fontSize: 11, color: 'var(--muted)', lineHeight: 1.7 }}>
+              💡 Recetas que se piden juntas: candidatas a combo o promoción cruzada en la carta del bar.
+            </div>
+          </>
+        )
+      ) : (
+        // Vistas de ranking (margen / rotacion / vip)
+        ordenadas.length === 0 ? (
+          <div style={{ color: 'var(--muted)', fontSize: 13, textAlign: 'center', padding: 16 }}>Sin datos</div>
+        ) : (
+          <>
+            {ordenadas.map((r, i) => {
+              const d = render(r)
+              return (
+                <div key={r.nombre} style={{ marginBottom: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ width: 18, height: 18, borderRadius: '50%', background: i === 0 ? d.color : 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: i === 0 ? '#000' : 'var(--muted)', flexShrink: 0 }}>{i + 1}</span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-strong)' }}>{r.nombre}</span>
+                    </div>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: d.color }}>{d.valor}</span>
+                  </div>
+                  <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 4, height: 5, overflow: 'hidden', marginBottom: 3 }}>
+                    <div style={{ height: '100%', borderRadius: 4, width: (d.pct * 100) + '%', background: d.color, transition: 'width 0.4s' }} />
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>{d.sub}</div>
+                </div>
+              )
+            })}
+            <div style={{ marginTop: 6, padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, fontSize: 11, color: 'var(--muted)', lineHeight: 1.7 }}>
+              {vista === 'margen' && '💡 Margen en pesos por unidad: cuánto deja cada venta más allá del porcentaje. Las de arriba sostienen el negocio.'}
+              {vista === 'rotacion' && '💡 Rotación: unidades vendidas por día desde su primera venta. Mide qué tan rápido se mueve cada receta.'}
+              {vista === 'vip' && '💡 Cuántos clientes recurrentes (VIP o 3+ pedidos) prefieren cada receta. Estas deben estar sí o sí en la carta del bar.'}
+            </div>
+          </>
+        )
+      )}
+    </div>
+  )
+}
+
+
 export default function Analisis() {
   const [ventas, setVentas] = useState([])
   const [ordenes, setOrdenes] = useState([])
@@ -1272,6 +1483,7 @@ export default function Analisis() {
   const [gastosCaja, setGastosCaja] = useState([])
   const [comprasDetalle, setComprasDetalle] = useState([])
   const [recetaIngredientes, setRecetaIngredientes] = useState([])
+  const [clientesData, setClientesData] = useState([])
   const [insumos, setInsumos] = useState([])
   const [config, setConfig] = useState({ merma_pct: 0.08, costo_envase: 794.6 })
   const [margenBruto, setMargenBruto] = useState(null)
@@ -1289,23 +1501,25 @@ export default function Analisis() {
           supabase.from('ventas').select('id, fecha, litros, precio_venta, origen, receta_nombre, orden_id, delivery').order('fecha', { ascending: false }),
           supabase.from('caja').select('fecha, monto, categoria, tipo').eq('tipo', 'salida'),
           supabase.from('compras').select('fecha, insumo_nombre, cantidad, precio_total, es_inversion, tipo').order('fecha'),
-          supabase.from('ordenes').select('id, fecha, hora, medio_pago, delivery, delivery_tipo, distancia_km').order('fecha', { ascending: false }),
+          supabase.from('ordenes').select('id, fecha, hora, medio_pago, delivery, delivery_tipo, distancia_km, cliente_nombre').order('fecha', { ascending: false }),
           supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad, unidad'),
           supabase.from('insumos').select('nombre, stock_actual, costo_ppp, unidad'),
           supabase.from('config').select('*'),
+          supabase.from('clientes').select('id, nombre, tag'),
         ])
         // Detectar si alguna query devolvió error
         const errores = results.map((r, i) => r.error ? { idx: i, msg: r.error.message } : null).filter(Boolean)
         if (errores.length > 0) {
-          const tablas = ['ventas','caja','compras','ordenes','receta_ingredientes','insumos','config']
+          const tablas = ['ventas','caja','compras','ordenes','receta_ingredientes','insumos','config','clientes']
           const detalle = errores.map(e => `${tablas[e.idx]}: ${e.msg}`).join(' · ')
           throw new Error(detalle)
         }
-        const [{ data: vts }, { data: cja }, { data: cmp }, { data: ords }, { data: recIng }, { data: ins }, { data: cfg }] = results
+        const [{ data: vts }, { data: cja }, { data: cmp }, { data: ords }, { data: recIng }, { data: ins }, { data: cfg }, { data: cls }] = results
         setVentas(vts || [])
         setOrdenes(ords || [])
         setComprasDetalle(cmp || [])
         setRecetaIngredientes(recIng || [])
+        setClientesData(cls || [])
         setInsumos(ins || [])
         setGastosCaja(cja || [])
         setGastosPub((cja || []).filter(m => m.categoria === 'Publicidad'))
@@ -1426,6 +1640,7 @@ export default function Analisis() {
               <HorasActivas ordenes={ordenes} />
               <VentasPorDia ventas={ventasFiltradas} />
               <TendenciaSemanal ventas={ventasFiltradas} />
+              <AnalisisRecetas ventas={ventasFiltradas} ordenes={ordenes} recetaIngredientes={recetaIngredientes} insumos={insumos} clientesData={clientesData} config={config} />
             </>
           )}
 

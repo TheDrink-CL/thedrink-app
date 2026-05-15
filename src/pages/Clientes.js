@@ -112,24 +112,81 @@ function ClienteModal({ cliente, onSave, onCancel }) {
   )
 }
 
+// Tags sugeridos para clientes (la columna `tag` es texto libre, esto es UX)
+const TAGS_CLIENTE = ['Cliente VIP', 'Probable invitado bar', 'Influencer potencial', 'Cliente nuevo', 'En riesgo']
+
+// Parsea "YYYY-MM-DD" sin desfase de zona horaria
+function parseFechaCli(f) {
+  const [y, m, d] = f.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+
 // ─── Modal perfil completo de cliente ────────────────────────────────────────
-function PerfilModal({ cliente, ordenes, onEditar, onCerrar }) {
-  const pedidos = ordenes.filter(o => o.cliente_id === cliente.id || (o.cliente_nombre || '').trim().toLowerCase() === cliente.nombre.trim().toLowerCase())
-  const totalGastado = pedidos.reduce((s, o) => s + (o.ventas || []).reduce((ss, v) => ss + (v.litros || 1) * (v.precio_venta || 0), 0), 0)
+function PerfilModal({ cliente, ordenes, onEditar, onCerrar, onTagSaved }) {
+  // Pedidos del cliente, ordenados del más reciente al más antiguo
+  const pedidos = ordenes
+    .filter(o => o.cliente_id === cliente.id || (o.cliente_nombre || '').trim().toLowerCase() === cliente.nombre.trim().toLowerCase())
+    .slice()
+    .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''))
+
+  const gastoDePedido = (o) => (o.ventas || []).reduce((ss, v) => ss + (v.litros || 1) * (v.precio_venta || 0), 0)
+  const totalGastado = pedidos.reduce((s, o) => s + gastoDePedido(o), 0)
+  const ticketPromedio = pedidos.length > 0 ? totalGastado / pedidos.length : 0
+
+  // ── Días entre compras (promedio) ──────────────────────────────────────────
+  const fechasUnicas = [...new Set(pedidos.map(o => o.fecha).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b))
+  let diasEntreCompras = null
+  if (fechasUnicas.length >= 2) {
+    let totalDias = 0
+    for (let i = 1; i < fechasUnicas.length; i++) {
+      totalDias += (parseFechaCli(fechasUnicas[i]) - parseFechaCli(fechasUnicas[i - 1])) / (1000 * 60 * 60 * 24)
+    }
+    diasEntreCompras = Math.round(totalDias / (fechasUnicas.length - 1))
+  }
+
+  // ── Bebida favorita ────────────────────────────────────────────────────────
   const recetasFav = {}
-  pedidos.forEach(o => (o.ventas || []).forEach(v => { recetasFav[v.receta_nombre] = (recetasFav[v.receta_nombre] || 0) + 1 }))
+  pedidos.forEach(o => (o.ventas || []).forEach(v => {
+    recetasFav[v.receta_nombre] = (recetasFav[v.receta_nombre] || 0) + (v.litros || 1)
+  }))
   const favSorted = Object.entries(recetasFav).sort((a, b) => b[1] - a[1])
-  const ultPedido = pedidos[0]
+
+  // ── Hora típica de compra ──────────────────────────────────────────────────
+  const horas = pedidos.map(o => o.hora).filter(Boolean).map(h => parseInt(h.slice(0, 2), 10)).filter(h => !isNaN(h))
+  let horaTipica = null
+  if (horas.length > 0) {
+    const avg = Math.round(horas.reduce((s, h) => s + h, 0) / horas.length)
+    horaTipica = `${String(avg).padStart(2, '0')}:00 aprox`
+  }
+
+  // ── Tag editable ───────────────────────────────────────────────────────────
+  const [tag, setTag] = useState(cliente.tag || '')
+  const [tagCustom, setTagCustom] = useState('')
+  const [savingTag, setSavingTag] = useState(false)
+  const [editandoTag, setEditandoTag] = useState(false)
+
+  const guardarTag = async (nuevoTag) => {
+    setSavingTag(true)
+    await supabase.from('clientes').update({ tag: nuevoTag || null }).eq('id', cliente.id)
+    setSavingTag(false)
+    setTag(nuevoTag)
+    setEditandoTag(false)
+    setTagCustom('')
+    if (onTagSaved) onTagSaved()
+  }
+
   const oc = origenColor(cliente.origen)
   const esVIP = pedidos.length >= 3
+  const ultPedido = pedidos[0]
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.82)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300, padding: 24 }}>
-      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 18, padding: 24, maxWidth: 380, width: '100%' }}>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.82)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', zIndex: 300, padding: 20, overflowY: 'auto' }}>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 18, padding: 22, maxWidth: 400, width: '100%', marginTop: 16, marginBottom: 16 }}>
 
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-          <div>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 20, fontWeight: 900, color: 'var(--text-strong)', marginBottom: 4 }}>{cliente.nombre}</div>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {cliente.origen && (
@@ -142,39 +199,111 @@ function PerfilModal({ cliente, ordenes, onEditar, onCerrar }) {
                   ⭐ VIP
                 </span>
               )}
+              {tag && (
+                <span style={{ fontSize: 11, background: 'rgba(123,47,190,0.18)', color: '#AFA9EC', borderRadius: 10, padding: '2px 8px', fontWeight: 700 }}>
+                  🏷️ {tag}
+                </span>
+              )}
             </div>
           </div>
           <button onClick={onCerrar}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 24, lineHeight: 1, padding: 0 }}>×</button>
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 24, lineHeight: 1, padding: 0, flexShrink: 0 }}>×</button>
         </div>
 
-        {/* KPIs */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
-          <div style={{ background: 'rgba(0,180,180,0.07)', borderRadius: 10, padding: '10px 12px', textAlign: 'center' }}>
-            <div style={{ fontSize: 24, fontWeight: 900, color: 'var(--cyan)' }}>{pedidos.length}</div>
-            <div style={{ fontSize: 11, color: 'var(--muted)' }}>pedido{pedidos.length !== 1 ? 's' : ''}</div>
+        {/* KPIs principales */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 12 }}>
+          <div style={{ background: 'rgba(0,180,180,0.07)', borderRadius: 10, padding: '10px 6px', textAlign: 'center' }}>
+            <div style={{ fontSize: 22, fontWeight: 900, color: 'var(--cyan)' }}>{pedidos.length}</div>
+            <div style={{ fontSize: 10, color: 'var(--muted)' }}>pedido{pedidos.length !== 1 ? 's' : ''}</div>
           </div>
-          <div style={{ background: 'rgba(16,185,129,0.07)', borderRadius: 10, padding: '10px 12px', textAlign: 'center' }}>
-            <div style={{ fontSize: 18, fontWeight: 900, color: 'var(--green)' }}>{formatCLP(totalGastado)}</div>
-            <div style={{ fontSize: 11, color: 'var(--muted)' }}>gastado total</div>
+          <div style={{ background: 'rgba(16,185,129,0.07)', borderRadius: 10, padding: '10px 6px', textAlign: 'center' }}>
+            <div style={{ fontSize: 15, fontWeight: 900, color: 'var(--green)' }}>{formatCLP(totalGastado)}</div>
+            <div style={{ fontSize: 10, color: 'var(--muted)' }}>total</div>
+          </div>
+          <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 10, padding: '10px 6px', textAlign: 'center' }}>
+            <div style={{ fontSize: 15, fontWeight: 900, color: 'var(--text-strong)' }}>{formatCLP(ticketPromedio)}</div>
+            <div style={{ fontSize: 10, color: 'var(--muted)' }}>ticket prom.</div>
           </div>
         </div>
 
-        {/* Recetas fav */}
-        {favSorted.length > 0 && (
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700, marginBottom: 6 }}>Receta favorita</div>
-            {favSorted.slice(0, 2).map(([rec, cnt]) => (
-              <div key={rec} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                <span style={{ fontSize: 13, color: 'var(--text)' }}>{rec}</span>
-                <span style={{ fontSize: 13, color: 'var(--cyan)', fontWeight: 700 }}>{cnt}×</span>
+        {/* Insights de comportamiento */}
+        <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: '12px 14px', marginBottom: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>🔁 Días entre compras</span>
+            <span style={{ fontSize: 12, color: 'var(--text)', fontWeight: 700 }}>
+              {diasEntreCompras != null ? `${diasEntreCompras} días` : '—'}
+            </span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>🍹 Bebida favorita</span>
+            <span style={{ fontSize: 12, color: 'var(--cyan)', fontWeight: 700 }}>
+              {favSorted.length > 0 ? favSorted[0][0] : '—'}
+            </span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>🕐 Hora típica</span>
+            <span style={{ fontSize: 12, color: 'var(--text)', fontWeight: 700 }}>
+              {horaTipica || '—'}
+            </span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>📅 Último pedido</span>
+            <span style={{ fontSize: 12, color: 'var(--text)', fontWeight: 700 }}>
+              {ultPedido ? ultPedido.fecha : '—'}
+            </span>
+          </div>
+        </div>
+
+        {/* Tag editable */}
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700, marginBottom: 6 }}>
+            🏷️ Etiqueta
+          </div>
+          {editandoTag ? (
+            <div>
+              <div className="chip-row" style={{ marginBottom: 8 }}>
+                {TAGS_CLIENTE.map(t => (
+                  <button key={t} type="button"
+                    className={`chip ${tag === t ? 'selected' : ''}`}
+                    onClick={() => guardarTag(t)} disabled={savingTag}>
+                    {t}
+                  </button>
+                ))}
               </div>
-            ))}
-          </div>
-        )}
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input type="text" className="form-input" value={tagCustom}
+                  placeholder="O escribe una etiqueta..." style={{ flex: 1, fontSize: 13 }}
+                  onChange={e => setTagCustom(e.target.value)} />
+                <button className="btn btn-primary btn-sm"
+                  onClick={() => guardarTag(tagCustom.trim())}
+                  disabled={savingTag || !tagCustom.trim()}>OK</button>
+              </div>
+              <button onClick={() => { setEditandoTag(false); setTagCustom('') }}
+                style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 12, marginTop: 6, padding: 0 }}>
+                Cancelar
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 13, color: tag ? '#AFA9EC' : 'var(--muted)', fontWeight: tag ? 700 : 400 }}>
+                {tag || 'Sin etiqueta'}
+              </span>
+              <button onClick={() => setEditandoTag(true)}
+                style={{ background: 'none', border: '1px solid rgba(123,47,190,0.4)', borderRadius: 7, color: '#AFA9EC', cursor: 'pointer', fontSize: 11, padding: '3px 9px' }}>
+                {tag ? 'Cambiar' : '+ Asignar'}
+              </button>
+              {tag && (
+                <button onClick={() => guardarTag('')} disabled={savingTag}
+                  style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 11, padding: 0 }}>
+                  Quitar
+                </button>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Datos de contacto */}
-        <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: '10px 14px', marginBottom: 14 }}>
+        <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: '10px 14px', marginBottom: 12 }}>
           {cliente.telefono
             ? <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: 4 }}>📞 <a href={`https://wa.me/${cliente.telefono.replace(/\D/g,'')}`} style={{ color: 'var(--green)', textDecoration: 'none' }}>{cliente.telefono}</a></div>
             : <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 4 }}>📞 Sin teléfono</div>
@@ -183,9 +312,38 @@ function PerfilModal({ cliente, ordenes, onEditar, onCerrar }) {
           {cliente.nota && <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic', marginTop: 4 }}>💬 {cliente.nota}</div>}
         </div>
 
-        {ultPedido && (
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
-            Último pedido: <strong style={{ color: 'var(--text)' }}>{ultPedido.fecha}</strong>
+        {/* Histórico de pedidos */}
+        {pedidos.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700, marginBottom: 8 }}>
+              Histórico de pedidos ({pedidos.length})
+            </div>
+            <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+              {pedidos.map((o, i) => {
+                const gasto = gastoDePedido(o)
+                const items = (o.ventas || [])
+                return (
+                  <div key={o.id || i} style={{
+                    padding: '8px 10px', marginBottom: 6,
+                    background: 'rgba(255,255,255,0.03)', borderRadius: 8,
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                      <span style={{ fontSize: 12, color: 'var(--text)', fontWeight: 700 }}>
+                        {o.fecha}{o.hora ? ` · ${o.hora}` : ''}
+                      </span>
+                      <span style={{ fontSize: 12, color: 'var(--green)', fontWeight: 800 }}>
+                        {formatCLP(gasto)}
+                      </span>
+                    </div>
+                    {items.length > 0 && (
+                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                        {items.map(v => `${v.receta_nombre}${v.litros && v.litros !== 1 ? ` (${v.litros}L)` : ''}`).join(' · ')}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           </div>
         )}
 
@@ -291,6 +449,7 @@ export default function Clientes() {
           ordenes={ordenes}
           onEditar={() => setEditando(perfil)}
           onCerrar={() => setPerfil(null)}
+          onTagSaved={() => { showToast('Etiqueta guardada ✓'); loadData() }}
         />
       )}
 

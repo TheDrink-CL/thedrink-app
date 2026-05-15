@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { calcularCostoReceta, formatCLP, formatPct } from '../lib/calculos'
 import { calcularRentabilidad } from '../lib/rentabilidad'
+import CaminoAlBar from './CaminoAlBar'
 
 function RecetasComparativo({ topVolumen, topGanancia }) {
   const [tab, setTab] = useState('volumen')
@@ -502,6 +503,8 @@ export default function Dashboard() {
   return (
     <div className="page">
       <div className="page-title">The Drink</div>
+
+      <CaminoAlBar />
 
       {bannerCtx && (
         <div style={{ background: bannerCtx.color, border: `1px solid ${bannerCtx.borde}`, borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: bannerCtx.txt, lineHeight: 1.6, fontWeight: 600 }}>
