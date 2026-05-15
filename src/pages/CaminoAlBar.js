@@ -11,10 +11,18 @@ function parseFecha(f) {
 }
 
 // ─── Barra de progreso individual ───────────────────────────────────────────
-function BarraObjetivo({ icono, label, actual, objetivo, formato, color, nota, sobreUmbral }) {
+// `actual` es el valor REAL de hoy (llena la barra y define el progreso).
+// `proyeccion` (opcional) es un valor estimado a futuro: se dibuja como una
+// marca fantasma sobre la barra y se explica en una línea aparte.
+function BarraObjetivo({ icono, label, actual, objetivo, formato, color, nota, sobreUmbral, proyeccion, proyeccionLabel }) {
   const pct = objetivo > 0 ? Math.min(1, actual / objetivo) : 0
   const pctTexto = Math.round(pct * 100)
   const fmt = formato || (n => String(Math.round(n)))
+
+  // Posición de la marca de proyección (cap a 100%)
+  const pctProy = (proyeccion != null && objetivo > 0)
+    ? Math.min(1, proyeccion / objetivo)
+    : null
 
   return (
     <div style={{ marginBottom: 14 }}>
@@ -29,9 +37,19 @@ function BarraObjetivo({ icono, label, actual, objetivo, formato, color, nota, s
           {pctTexto}%
         </div>
       </div>
-      <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 4, height: 7, overflow: 'hidden', marginBottom: 4 }}>
+      <div style={{ position: 'relative', background: 'rgba(255,255,255,0.06)', borderRadius: 4, height: 7, overflow: 'hidden', marginBottom: 4 }}>
+        {/* Tramo proyectado: fantasma tenue entre lo real y la proyección */}
+        {pctProy != null && pctProy > pct && (
+          <div style={{
+            position: 'absolute', left: (pct * 100) + '%',
+            width: ((pctProy - pct) * 100) + '%', top: 0, bottom: 0,
+            background: `repeating-linear-gradient(45deg, ${color}33, ${color}33 3px, transparent 3px, transparent 6px)`,
+          }} />
+        )}
+        {/* Tramo real */}
         <div style={{
-          height: '100%', borderRadius: 4, width: (pct * 100) + '%',
+          position: 'absolute', left: 0, top: 0, bottom: 0,
+          borderRadius: 4, width: (pct * 100) + '%',
           background: `linear-gradient(90deg, ${color}, ${color})`,
           transition: 'width 0.5s ease',
         }} />
@@ -48,6 +66,11 @@ function BarraObjetivo({ icono, label, actual, objetivo, formato, color, nota, s
         </span>
         {nota && <span style={{ fontStyle: 'italic' }}>{nota}</span>}
       </div>
+      {proyeccion != null && (
+        <div style={{ fontSize: 10, color: color, marginTop: 3, opacity: 0.85 }}>
+          ◇ {proyeccionLabel || 'Proyectado'}: {fmt(proyeccion)}
+        </div>
+      )}
     </div>
   )
 }
@@ -248,8 +271,9 @@ export default function CaminoAlBar() {
   const margenOk = margen30 >= objetivos.margen
 
   // Progreso global (promedio de los 4 indicadores, cap a 100%)
+  // El capital usa el patrimonio REAL de hoy, no la proyección.
   const progresos = [
-    Math.min(1, capital.actual / objetivos.capital),
+    Math.min(1, capital.patrimonioNeto / objetivos.capital),
     Math.min(1, clientesBase / objetivos.clientes),
     Math.min(1, recetasValidadas / objetivos.recetas),
     Math.min(1, margen30 / objetivos.margen),
@@ -301,9 +325,11 @@ export default function CaminoAlBar() {
           <>
             <BarraObjetivo
               icono="💰" label="Capital acumulado"
-              actual={capital.actual} objetivo={objetivos.capital}
+              actual={capital.patrimonioNeto} objetivo={objetivos.capital}
               formato={formatCLP} color="var(--green)"
-              nota={`proyectado a ${objetivos.horizonteMeses} meses`}
+              nota="patrimonio neto hoy"
+              proyeccion={capital.utilidadMensual > 0 ? capital.actual : null}
+              proyeccionLabel={`a ${objetivos.horizonteMeses} meses`}
             />
             <BarraObjetivo
               icono="👥" label="Clientes base"
@@ -332,8 +358,8 @@ export default function CaminoAlBar() {
               fontSize: 11, color: 'var(--muted)', lineHeight: 1.7,
             }}>
               {capital.utilidadMensual > 0
-                ? <>Al ritmo actual sumas <strong style={{ color: '#AFA9EC' }}>{formatCLP(capital.utilidadMensual)}</strong> de utilidad al mes. Tu patrimonio hoy es <strong style={{ color: 'var(--green)' }}>{formatCLP(capital.patrimonioNeto)}</strong>.</>
-                : <>Registra más ventas para que la proyección de capital tome forma.</>}
+                ? <>La barra llena es tu patrimonio <strong style={{ color: 'var(--green)' }}>real de hoy</strong> ({formatCLP(capital.patrimonioNeto)}). La marca ◇ es la <strong style={{ color: '#AFA9EC' }}>proyección</strong> si mantienes el ritmo actual de {formatCLP(capital.utilidadMensual)} de utilidad al mes.</>
+                : <>La barra muestra tu patrimonio real. Registra más ventas para que aparezca la proyección de capital.</>}
             </div>
           </>
         )}
