@@ -68,12 +68,33 @@ function RecetasComparativo({ topVolumen, topGanancia }) {
 }
 
 // ─── Tooltip cyberpunk reutilizable ─────────────────────────────────────────
+// Usa position:fixed + getBoundingClientRect para que la burbuja nunca se
+// salga de la pantalla en móvil (se ajusta a los bordes del viewport).
 function InfoTip({ texto }) {
   const [abierto, setAbierto] = useState(false)
+  const [pos, setPos] = useState(null)
+  const btnRef = React.useRef(null)
+
+  const toggle = () => {
+    if (abierto) { setAbierto(false); return }
+    const btn = btnRef.current
+    if (!btn) return
+    const rect = btn.getBoundingClientRect()
+    const margen = 12
+    const maxAncho = 260
+    const ancho = Math.min(maxAncho, window.innerWidth - margen * 2)
+    // Centrar sobre el botón, pero clamp a los bordes del viewport
+    let left = rect.left + rect.width / 2 - ancho / 2
+    left = Math.max(margen, Math.min(left, window.innerWidth - ancho - margen))
+    setPos({ left, top: rect.top, ancho })
+    setAbierto(true)
+  }
+
   return (
-    <span style={{ position: 'relative', display: 'inline-block' }}>
+    <>
       <button
-        onClick={() => setAbierto(a => !a)}
+        ref={btnRef}
+        onClick={toggle}
         onBlur={() => setTimeout(() => setAbierto(false), 150)}
         style={{
           width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
@@ -84,10 +105,11 @@ function InfoTip({ texto }) {
         }}
         aria-label="Más información"
       >i</button>
-      {abierto && (
+      {abierto && pos && (
         <span style={{
-          position: 'absolute', bottom: '130%', right: -4, zIndex: 200,
-          width: 220, background: 'var(--bg2)', border: '1px solid var(--cyan-dim)',
+          position: 'fixed', left: pos.left, top: pos.top, zIndex: 300,
+          transform: 'translateY(-100%) translateY(-8px)',
+          width: pos.ancho, background: 'var(--bg2)', border: '1px solid var(--cyan-dim)',
           borderRadius: 8, padding: '8px 10px', fontSize: 11, color: 'var(--text)',
           lineHeight: 1.6, boxShadow: '0 6px 24px rgba(0,0,0,0.6)',
           textTransform: 'none', letterSpacing: 0, fontWeight: 400,
@@ -95,7 +117,7 @@ function InfoTip({ texto }) {
           {texto}
         </span>
       )}
-    </span>
+    </>
   )
 }
 
