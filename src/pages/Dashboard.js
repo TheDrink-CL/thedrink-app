@@ -123,7 +123,7 @@ function InfoTip({ texto }) {
 }
 
 // ─── Sección RENTABILIDAD: tres márgenes con label explicativo ──────────────
-function Rentabilidad({ r }) {
+function Rentabilidad({ r, comp }) {
   if (!r) return null
   const filas = [
     {
@@ -131,6 +131,7 @@ function Rentabilidad({ r }) {
       pct: r.margenBruto,
       pesos: r.gananciaBruta,
       color: 'var(--green)',
+      delta: comp ? comp.bruto : null,
       desc: 'Lo que queda después del costo de los insumos (COGS): receta, merma y envase. Es la rentabilidad pura del producto.',
     },
     {
@@ -138,6 +139,7 @@ function Rentabilidad({ r }) {
       pct: r.margenOperativo,
       pesos: r.gananciaOperativa,
       color: 'var(--cyan)',
+      delta: comp ? comp.operativo : null,
       desc: 'Margen bruto menos publicidad, transporte/delivery y otros gastos variables. Es lo que deja la operación del día a día.',
     },
     {
@@ -145,6 +147,7 @@ function Rentabilidad({ r }) {
       pct: r.margenNeto,
       pesos: r.gananciaNeta,
       color: r.tieneCostoOportunidad ? 'var(--purple)' : 'var(--muted)',
+      delta: comp ? comp.neto : null,
       desc: r.tieneCostoOportunidad
         ? 'Margen operativo menos el costo de oportunidad de tu tiempo como operador. Es la ganancia real considerando tus horas.'
         : 'Margen operativo menos el costo de oportunidad de tu tiempo. Aún no registras horas trabajadas — cuando lo hagas, este número se ajusta.',
@@ -168,8 +171,15 @@ function Rentabilidad({ r }) {
               {formatCLP(f.pesos)} {f.pesos >= 0 ? 'de ganancia' : 'de pérdida'}
             </div>
           </div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: f.color, flexShrink: 0 }}>
-            {formatPct(f.pct)}
+          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+            <div style={{ fontSize: 22, fontWeight: 800, color: f.color }}>
+              {formatPct(f.pct)}
+            </div>
+            {f.delta != null && Math.abs(f.delta) >= 0.005 && (
+              <div style={{ fontSize: 10, color: f.delta >= 0 ? 'var(--green)' : 'var(--pink)', marginTop: 1 }}>
+                {f.delta >= 0 ? '↑' : '↓'} {(Math.abs(f.delta) * 100).toFixed(1)}pp vs 30d previos
+              </div>
+            )}
           </div>
         </div>
       ))}
@@ -345,6 +355,29 @@ export default function Dashboard() {
         costoHora,
       })
 
+      // Rentabilidad 30d vs 30d previos (para mostrar deltas en cada margen)
+      const _hoy = new Date()
+      const _h30 = new Date(_hoy); _h30.setDate(_hoy.getDate() - 30)
+      const _h60 = new Date(_hoy); _h60.setDate(_hoy.getDate() - 60)
+      const vts30 = (vts || []).filter(v => new Date(v.fecha) >= _h30)
+      const vtsPrev = (vts || []).filter(v => new Date(v.fecha) >= _h60 && new Date(v.fecha) < _h30)
+      const gastos30 = gastosCajaSalida.filter(m => m.fecha && new Date(m.fecha) >= _h30)
+      const gastosPrev = gastosCajaSalida.filter(m => m.fecha && new Date(m.fecha) >= _h60 && new Date(m.fecha) < _h30)
+      const rent30 = calcularRentabilidad({
+        ventas: vts30, recetaIngredientes: recIng || [], insumosPPP: insumosConPPP || [],
+        gastosCaja: gastos30, config: { merma_pct: merma, costo_envase: costoEnvase },
+      })
+      const rentPrev = calcularRentabilidad({
+        ventas: vtsPrev, recetaIngredientes: recIng || [], insumosPPP: insumosConPPP || [],
+        gastosCaja: gastosPrev, config: { merma_pct: merma, costo_envase: costoEnvase },
+      })
+      const comparacionRent = {
+        bruto:     rentPrev.ingresos > 0 ? rent30.margenBruto    - rentPrev.margenBruto    : null,
+        operativo: rentPrev.ingresos > 0 ? rent30.margenOperativo - rentPrev.margenOperativo : null,
+        neto:      rentPrev.ingresos > 0 ? rent30.margenNeto      - rentPrev.margenNeto      : null,
+        ingresos30: rent30.ingresos, ingresosPrev: rentPrev.ingresos,
+      }
+
       // ── Inventario rotable: valor del stock actual de insumos a costo PPP ──
       const inventarioRotable = (ins || []).reduce((s, i) => {
         const stock = parseFloat(i.stock_actual) || 0
@@ -449,7 +482,7 @@ export default function Dashboard() {
       const transferencias = (ordenes || []).filter(o => o.medio_pago === 'transferencia' && o.fecha >= inicioMes).length
       setTransferenciasMes(transferencias)
 
-      setData({ inversion, ingresoTotal, litrosTotales, costoTotalReal, saldoCaja, ingresoMes, ticketPromedio, ticketMediana, totalOrdenes, clientesRecurrentes: clientesRecurrentes.length, totalClientesNombrados, pctRecurrentes, topRecurrentes, totalActivosFijos, ingresoSemAct, ingresoSemAnt, deltaSem, canalTop, proximoEvento, diasHastaEvento, rentabilidad, inventarioRotable, capitalTrabajoStock })
+      setData({ inversion, ingresoTotal, litrosTotales, costoTotalReal, saldoCaja, ingresoMes, ticketPromedio, ticketMediana, totalOrdenes, clientesRecurrentes: clientesRecurrentes.length, totalClientesNombrados, pctRecurrentes, topRecurrentes, totalActivosFijos, ingresoSemAct, ingresoSemAnt, deltaSem, canalTop, proximoEvento, diasHastaEvento, rentabilidad, inventarioRotable, capitalTrabajoStock, comparacionRent })
       setVentas({ topRecetas, topPorGanancia, recientes: vts?.slice(0, 5) || [] })
       setLoading(false)
     }
@@ -553,7 +586,7 @@ export default function Dashboard() {
       </div>
 
       {/* ── RENTABILIDAD: tres márgenes con explicación ──────────────────── */}
-      <Rentabilidad r={data.rentabilidad} />
+      <Rentabilidad r={data.rentabilidad} comp={data.comparacionRent} />
 
       {/* ── Rotación de capital de trabajo (antes "ROI capital trabajo") ─── */}
       <RotacionCapital

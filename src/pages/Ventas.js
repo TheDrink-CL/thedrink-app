@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatCLP } from '../lib/calculos'
+import { descargarCSV, BotonExportar } from '../lib/exportar'
 
 // ─── Modal ticket de pedido ──────────────────────────────────────────────────
 function TicketModal({ orden, onCerrar }) {
@@ -1148,11 +1149,37 @@ export default function Ventas() {
 
         return (
           <>
-            <div className="section-divider">
-              Historial de pedidos
-              {ordenesFiltradas.length !== ordenes.length
-                ? ` (${ordenesFiltradas.length} de ${ordenes.length})`
-                : ` (${ordenes.length})`}
+            <div className="section-divider" style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <span>
+                Historial de pedidos
+                {ordenesFiltradas.length !== ordenes.length
+                  ? ` (${ordenesFiltradas.length} de ${ordenes.length})`
+                  : ` (${ordenes.length})`}
+              </span>
+              {ordenesFiltradas.length > 0 && (
+                <BotonExportar onClick={() => {
+                  // Una fila por venta (item) — permite analizar receta a receta en Excel
+                  const headers = ['Fecha','Hora','Cliente','Medio pago','Receta','Cantidad','Precio unit.','Total ítem','Origen','Delivery','Tipo entrega','Distancia km','Nota orden']
+                  const rows = []
+                  ordenesFiltradas.forEach(o => {
+                    const items = o.ventas || []
+                    if (items.length === 0) {
+                      rows.push([o.fecha, o.hora || '', o.cliente_nombre || '', o.medio_pago || '', '', '', '', '', o.origen || '', o.delivery || 0, o.delivery_tipo || '', o.distancia_km ?? '', o.nota || ''])
+                    } else {
+                      items.forEach(v => {
+                        const total = (parseFloat(v.litros)||1) * (parseFloat(v.precio_venta)||0)
+                        rows.push([
+                          o.fecha, o.hora || '', o.cliente_nombre || '', o.medio_pago || '',
+                          v.receta_nombre, v.litros, v.precio_venta, total,
+                          o.origen || '', o.delivery || 0, o.delivery_tipo || '',
+                          o.distancia_km ?? '', o.nota || '',
+                        ])
+                      })
+                    }
+                  })
+                  descargarCSV('thedrink_pedidos', headers, rows)
+                }} />
+              )}
             </div>
             <div className="card">
               {ordenesFiltradas.length === 0 && (

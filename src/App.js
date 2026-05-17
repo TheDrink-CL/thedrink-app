@@ -12,6 +12,8 @@ import Clientes from './pages/Clientes'
 import Aprendizajes from './pages/Aprendizajes'
 import Proyecciones from './pages/Proyecciones'
 import Conciliacion from './pages/Conciliacion'
+import Horas from './pages/Horas'
+import Alertas, { useAlertasCount } from './pages/Alertas'
 import DeliveryLogin, { isDeliveryUnlocked } from './pages/DeliveryLogin'
 import DeliveryPanel from './pages/DeliveryPanel'
 import PinLock, { isPinUnlocked } from './pages/PinLock'
@@ -104,6 +106,18 @@ const TABS_MAS = [
       <circle cx="15" cy="14" r="1.2"/>
     </svg>
   )},
+  { id: 'horas', label: 'Horas', icon: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="9"/>
+      <polyline points="12 7 12 12 15 14"/>
+    </svg>
+  )},
+  { id: 'alertas', label: 'Alertas', icon: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/>
+      <path d="M13.7 21a2 2 0 0 1-3.4 0"/>
+    </svg>
+  )},
 ]
 
 // Detectar si la URL es /delivery
@@ -117,6 +131,7 @@ export default function App() {
   const [menuMas, setMenuMas] = useState(false)
   const [desbloqueado, setDesbloqueado] = useState(isPinUnlocked())
   const [deliveryDesbloqueado, setDeliveryDesbloqueado] = useState(isDeliveryUnlocked())
+  const alertasCount = useAlertasCount()
 
   const isEnMas = TABS_MAS.some(t => t.id === tab)
 
@@ -160,6 +175,8 @@ export default function App() {
       {tab === 'aprendizajes' && <Aprendizajes />}
       {tab === 'proyecciones' && <Proyecciones />}
       {tab === 'conciliacion' && <Conciliacion />}
+      {tab === 'horas' && <Horas />}
+      {tab === 'alertas' && <Alertas />}
 
       {/* Menú "Más" desplegable */}
       {menuMas && (
@@ -182,7 +199,14 @@ export default function App() {
                   cursor:'pointer', fontSize:14, fontWeight: tab === t.id ? 700 : 400
                 }}>
                 <span style={{ width:20, height:20, display:'block' }}>{t.icon}</span>
-                {t.label}
+                <span style={{ flex:1, textAlign:'left' }}>{t.label}</span>
+                {t.id === 'alertas' && alertasCount > 0 && (
+                  <span style={{
+                    background: 'var(--pink)', color: '#fff',
+                    fontSize: 10, fontWeight: 800, padding: '1px 7px',
+                    borderRadius: 10, minWidth: 18, textAlign: 'center',
+                  }}>{alertasCount > 99 ? '99+' : alertasCount}</span>
+                )}
               </button>
             ))}
 
@@ -218,13 +242,24 @@ export default function App() {
         ))}
         {/* Botón "Más" */}
         <button className={`nav-btn ${isEnMas ? 'active' : ''}`}
-          onClick={() => setMenuMas(m => !m)}>
+          onClick={() => setMenuMas(m => !m)}
+          style={{ position: 'relative' }}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="12" cy="5" r="1" fill="currentColor"/>
             <circle cx="12" cy="12" r="1" fill="currentColor"/>
             <circle cx="12" cy="19" r="1" fill="currentColor"/>
           </svg>
           Más
+          {alertasCount > 0 && (
+            <span style={{
+              position: 'absolute', top: 2, right: 6,
+              minWidth: 16, height: 16, padding: '0 4px',
+              borderRadius: 8, background: 'var(--pink)',
+              color: '#fff', fontSize: 9, fontWeight: 800,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              lineHeight: 1, border: '1.5px solid var(--bg)',
+            }}>{alertasCount > 99 ? '99+' : alertasCount}</span>
+          )}
         </button>
       </nav>
     </div>

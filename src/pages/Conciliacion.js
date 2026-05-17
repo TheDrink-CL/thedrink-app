@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatCLP } from '../lib/calculos'
+import { descargarCSV, BotonExportar } from '../lib/exportar'
 
 const MEDIOS = [
   { id: 'transferencia', label: 'Transferencia', icon: '🏦', color: 'var(--cyan)',   bg: 'rgba(0,180,180,0.10)',  borde: 'rgba(0,180,180,0.35)' },
@@ -169,6 +170,20 @@ export default function Conciliacion() {
         </div>
       ) : (
         <>
+          {/* Botón de exportar */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+            <BotonExportar onClick={() => {
+              const headers = ['Fecha','Hora','Cliente','Medio pago','Total','Delivery','Tipo entrega']
+              const rows = []
+              Object.entries(data.porMedio).forEach(([medio, grupo]) => {
+                grupo.pedidos.forEach(o => {
+                  rows.push([o.fecha, o.hora || '', o.cliente_nombre || '', medio === '_sin' ? '' : medio, o.totalItems, o.delivery || 0, o.delivery_tipo || ''])
+                })
+              })
+              descargarCSV('thedrink_conciliacion', headers, rows)
+            }} />
+          </div>
+
           {/* Resumen banco vs efectivo */}
           <div className="kpi-grid">
             <div className="kpi-card" style={{ background: 'rgba(0,180,180,0.08)', borderColor: 'rgba(0,180,180,0.3)' }}>

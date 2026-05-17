@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { descargarCSV, BotonExportar } from '../lib/exportar'
 
 // ─── Tags de aprendizaje: deben coincidir con el CHECK de la migración ──────
 const TAGS = [
@@ -178,6 +179,17 @@ export default function Aprendizajes() {
       <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16, lineHeight: 1.6, marginTop: -12 }}>
         El conocimiento del negocio que vas acumulando. Todo lo que aprendes operando, en un solo lugar.
       </div>
+
+      {/* Boton exportar */}
+      {items.length > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+          <BotonExportar onClick={() => {
+            const headers = ['Fecha','Categoría','Texto']
+            const rows = items.map(i => [i.fecha, i.tag || '', i.texto])
+            descargarCSV('thedrink_aprendizajes', headers, rows)
+          }} />
+        </div>
+      )}
 
       {/* Filtros por tag */}
       <div className="chip-row">
