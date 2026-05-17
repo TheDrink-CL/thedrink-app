@@ -13,6 +13,37 @@ function horasEntre(inicio, fin) {
   const mi = hhmmToMin(inicio), mf = hhmmToMin(fin)
   return mf > mi ? (mf - mi) / 60 : 0
 }
+// ¿El bloque cruza medianoche? (fin menor o igual al inicio, pero ambos válidos)
+function cruzaMedianoche(inicio, fin) {
+  if (!inicio || !fin) return false
+  return hhmmToMin(fin) <= hhmmToMin(inicio)
+}
+// Total de horas considerando cruce (suma 24h si fin <= inicio)
+function horasTotalCruce(inicio, fin) {
+  if (!inicio || !fin) return 0
+  const mi = hhmmToMin(inicio), mf = hhmmToMin(fin)
+  if (mf > mi) return (mf - mi) / 60
+  // Cruza medianoche: del inicio hasta 24:00 + de 00:00 hasta fin
+  return ((24 * 60 - mi) + mf) / 60
+}
+// Suma N días a una fecha ISO "YYYY-MM-DD" sin desfases de zona horaria
+function sumarDiasISO(fechaISO, n) {
+  const [y, m, d] = fechaISO.split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  dt.setDate(dt.getDate() + n)
+  return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`
+}
+// Devuelve 1 o 2 payloads para insertar. Si cruza medianoche, parte en dos:
+// bloque A: (fecha, inicio → 23:59) y bloque B: (fecha+1, 00:00 → fin)
+function construirPayloads(base, fecha, horaInicio, horaFin) {
+  if (!cruzaMedianoche(horaInicio, horaFin)) {
+    return [{ ...base, fecha, hora_inicio: horaInicio, hora_fin: horaFin }]
+  }
+  return [
+    { ...base, fecha,                       hora_inicio: horaInicio, hora_fin: '23:59' },
+    { ...base, fecha: sumarDiasISO(fecha, 1), hora_inicio: '00:00',    hora_fin: horaFin },
+  ]
+}
 function hoyISO() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
@@ -57,27 +88,32 @@ function BloqueModal({ bloque, personas, roles, prefill, onSave, onCancel }) {
 
   const handleSave = async () => {
     if (!horaInicio || !horaFin) { setError('Necesitas hora de inicio y fin'); return }
-    if (horasEntre(horaInicio, horaFin) <= 0) { setError('La hora fin debe ser después del inicio'); return }
+    if (horaInicio === horaFin) { setError('La hora fin debe ser distinta del inicio'); return }
     if (!personaId) { setError('Elige quién trabajó'); return }
     if (!rolId) { setError('Elige el rol'); return }
     setSaving(true); setError('')
-    const payload = {
-      fecha,
-      hora_inicio: horaInicio,
-      hora_fin: horaFin,
+    const base = {
       persona_id: personaId,
       rol_id: rolId,
       descripcion: descripcion.trim() || null,
     }
-    const { error: err } = bloque?.id
-      ? await supabase.from('horas_trabajadas').update(payload).eq('id', bloque.id)
-      : await supabase.from('horas_trabajadas').insert(payload)
+    // Si cruza medianoche, parte en dos bloques (uno por día). Esto mantiene
+    // los reportes por día exactos y respeta el CHECK fin > inicio del SQL.
+    const payloads = construirPayloads(base, fecha, horaInicio, horaFin)
+
+    // En edit: borrar el original e insertar los nuevos (1 o 2).
+    // En insert: solo insertar.
+    if (bloque?.id) {
+      await supabase.from('horas_trabajadas').delete().eq('id', bloque.id)
+    }
+    const { error: err } = await supabase.from('horas_trabajadas').insert(payloads)
     setSaving(false)
     if (err) { setError(err.message); return }
     onSave()
   }
 
-  const horas = horaInicio && horaFin ? horasEntre(horaInicio, horaFin) : 0
+  const horas = horaInicio && horaFin ? horasTotalCruce(horaInicio, horaFin) : 0
+  const cruza = cruzaMedianoche(horaInicio, horaFin)
   const rolSeleccionado = roles.find(r => r.id === rolId)
   const costoEstimado = horas * (rolSeleccionado?.tarifa_hora || 0)
 
@@ -130,9 +166,16 @@ function BloqueModal({ bloque, personas, roles, prefill, onSave, onCancel }) {
         </div>
 
         {horas > 0 && (
-          <div style={{ fontSize:12, color:'var(--cyan)', textAlign:'center', marginBottom:14 }}>
-            = {horas.toFixed(1)} horas
-            {rolSeleccionado?.tarifa_hora > 0 && ` · costo oportunidad ${formatCLP(costoEstimado)}`}
+          <div style={{ textAlign:'center', marginBottom:14 }}>
+            <div style={{ fontSize:12, color:'var(--cyan)' }}>
+              = {horas.toFixed(1)} horas
+              {rolSeleccionado?.tarifa_hora > 0 && ` · costo oportunidad ${formatCLP(costoEstimado)}`}
+            </div>
+            {cruza && (
+              <div style={{ fontSize:11, color:'#f59e0b', marginTop:4, lineHeight:1.5 }}>
+                🌙 Cruza medianoche: se guardará como 2 bloques (uno por día) para que los reportes por día queden exactos.
+              </div>
+            )}
           </div>
         )}
 
