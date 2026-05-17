@@ -11,6 +11,7 @@ import Stock from './pages/Stock'
 import Clientes from './pages/Clientes'
 import Aprendizajes from './pages/Aprendizajes'
 import Proyecciones from './pages/Proyecciones'
+import Conciliacion from './pages/Conciliacion'
 import DeliveryLogin, { isDeliveryUnlocked } from './pages/DeliveryLogin'
 import DeliveryPanel from './pages/DeliveryPanel'
 import PinLock, { isPinUnlocked } from './pages/PinLock'
@@ -95,6 +96,14 @@ const TABS_MAS = [
       <line x1="6" y1="20" x2="6" y2="14"/>
     </svg>
   )},
+  { id: 'conciliacion', label: 'Conciliación', icon: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M3 3v18h18"/>
+      <path d="M7 14l4-4 4 4 5-7"/>
+      <circle cx="7" cy="14" r="1.2"/>
+      <circle cx="15" cy="14" r="1.2"/>
+    </svg>
+  )},
 ]
 
 // Detectar si la URL es /delivery
@@ -150,6 +159,7 @@ export default function App() {
       {tab === 'clientes'   && <Clientes />}
       {tab === 'aprendizajes' && <Aprendizajes />}
       {tab === 'proyecciones' && <Proyecciones />}
+      {tab === 'conciliacion' && <Conciliacion />}
 
       {/* Menú "Más" desplegable */}
       {menuMas && (

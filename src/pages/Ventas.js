@@ -212,6 +212,16 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
       distancia_km: (deliveryTipo && deliveryTipo !== 'retiro' && distanciaKm !== '') ? parseFloat(distanciaKm) : null,
     }).eq('id', orden.id)
 
+    // Reintegrar el stock que consumieron las ventas anteriores
+    const itemsAnteriores = (orden.ventas || []).map(v => ({
+      receta_nombre: v.receta_nombre,
+      litros: v.litros,
+      devuelve_envase: v.nota === 'envase devuelto',
+    }))
+    if (itemsAnteriores.length > 0) {
+      await reintegrarStock(itemsAnteriores)
+    }
+
     // Borrar ventas antiguas e insertar nuevas
     await supabase.from('ventas').delete().eq('orden_id', orden.id)
     await supabase.from('ventas').insert(itemsValidos.map(it => ({
@@ -224,6 +234,9 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
       nota: it.devuelve_envase ? 'envase devuelto' : null,
       orden_id: orden.id,
     })))
+
+    // Descontar stock por los nuevos ítems
+    await descontarStock(itemsValidos)
 
     setSaving(false)
     onSave()
@@ -360,51 +373,78 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
   )
 }
 
-// Descuenta ingredientes del stock al registrar una venta.
-// Aplica merma del 8% sobre la cantidad utilizada.
-async function descontarStock(itemsValidos) {
+// ─── Movimientos de stock por ventas ────────────────────────────────────────
+// Calcula cuánto descontar/reintegrar de cada insumo para un set de ítems.
+// `signo`: -1 para descontar (venta nueva), +1 para reintegrar (venta borrada/editada).
+// Aplica merma del 8% al INSUMO al descontar; al reintegrar se devuelve el mismo
+// monto que se descontó originalmente (con merma incluida) para que el reverso
+// sea exacto. ENVASE se cuenta como un insumo más, EXCEPTO si la venta tiene
+// "envase devuelto" (en cuyo caso el frasco vuelve al stock al instante).
+function calcularMovimientosStock(itemsValidos, ingredientesPorReceta, signo) {
   const MERMA = 0.08
-
-  // Obtener nombres de recetas únicas involucradas
-  const nombresRecetas = [...new Set(itemsValidos.map(it => it.receta_nombre))]
-
-  // Cargar ingredientes de esas recetas
-  const { data: ings } = await supabase
-    .from('receta_ingredientes')
-    .select('receta_nombre, insumo_nombre, cantidad')
-    .in('receta_nombre', nombresRecetas)
-
-  if (!ings || ings.length === 0) return
-
-  // Agregar cuánto hay que descontar de cada insumo (suma de todos los ítems)
-  const descuentos = {} // { insumo_nombre: cantidad_total_a_descontar }
+  const movs = {} // { insumo_nombre: cantidad (con signo) }
   itemsValidos.forEach(it => {
     const litros = parseFloat(it.litros) || 1
-    const ingsReceta = ings.filter(i => i.receta_nombre === it.receta_nombre && i.insumo_nombre !== 'ENVASE')
+    const devuelve = !!it.devuelve_envase || it.nota === 'envase devuelto'
+    const ingsReceta = ingredientesPorReceta[it.receta_nombre] || []
     ingsReceta.forEach(ing => {
-      const usado = ing.cantidad * litros * (1 + MERMA)
-      descuentos[ing.insumo_nombre] = (descuentos[ing.insumo_nombre] || 0) + usado
+      const esEnvase = ing.insumo_nombre === 'ENVASE'
+      // Si el cliente devuelve el envase, no se descuenta ni se reintegra.
+      if (esEnvase && devuelve) return
+      // Merma solo aplica a insumos consumibles, no al envase (es reutilizable
+      // físicamente; lo que se "pierde" se modela aparte).
+      const factorMerma = esEnvase ? 1 : (1 + MERMA)
+      const cantidad = ing.cantidad * litros * factorMerma
+      movs[ing.insumo_nombre] = (movs[ing.insumo_nombre] || 0) + cantidad * signo
     })
   })
+  return movs
+}
 
-  if (Object.keys(descuentos).length === 0) return
-
-  // Cargar stock actual de todos los insumos afectados
-  const nombresInsumos = Object.keys(descuentos)
+// Aplica un set de movimientos al stock (puede ser mezcla de + y -).
+async function aplicarMovimientosStock(movs) {
+  const nombresInsumos = Object.keys(movs).filter(n => movs[n] !== 0)
+  if (nombresInsumos.length === 0) return
   const { data: stocks } = await supabase
     .from('insumos')
     .select('nombre, stock_actual')
     .in('nombre', nombresInsumos)
-
   if (!stocks) return
+  await Promise.all(stocks.map(ins => {
+    const delta = movs[ins.nombre] || 0
+    const nuevo = Math.max(0, (ins.stock_actual || 0) + delta)
+    return supabase.from('insumos').update({ stock_actual: nuevo }).eq('nombre', ins.nombre)
+  }))
+}
 
-  // Actualizar cada insumo en paralelo
-  await Promise.all(
-    stocks.map(ins => {
-      const nuevo = Math.max(0, (ins.stock_actual || 0) - (descuentos[ins.nombre] || 0))
-      return supabase.from('insumos').update({ stock_actual: nuevo }).eq('nombre', ins.nombre)
-    })
-  )
+// Carga los ingredientes de las recetas que aparecen en estos ítems.
+async function cargarIngredientes(itemsValidos) {
+  const nombresRecetas = [...new Set(itemsValidos.map(it => it.receta_nombre))]
+  if (nombresRecetas.length === 0) return {}
+  const { data: ings } = await supabase
+    .from('receta_ingredientes')
+    .select('receta_nombre, insumo_nombre, cantidad')
+    .in('receta_nombre', nombresRecetas)
+  const porReceta = {}
+  ;(ings || []).forEach(i => {
+    if (!porReceta[i.receta_nombre]) porReceta[i.receta_nombre] = []
+    porReceta[i.receta_nombre].push(i)
+  })
+  return porReceta
+}
+
+// Descuenta ingredientes del stock al registrar una venta (api pública).
+async function descontarStock(itemsValidos) {
+  const ingredientes = await cargarIngredientes(itemsValidos)
+  const movs = calcularMovimientosStock(itemsValidos, ingredientes, -1)
+  await aplicarMovimientosStock(movs)
+}
+
+// Reintegra stock cuando se borra o edita una venta (lo opuesto a descontar).
+async function reintegrarStock(itemsAnteriores) {
+  const ingredientes = await cargarIngredientes(itemsAnteriores)
+  const movs = calcularMovimientosStock(itemsAnteriores, ingredientes, +1)
+  await aplicarMovimientosStock(movs)
 }
 
 export default function Ventas() {
@@ -666,9 +706,19 @@ export default function Ventas() {
   }
 
   const handleEliminarOrden = async (orden) => {
+    // Reintegrar stock antes de borrar las ventas (para no perder la info de
+    // qué se había consumido). Esto revierte ingredientes Y envase.
+    const itemsAnteriores = (orden.ventas || []).map(v => ({
+      receta_nombre: v.receta_nombre,
+      litros: v.litros,
+      devuelve_envase: v.nota === 'envase devuelto',
+    }))
+    if (itemsAnteriores.length > 0) {
+      await reintegrarStock(itemsAnteriores)
+    }
     await supabase.from('ventas').delete().eq('orden_id', orden.id)
     await supabase.from('ordenes').delete().eq('id', orden.id)
-    showToast('Pedido eliminado')
+    showToast('Pedido eliminado · stock reintegrado')
     setConfirmar(null)
     load()
   }
@@ -1112,7 +1162,9 @@ export default function Ventas() {
               )}
               {ordenesFiltradas.map(o => {
                 const totalOrden = (o.ventas || []).reduce((s, v) => s + (v.litros||1) * (v.precio_venta||0), 0)
-                const nItems = (o.ventas || []).length
+                // Suma de unidades (litros) en vez del número de filas, así una
+                // venta con litros=2 cuenta como 2 productos.
+                const nItems = (o.ventas || []).reduce((s, v) => s + (parseFloat(v.litros) || 1), 0)
                 const oc = origenColor(o.origen)
                 return (
                   <div className="list-item" key={o.id} style={{ gap:8, alignItems:'flex-start' }}>
@@ -1122,7 +1174,7 @@ export default function Ventas() {
                         style={{ cursor: o.cliente_nombre ? 'pointer' : 'default', color: o.cliente_nombre ? 'var(--cyan)' : 'var(--text)' }}>
                         {o.cliente_nombre || 'Cliente anónimo'}
                       </div>
-                      <div className="list-item-sub">{o.fecha}{o.hora ? ` · ${o.hora}` : ''} · {nItems} producto{nItems !== 1 ? 's' : ''}</div>
+                      <div className="list-item-sub">{o.fecha}{o.hora ? ` · ${o.hora}` : ''} · {Number.isInteger(nItems) ? nItems : nItems.toFixed(1)} producto{nItems !== 1 ? 's' : ''}</div>
                       <div style={{ display:'flex', gap:6, marginTop:3, flexWrap:'wrap' }}>
                         {o.origen && (
                           <span style={{ fontSize:11, background:oc.bg, color:oc.color, borderRadius:10, padding:'1px 7px', fontWeight:600 }}>
