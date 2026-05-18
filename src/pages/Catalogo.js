@@ -122,8 +122,10 @@ function NuevaRecetaModal({ recetasExistentes, onCreate, onCancel }) {
 
 // ─── Modal edición de receta ─────────────────────────────────────────────────
 
-function EditRecetaModal({ receta, ingredientes, insumos, config, onSave, onCancel }) {
+function EditRecetaModal({ receta, ingredientes, insumos, recetasExistentes, config, onSave, onCancel }) {
+  const [nombre, setNombre] = useState(receta.nombre)
   const [precio, setPrecio] = useState(receta.precio_venta || 9000)
+  const [precioAddons, setPrecioAddons] = useState(receta.precio_addons || 0)
   const [envaseFormato, setEnvaseFormato] = useState(receta.envase_formato || '1lt')
   const [ings, setIngs] = useState(
     ingredientes
@@ -132,6 +134,18 @@ function EditRecetaModal({ receta, ingredientes, insumos, config, onSave, onCanc
   )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+
+  // ¿La receta tiene add-ons (insumos sin merma) entre sus ingredientes?
+  const tieneAddons = ings.some(ing => {
+    const ins = insumos.find(i => i.nombre.toLowerCase() === (ing.insumo_nombre || '').toLowerCase())
+    return ins && ins.aplica_merma === false && !ing.insumo_nombre?.startsWith('Frascos ')
+  })
+
+  // Validación de nombre: obligatorio + no duplicado (salvo el propio)
+  const nombreTrim = nombre.trim()
+  const nombreDuplicado = nombreTrim &&
+    nombreTrim.toLowerCase() !== receta.nombre.toLowerCase() &&
+    (recetasExistentes || []).some(r => r.nombre.toLowerCase() === nombreTrim.toLowerCase())
 
   const updateIng = (idx, campo, valor) =>
     setIngs(prev => prev.map((it, i) => i !== idx ? it : { ...it, [campo]: valor }))
@@ -166,37 +180,60 @@ function EditRecetaModal({ receta, ingredientes, insumos, config, onSave, onCanc
   }
 
   const handleSave = async () => {
+    if (!nombreTrim) { setError('El nombre es obligatorio'); return }
+    if (nombreDuplicado) { setError('Ya existe otra receta con ese nombre'); return }
     const ingsValidos = ings.filter(i => i.insumo_nombre && parseFloat(i.cantidad) > 0)
     if (ingsValidos.length === 0) { setError('Agrega al menos un ingrediente válido'); return }
     setSaving(true)
     setError('')
 
-    // ── 1. Actualizar precio_venta en receta ───────────────────────────────
+    // ── 0. Renombrar en cascada si el nombre cambió ─────────────────────────
+    // receta_ingredientes y ventas referencian la receta por nombre, así que
+    // hay que actualizar las tres tablas. Lo hacemos antes que cualquier otro
+    // update para que el nombre nuevo sea la fuente de verdad en adelante.
+    const renombrado = nombreTrim !== receta.nombre
+    if (renombrado) {
+      const oldNombre = receta.nombre
+      const { error: errR1 } = await supabase
+        .from('recetas').update({ nombre: nombreTrim }).eq('nombre', oldNombre)
+      if (errR1) {
+        setError('Error renombrando receta: ' + errR1.message)
+        setSaving(false); return
+      }
+      const { error: errR2 } = await supabase
+        .from('receta_ingredientes').update({ receta_nombre: nombreTrim }).eq('receta_nombre', oldNombre)
+      if (errR2) {
+        setError('Receta renombrada pero falló actualizar ingredientes: ' + errR2.message)
+        setSaving(false); return
+      }
+      const { error: errR3 } = await supabase
+        .from('ventas').update({ receta_nombre: nombreTrim }).eq('receta_nombre', oldNombre)
+      if (errR3) {
+        setError('Receta e ingredientes renombrados pero falló actualizar ventas: ' + errR3.message)
+        setSaving(false); return
+      }
+    }
+
+    // ── 1. Actualizar campos de la receta ──────────────────────────────────
     const precioNum = parseFloat(precio) || 9000
-    const matchCol = receta.id ? 'id' : 'nombre'
-    const matchVal = receta.id || receta.nombre
-    const updatePayload = { precio_venta: precioNum, envase_formato: envaseFormato }
-    const { data: updated, error: errPrecio } = await supabase
+    const precioAddonsNum = Math.max(0, parseFloat(precioAddons) || 0)
+    const updatePayload = {
+      precio_venta: precioNum,
+      precio_addons: precioAddonsNum,
+      envase_formato: envaseFormato,
+    }
+    const { data: updated, error: errUpd } = await supabase
       .from('recetas')
       .update(updatePayload)
-      .eq(matchCol, matchVal)
-      .select()  // ← devuelve filas afectadas para confirmar el update
-    if (errPrecio) {
-      setError('Error actualizando receta: ' + errPrecio.message)
+      .eq('nombre', nombreTrim)
+      .select()
+    if (errUpd) {
+      setError('Error actualizando receta: ' + errUpd.message)
       setSaving(false); return
     }
     if (!updated || updated.length === 0) {
-      // Caso típico: el update no encontró la receta por ese match.
-      // Probamos un fallback por nombre antes de rendirnos.
-      const { data: retry, error: errRetry } = await supabase
-        .from('recetas')
-        .update(updatePayload)
-        .eq('nombre', receta.nombre)
-        .select()
-      if (errRetry || !retry || retry.length === 0) {
-        setError('No se pudo actualizar la receta. Verifica que "' + receta.nombre + '" exista en Supabase.')
-        setSaving(false); return
-      }
+      setError('No se pudo actualizar la receta "' + nombreTrim + '".')
+      setSaving(false); return
     }
 
     // ── 2. Solo regenerar ingredientes si cambiaron ────────────────────────
@@ -204,7 +241,7 @@ function EditRecetaModal({ receta, ingredientes, insumos, config, onSave, onCanc
       const { error: errDel } = await supabase
         .from('receta_ingredientes')
         .delete()
-        .eq('receta_nombre', receta.nombre)
+        .eq('receta_nombre', nombreTrim)
       if (errDel) {
         setError('Error eliminando ingredientes: ' + errDel.message)
         setSaving(false); return
@@ -212,7 +249,7 @@ function EditRecetaModal({ receta, ingredientes, insumos, config, onSave, onCanc
 
       const { error: errIng } = await supabase.from('receta_ingredientes').insert(
         ingsValidos.map(i => ({
-          receta_nombre: receta.nombre,
+          receta_nombre: nombreTrim,
           insumo_nombre: i.insumo_nombre,
           cantidad: parseFloat(i.cantidad) || 0,
           unidad: i.unidad || 'ml',
@@ -225,20 +262,53 @@ function EditRecetaModal({ receta, ingredientes, insumos, config, onSave, onCanc
     }
 
     setSaving(false)
-    onSave()
+    onSave(nombreTrim)
   }
 
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.78)', display:'flex', alignItems:'flex-start', justifyContent:'center', zIndex:200, padding:24, overflowY:'auto' }}>
       <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:14, padding:24, maxWidth:500, width:'100%', marginTop:20 }}>
-        <div style={{ fontFamily:'Orbitron', fontSize:16, color:'var(--cyan)', marginBottom:18 }}>{receta.nombre}</div>
+        <div style={{ fontFamily:'Orbitron', fontSize:16, color:'var(--cyan)', marginBottom:18 }}>
+          Editar receta
+        </div>
+
+        {/* Nombre */}
+        <div className="form-group" style={{ marginBottom:12 }}>
+          <label className="form-label">Nombre</label>
+          <input type="text" className="form-input" value={nombre}
+            onChange={e => setNombre(e.target.value)} />
+          {nombreDuplicado && (
+            <div style={{ color:'var(--pink)', fontSize:12, marginTop:4 }}>
+              Ya existe otra receta con ese nombre
+            </div>
+          )}
+          {nombreTrim && nombreTrim !== receta.nombre && !nombreDuplicado && (
+            <div style={{ fontSize:11, color:'var(--muted)', marginTop:4, lineHeight:1.4 }}>
+              Al guardar se actualizará el nombre en ventas e ingredientes asociados.
+            </div>
+          )}
+        </div>
 
         {/* Precio de venta */}
         <div className="form-group" style={{ marginBottom:12 }}>
-          <label className="form-label">Precio de venta ($)</label>
+          <label className="form-label">Precio de venta total ($)</label>
           <input type="number" className="form-input" value={precio}
             onChange={e => setPrecio(e.target.value)} />
         </div>
+
+        {/* Precio de add-ons — solo aparece si hay insumos sin merma */}
+        {tieneAddons && (
+          <div className="form-group" style={{ marginBottom:12 }}>
+            <label className="form-label">Precio cobrado por add-ons ($)</label>
+            <input type="number" className="form-input" value={precioAddons}
+              placeholder="ej: 3000 (2 Redbull a 1500 c/u)"
+              onChange={e => setPrecioAddons(e.target.value)} />
+            <div style={{ fontSize:11, color:'var(--muted)', marginTop:4, lineHeight:1.4 }}>
+              Cuánto del precio total corresponde a los insumos cerrados (Redbull, etc.).
+              Se usa solo para mostrar el desglose de margen mezcla vs add-ons. No afecta el cobro al cliente.
+            </div>
+          </div>
+        )}
 
         {/* Formato de envase */}
         <div className="form-group" style={{ marginBottom:16 }}>
@@ -338,12 +408,28 @@ function DetalleReceta({ receta, ingredientes, insumos, config, onEditar, onVolv
   const precio = receta.precio_venta || 9000
   const margen = precio > 0 ? (precio - costo) / precio : 0
   // Para mostrar la línea "Merma" en el desglose, solo se cuentan los insumos
-  // que sí aplican merma (excluye Red Bull y otros marcados con aplica_merma=false).
+  // que sí aplican merma (excluye Redbull y otros marcados con aplica_merma=false).
   const costoInsumosConMerma = ings.reduce((s, ing) => {
     const ins = insumos.find(i => i.nombre.toLowerCase() === ing.insumo_nombre.toLowerCase())
     if (!ins || ins.aplica_merma === false) return s
     return s + (ins.costo_ppp || 0) * ing.cantidad
   }, 0)
+
+  // ── Desglose mezcla vs add-ons ─────────────────────────────────────────────
+  // Add-ons = insumos sin merma que NO son envases (latas, botellas cerradas).
+  // Solo se muestra si la receta tiene add-ons y `precio_addons` está declarado.
+  const costoAddons = ings.reduce((s, ing) => {
+    const nombre = ing.insumo_nombre || ''
+    const ins = insumos.find(i => i.nombre.toLowerCase() === nombre.toLowerCase())
+    const esAddon = ins && ins.aplica_merma === false && !nombre.startsWith('Frascos ')
+    return esAddon ? s + (ins.costo_ppp || 0) * ing.cantidad : s
+  }, 0)
+  const precioAddons = parseFloat(receta.precio_addons) || 0
+  const mostrarDesglose = costoAddons > 0 && precioAddons > 0
+  const costoMezcla = costo - costoAddons
+  const precioMezcla = precio - precioAddons
+  const margenMezcla = precioMezcla > 0 ? (precioMezcla - costoMezcla) / precioMezcla : 0
+  const margenAddons = precioAddons > 0 ? (precioAddons - costoAddons) / precioAddons : 0
   // Costo del envase resuelto desde el PPP del insumo del formato
   const insumoEnvase = insumos.find(
     i => i.nombre.toLowerCase() === (formato === '475ml' ? 'frascos 475ml' : 'frascos 1lt')
@@ -381,7 +467,7 @@ function DetalleReceta({ receta, ingredientes, insumos, config, onEditar, onVolv
           </div>
         </div>
 
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10, marginBottom:16 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10, marginBottom: mostrarDesglose ? 12 : 16 }}>
           <div style={{ textAlign:'center' }}>
             <div className="kpi-label">Costo/L</div>
             <div style={{ color:'var(--pink)', fontWeight:700, fontSize:16 }}>{formatCLP(costo)}</div>
@@ -395,6 +481,33 @@ function DetalleReceta({ receta, ingredientes, insumos, config, onEditar, onVolv
             <div style={{ color: margenColor(margen), fontWeight:700, fontSize:16 }}>{formatPct(margen)}</div>
           </div>
         </div>
+
+        {/* Desglose mezcla vs add-ons (solo si la receta tiene add-ons y precio_addons) */}
+        {mostrarDesglose && (
+          <div style={{ background:'rgba(0,180,180,0.05)', border:'1px solid rgba(0,180,180,0.18)', borderRadius:10, padding:'10px 12px', marginBottom:16 }}>
+            <div style={{ fontSize:10, color:'var(--cyan)', fontWeight:700, letterSpacing:1, marginBottom:8 }}>
+              DESGLOSE MARGEN
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr auto auto auto', gap:8, fontSize:13, alignItems:'center' }}>
+              <div style={{ color:'var(--text)' }}>Mezcla</div>
+              <div style={{ color:'var(--muted)', fontSize:12, textAlign:'right' }}>{formatCLP(costoMezcla)}</div>
+              <div style={{ color:'var(--muted)', fontSize:12, textAlign:'right' }}>→ {formatCLP(precioMezcla)}</div>
+              <div style={{ color: margenColor(margenMezcla), fontWeight:700, textAlign:'right', minWidth:50 }}>
+                {formatPct(margenMezcla)}
+              </div>
+
+              <div style={{ color:'var(--text)' }}>Add-ons</div>
+              <div style={{ color:'var(--muted)', fontSize:12, textAlign:'right' }}>{formatCLP(costoAddons)}</div>
+              <div style={{ color:'var(--muted)', fontSize:12, textAlign:'right' }}>→ {formatCLP(precioAddons)}</div>
+              <div style={{ color: margenColor(margenAddons), fontWeight:700, textAlign:'right', minWidth:50 }}>
+                {formatPct(margenAddons)}
+              </div>
+            </div>
+            <div style={{ fontSize:10, color:'var(--muted)', marginTop:8, lineHeight:1.4, fontStyle:'italic' }}>
+              Tu valor agregado real está en la mezcla. Los add-ons son commodity y su margen es informativo.
+            </div>
+          </div>
+        )}
 
         <div className="section-divider">Ingredientes por litro</div>
         {ings.length === 0 && (
@@ -575,10 +688,16 @@ export default function Catalogo() {
             receta={receta}
             ingredientes={ings}
             insumos={insumos}
+            recetasExistentes={recetas}
             config={config}
-            onSave={async () => {
+            onSave={async (nuevoNombre) => {
               setEditando(false)
               await load()
+              // Si renombramos, apuntar la selección al nuevo nombre para no
+              // perder la vista detalle. Si no, mantener la selección actual.
+              if (nuevoNombre && nuevoNombre !== seleccionada) {
+                setSeleccionada(nuevoNombre)
+              }
               showToast('Receta actualizada ✓')
             }}
             onCancel={() => setEditando(false)}
