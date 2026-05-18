@@ -227,6 +227,8 @@ function HistoricoPPP({ compras, insumos }) {
   const [insumoSel, setInsumoSel] = useState(null)
 
   // Solo insumos con al menos 2 compras (para tener línea)
+  // Los frascos sí entran al histórico de PPP porque queremos ver cómo evoluciona
+  // el costo de cada formato.
   const insumosConHistorial = insumos
     .filter(i => i.nombre !== 'ENVASE')
     .map(i => {
@@ -406,6 +408,11 @@ export default function Compras() {
   const [confirmarProveedor, setConfirmarProveedor] = useState(null)
   const [fabricandoGoma, setFabricandoGoma] = useState(false)
   const [mlGoma, setMlGoma] = useState('')
+
+  // ── Frascos: detecta si el insumo seleccionado es un frasco ────────────────
+  // y permite mostrar un banner aclaratorio sobre el formato.
+  const esFrasco = form.insumo_nombre?.startsWith('Frascos ')
+  const formatoFrasco = esFrasco ? form.insumo_nombre.replace('Frascos ', '') : null
 
   useEffect(() => {
     const hoy = fechaHoy()
@@ -629,6 +636,34 @@ export default function Compras() {
                     {insumos.map(i => <option key={i.nombre} value={i.nombre}>{i.nombre}</option>)}
                   </select>
                 </div>
+                {/* Banner Frascos: aclara formato y permite cambio rápido */}
+                {esFrasco && (
+                  <div style={{ background: 'rgba(0,180,180,0.06)', border: '1px solid rgba(0,180,180,0.2)', borderRadius: 10, padding: '10px 14px', marginBottom: 12 }}>
+                    <div style={{ fontSize: 12, color: 'var(--cyan)', fontWeight: 600, marginBottom: 8 }}>
+                      🫙 Formato del frasco
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button type="button"
+                        onClick={() => handleSelectInsumo('Frascos 1lt')}
+                        style={{ flex: 1, padding: '6px 0', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                          background: formatoFrasco === '1lt' ? 'var(--cyan)' : 'rgba(255,255,255,0.06)',
+                          color: formatoFrasco === '1lt' ? '#000' : 'var(--muted)' }}>
+                        1 litro
+                      </button>
+                      <button type="button"
+                        onClick={() => handleSelectInsumo('Frascos 475ml')}
+                        style={{ flex: 1, padding: '6px 0', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                          background: formatoFrasco === '475ml' ? 'var(--cyan)' : 'rgba(255,255,255,0.06)',
+                          color: formatoFrasco === '475ml' ? '#000' : 'var(--muted)' }}>
+                        475 ml
+                      </button>
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, lineHeight: 1.5 }}>
+                      Cada formato lleva su propio PPP y stock. Las recetas eligen qué frasco usan.
+                    </div>
+                  </div>
+                )}
+
                 {/* Toggle kg/ml para Jugo limón */}
                 {esLimon && (
                   <div style={{ background: 'rgba(0,180,180,0.06)', border: '1px solid rgba(0,180,180,0.2)', borderRadius: 10, padding: '10px 14px', marginBottom: 12 }}>

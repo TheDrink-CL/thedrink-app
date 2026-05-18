@@ -389,14 +389,16 @@ function calcularMovimientosStock(itemsValidos, ingredientesPorReceta, signo) {
     const devuelve = !!it.devuelve_envase || it.nota === 'envase devuelto'
     const ingsReceta = ingredientesPorReceta[it.receta_nombre] || []
     ingsReceta.forEach(ing => {
-      const esEnvase = ing.insumo_nombre === 'ENVASE'
+      // "Envase" abarca el legacy 'ENVASE' y cualquier insumo 'Frascos *'.
+      const nombre = ing.insumo_nombre || ''
+      const esEnvase = nombre === 'ENVASE' || nombre.startsWith('Frascos ')
       // Si el cliente devuelve el envase, no se descuenta ni se reintegra.
       if (esEnvase && devuelve) return
       // Merma solo aplica a insumos consumibles, no al envase (es reutilizable
       // físicamente; lo que se "pierde" se modela aparte).
       const factorMerma = esEnvase ? 1 : (1 + MERMA)
       const cantidad = ing.cantidad * litros * factorMerma
-      movs[ing.insumo_nombre] = (movs[ing.insumo_nombre] || 0) + cantidad * signo
+      movs[nombre] = (movs[nombre] || 0) + cantidad * signo
     })
   })
   return movs
@@ -419,17 +421,37 @@ async function aplicarMovimientosStock(movs) {
 }
 
 // Carga los ingredientes de las recetas que aparecen en estos ítems.
+// Además, inyecta automáticamente el insumo del frasco según el
+// `envase_formato` de la receta. Así no hay que crear filas "ENVASE" para
+// cada receta nueva en `receta_ingredientes` — el formato de la receta es
+// la fuente de verdad.
 async function cargarIngredientes(itemsValidos) {
   const nombresRecetas = [...new Set(itemsValidos.map(it => it.receta_nombre))]
   if (nombresRecetas.length === 0) return {}
-  const { data: ings } = await supabase
-    .from('receta_ingredientes')
-    .select('receta_nombre, insumo_nombre, cantidad')
-    .in('receta_nombre', nombresRecetas)
+  const [{ data: ings }, { data: recetasMeta }] = await Promise.all([
+    supabase
+      .from('receta_ingredientes')
+      .select('receta_nombre, insumo_nombre, cantidad')
+      .in('receta_nombre', nombresRecetas),
+    supabase
+      .from('recetas')
+      .select('nombre, envase_formato')
+      .in('nombre', nombresRecetas),
+  ])
   const porReceta = {}
   ;(ings || []).forEach(i => {
     if (!porReceta[i.receta_nombre]) porReceta[i.receta_nombre] = []
     porReceta[i.receta_nombre].push(i)
+  })
+  // Inyectar frasco según envase_formato (si no está ya como ingrediente).
+  ;(recetasMeta || []).forEach(r => {
+    const lista = porReceta[r.nombre] || []
+    const yaTieneFrasco = lista.some(x => (x.insumo_nombre || '').startsWith('Frascos '))
+    if (yaTieneFrasco) return
+    const formato = r.envase_formato || '1lt'
+    const insumoEnvase = formato === '475ml' ? 'Frascos 475ml' : 'Frascos 1lt'
+    lista.push({ receta_nombre: r.nombre, insumo_nombre: insumoEnvase, cantidad: 1 })
+    porReceta[r.nombre] = lista
   })
   return porReceta
 }
@@ -680,8 +702,10 @@ export default function Ventas() {
     }
 
     if (envasesDevueltos > 0) {
-      const { data: ins } = await supabase.from('insumos').select('stock_actual').eq('nombre', 'Frascos de vidrio').single()
-      await supabase.from('insumos').update({ stock_actual: (ins?.stock_actual || 0) + envasesDevueltos }).eq('nombre', 'Frascos de vidrio')
+      // Devolución asume frasco 1lt (es el único formato que se vendía cuando
+      // se ofrecía esta promoción). El feature será removido a futuro.
+      const { data: ins } = await supabase.from('insumos').select('stock_actual').eq('nombre', 'Frascos 1lt').single()
+      await supabase.from('insumos').update({ stock_actual: (ins?.stock_actual || 0) + envasesDevueltos }).eq('nombre', 'Frascos 1lt')
     }
 
     // Descuento de stock por ingredientes utilizados

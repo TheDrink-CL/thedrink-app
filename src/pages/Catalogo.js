@@ -14,6 +14,7 @@ function margenColor(pct) {
 
 function EditRecetaModal({ receta, ingredientes, insumos, config, onSave, onCancel }) {
   const [precio, setPrecio] = useState(receta.precio_venta || 9000)
+  const [envaseFormato, setEnvaseFormato] = useState(receta.envase_formato || '1lt')
   const [ings, setIngs] = useState(
     ingredientes
       .filter(i => i.insumo_nombre !== 'ENVASE')
@@ -34,7 +35,7 @@ function EditRecetaModal({ receta, ingredientes, insumos, config, onSave, onCanc
     ings.filter(i => i.insumo_nombre),
     insumos,
     config.merma_pct,
-    config.costo_envase
+    { envase_formato: envaseFormato, costoLegacy: config.costo_envase }
   )
   const margen = precio > 0 ? (precio - costo) / precio : 0
 
@@ -64,13 +65,14 @@ function EditRecetaModal({ receta, ingredientes, insumos, config, onSave, onCanc
     const precioNum = parseFloat(precio) || 9000
     const matchCol = receta.id ? 'id' : 'nombre'
     const matchVal = receta.id || receta.nombre
+    const updatePayload = { precio_venta: precioNum, envase_formato: envaseFormato }
     const { data: updated, error: errPrecio } = await supabase
       .from('recetas')
-      .update({ precio_venta: precioNum })
+      .update(updatePayload)
       .eq(matchCol, matchVal)
       .select()  // ← devuelve filas afectadas para confirmar el update
     if (errPrecio) {
-      setError('Error actualizando precio: ' + errPrecio.message)
+      setError('Error actualizando receta: ' + errPrecio.message)
       setSaving(false); return
     }
     if (!updated || updated.length === 0) {
@@ -78,11 +80,11 @@ function EditRecetaModal({ receta, ingredientes, insumos, config, onSave, onCanc
       // Probamos un fallback por nombre antes de rendirnos.
       const { data: retry, error: errRetry } = await supabase
         .from('recetas')
-        .update({ precio_venta: precioNum })
+        .update(updatePayload)
         .eq('nombre', receta.nombre)
         .select()
       if (errRetry || !retry || retry.length === 0) {
-        setError('No se pudo actualizar el precio. Verifica que la receta "' + receta.nombre + '" exista en Supabase.')
+        setError('No se pudo actualizar la receta. Verifica que "' + receta.nombre + '" exista en Supabase.')
         setSaving(false); return
       }
     }
@@ -122,10 +124,34 @@ function EditRecetaModal({ receta, ingredientes, insumos, config, onSave, onCanc
         <div style={{ fontFamily:'Orbitron', fontSize:16, color:'var(--cyan)', marginBottom:18 }}>{receta.nombre}</div>
 
         {/* Precio de venta */}
-        <div className="form-group" style={{ marginBottom:16 }}>
+        <div className="form-group" style={{ marginBottom:12 }}>
           <label className="form-label">Precio de venta ($)</label>
           <input type="number" className="form-input" value={precio}
             onChange={e => setPrecio(e.target.value)} />
+        </div>
+
+        {/* Formato de envase */}
+        <div className="form-group" style={{ marginBottom:16 }}>
+          <label className="form-label">Formato de envase</label>
+          <div style={{ display:'flex', gap:8 }}>
+            <button type="button"
+              onClick={() => setEnvaseFormato('1lt')}
+              style={{ flex:1, padding:'8px 0', borderRadius:8, border:'none', cursor:'pointer', fontSize:13, fontWeight:600,
+                background: envaseFormato === '1lt' ? 'var(--cyan)' : 'rgba(255,255,255,0.06)',
+                color: envaseFormato === '1lt' ? '#000' : 'var(--muted)' }}>
+              Frasco 1lt
+            </button>
+            <button type="button"
+              onClick={() => setEnvaseFormato('475ml')}
+              style={{ flex:1, padding:'8px 0', borderRadius:8, border:'none', cursor:'pointer', fontSize:13, fontWeight:600,
+                background: envaseFormato === '475ml' ? 'var(--cyan)' : 'rgba(255,255,255,0.06)',
+                color: envaseFormato === '475ml' ? '#000' : 'var(--muted)' }}>
+              Frasco 475ml
+            </button>
+          </div>
+          <div style={{ fontSize:11, color:'var(--muted)', marginTop:6, lineHeight:1.4 }}>
+            Define qué frasco usa esta receta. El costo del envase se calcula desde el PPP del insumo correspondiente.
+          </div>
         </div>
 
         {/* Resumen costo/margen en tiempo real */}
@@ -154,7 +180,7 @@ function EditRecetaModal({ receta, ingredientes, insumos, config, onSave, onCanc
             <select className="form-select" value={ing.insumo_nombre}
               onChange={e => updateIng(idx, 'insumo_nombre', e.target.value)}>
               <option value="">Insumo...</option>
-              {insumos.filter(i => i.nombre !== 'ENVASE').map(i => (
+              {insumos.filter(i => i.nombre !== 'ENVASE' && !i.nombre.startsWith('Frascos ')).map(i => (
                 <option key={i.nombre} value={i.nombre}>{i.nombre}</option>
               ))}
             </select>
@@ -196,13 +222,22 @@ function EditRecetaModal({ receta, ingredientes, insumos, config, onSave, onCanc
 
 function DetalleReceta({ receta, ingredientes, insumos, config, onEditar, onVolver }) {
   const ings = ingredientes.filter(i => i.insumo_nombre !== 'ENVASE')
-  const costo = calcularCostoReceta(ings, insumos, config.merma_pct, config.costo_envase)
+  const formato = receta.envase_formato || '1lt'
+  const costo = calcularCostoReceta(ings, insumos, config.merma_pct,
+    { envase_formato: formato, costoLegacy: config.costo_envase })
   const precio = receta.precio_venta || 9000
   const margen = precio > 0 ? (precio - costo) / precio : 0
   const costoInsumos = ings.reduce((s, ing) => {
     const ins = insumos.find(i => i.nombre.toLowerCase() === ing.insumo_nombre.toLowerCase())
     return s + (ins?.costo_ppp || 0) * ing.cantidad
   }, 0)
+  // Costo del envase resuelto desde el PPP del insumo del formato
+  const insumoEnvase = insumos.find(
+    i => i.nombre.toLowerCase() === (formato === '475ml' ? 'frascos 475ml' : 'frascos 1lt')
+  )
+  const costoEnvaseShown = insumoEnvase?.costo_ppp > 0
+    ? insumoEnvase.costo_ppp
+    : config.costo_envase
 
   return (
     <div>
@@ -212,7 +247,12 @@ function DetalleReceta({ receta, ingredientes, insumos, config, onEditar, onVolv
       </div>
 
       <div className="card">
-        <div style={{ fontFamily:'Orbitron', fontSize:18, color:'var(--cyan)', marginBottom:16 }}>{receta.nombre}</div>
+        <div style={{ display:'flex', alignItems:'baseline', gap:10, marginBottom:16, flexWrap:'wrap' }}>
+          <div style={{ fontFamily:'Orbitron', fontSize:18, color:'var(--cyan)' }}>{receta.nombre}</div>
+          <div style={{ fontSize:11, fontWeight:700, color:'var(--muted)', background:'rgba(255,255,255,0.05)', padding:'3px 8px', borderRadius:6, letterSpacing:0.5 }}>
+            Frasco {formato}
+          </div>
+        </div>
 
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:10, marginBottom:16 }}>
           <div style={{ textAlign:'center' }}>
@@ -259,8 +299,8 @@ function DetalleReceta({ receta, ingredientes, insumos, config, onEditar, onVolv
             <div style={{ color:'var(--muted)', fontSize:13 }}>{formatCLP(costoInsumos * config.merma_pct)}</div>
           </div>
           <div className="list-item">
-            <div className="list-item-name" style={{ fontSize:13 }}>Envase + etiqueta</div>
-            <div style={{ color:'var(--muted)', fontSize:13 }}>{formatCLP(config.costo_envase)}</div>
+            <div className="list-item-name" style={{ fontSize:13 }}>Envase ({formato})</div>
+            <div style={{ color:'var(--muted)', fontSize:13 }}>{formatCLP(costoEnvaseShown)}</div>
           </div>
           <div className="list-item" style={{ borderTop:'1px solid var(--border)', marginTop:4, paddingTop:8 }}>
             <div style={{ fontWeight:700, fontSize:14, color:'var(--text)' }}>Ganancia por litro</div>
@@ -312,7 +352,10 @@ export default function Catalogo() {
 
   const getCosto = (nombre) => {
     const ings = getIngredientes(nombre).filter(i => i.insumo_nombre !== 'ENVASE')
-    return calcularCostoReceta(ings, insumos, config.merma_pct, config.costo_envase)
+    const receta = recetas.find(r => r.nombre === nombre)
+    const formato = receta?.envase_formato || '1lt'
+    return calcularCostoReceta(ings, insumos, config.merma_pct,
+      { envase_formato: formato, costoLegacy: config.costo_envase })
   }
 
   const getPrecio = (receta) => receta.precio_venta || 9000
@@ -379,7 +422,12 @@ export default function Catalogo() {
               onClick={() => setSeleccionada(r.nombre)}
               style={{ cursor:'pointer' }}>
               <div>
-                <div className="list-item-name">{r.nombre}</div>
+                <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
+                  <div className="list-item-name">{r.nombre}</div>
+                  <span style={{ fontSize:10, fontWeight:700, color:'var(--muted)', background:'rgba(255,255,255,0.05)', padding:'1px 6px', borderRadius:5, letterSpacing:0.3 }}>
+                    {r.envase_formato || '1lt'}
+                  </span>
+                </div>
                 <div className="list-item-sub">
                   Costo: {formatCLP(costo)} · Precio: {formatCLP(precio)}
                 </div>
