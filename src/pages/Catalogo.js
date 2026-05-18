@@ -10,6 +10,116 @@ function margenColor(pct) {
   return 'var(--pink)'
 }
 
+// ─── Modal confirmación genérico ─────────────────────────────────────────────
+
+function ConfirmModal({ titulo, mensaje, confirmLabel = 'Eliminar', onConfirm, onCancel, peligro = true }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.78)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 220, padding: 24
+    }}>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24, maxWidth: 340, width: '100%' }}>
+        {titulo && <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text-strong)', marginBottom: 8 }}>{titulo}</div>}
+        <div style={{ fontSize: 14, color: 'var(--text)', marginBottom: 18, lineHeight: 1.5 }}>{mensaje}</div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={onCancel}>Cancelar</button>
+          <button className="btn btn-primary btn-sm"
+            style={{ flex: 1, background: peligro ? 'var(--pink)' : undefined }}
+            onClick={onConfirm}>
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Modal: crear receta nueva (nombre + formato) ────────────────────────────
+// Pide solo lo mínimo para crear el registro. El resto (precio, ingredientes)
+// se completa en el EditRecetaModal que se abre inmediatamente después.
+
+function NuevaRecetaModal({ recetasExistentes, onCreate, onCancel }) {
+  const [nombre, setNombre] = useState('')
+  const [formato, setFormato] = useState('1lt')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const nombreTrim = nombre.trim()
+  const nombreDuplicado = nombreTrim &&
+    recetasExistentes.some(r => r.nombre.toLowerCase() === nombreTrim.toLowerCase())
+
+  const handleCreate = async () => {
+    if (!nombreTrim) { setError('El nombre es obligatorio'); return }
+    if (nombreDuplicado) { setError('Ya existe una receta con ese nombre'); return }
+    setSaving(true); setError('')
+    const { error: err } = await supabase.from('recetas').insert({
+      nombre: nombreTrim,
+      envase_formato: formato,
+      precio_venta: 9000,  // valor por defecto editable después
+    })
+    setSaving(false)
+    if (err) { setError(err.message); return }
+    onCreate(nombreTrim)
+  }
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.78)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, padding:24 }}>
+      <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:14, padding:24, maxWidth:400, width:'100%' }}>
+        <div style={{ fontFamily:'Orbitron', fontSize:16, color:'var(--cyan)', marginBottom:18 }}>
+          Nueva receta
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Nombre del trago</label>
+          <input type="text" className="form-input" value={nombre} autoFocus
+            placeholder="ej: Pisco Sour, Gin Tropical..."
+            onChange={e => setNombre(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && nombreTrim && !nombreDuplicado) handleCreate() }} />
+          {nombreDuplicado && (
+            <div style={{ color:'var(--pink)', fontSize:12, marginTop:4 }}>
+              Ya existe una receta con ese nombre
+            </div>
+          )}
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Formato de envase</label>
+          <div style={{ display:'flex', gap:8 }}>
+            <button type="button"
+              onClick={() => setFormato('1lt')}
+              style={{ flex:1, padding:'10px 0', borderRadius:8, border:'none', cursor:'pointer', fontSize:13, fontWeight:600,
+                background: formato === '1lt' ? 'var(--cyan)' : 'rgba(255,255,255,0.06)',
+                color: formato === '1lt' ? '#000' : 'var(--muted)' }}>
+              Frasco 1lt
+            </button>
+            <button type="button"
+              onClick={() => setFormato('475ml')}
+              style={{ flex:1, padding:'10px 0', borderRadius:8, border:'none', cursor:'pointer', fontSize:13, fontWeight:600,
+                background: formato === '475ml' ? 'var(--cyan)' : 'rgba(255,255,255,0.06)',
+                color: formato === '475ml' ? '#000' : 'var(--muted)' }}>
+              Frasco 475ml
+            </button>
+          </div>
+          <div style={{ fontSize:11, color:'var(--muted)', marginTop:6, lineHeight:1.4 }}>
+            Lo puedes cambiar más adelante desde la pantalla de edición.
+          </div>
+        </div>
+
+        {error && <div style={{ color:'var(--pink)', fontSize:13, marginBottom:10 }}>{error}</div>}
+
+        <div style={{ display:'flex', gap:10 }}>
+          <button className="btn btn-secondary" style={{ flex:1 }} onClick={onCancel}>Cancelar</button>
+          <button className="btn btn-primary" style={{ flex:1 }}
+            onClick={handleCreate}
+            disabled={saving || !nombreTrim || nombreDuplicado}>
+            {saving ? 'Creando...' : 'Crear y editar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Modal edición de receta ─────────────────────────────────────────────────
 
 function EditRecetaModal({ receta, ingredientes, insumos, config, onSave, onCancel }) {
@@ -220,7 +330,7 @@ function EditRecetaModal({ receta, ingredientes, insumos, config, onSave, onCanc
 
 // ─── Vista detalle receta (solo lectura) ─────────────────────────────────────
 
-function DetalleReceta({ receta, ingredientes, insumos, config, onEditar, onVolver }) {
+function DetalleReceta({ receta, ingredientes, insumos, config, onEditar, onVolver, onDuplicar, onEliminar }) {
   const ings = ingredientes.filter(i => i.insumo_nombre !== 'ENVASE')
   const formato = receta.envase_formato || '1lt'
   const costo = calcularCostoReceta(ings, insumos, config.merma_pct,
@@ -241,9 +351,23 @@ function DetalleReceta({ receta, ingredientes, insumos, config, onEditar, onVolv
 
   return (
     <div>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, gap:8, flexWrap:'wrap' }}>
         <button className="btn btn-secondary btn-sm" onClick={onVolver}>← Volver</button>
-        <button className="btn btn-primary btn-sm" onClick={onEditar}>✏ Editar</button>
+        <div style={{ display:'flex', gap:6 }}>
+          <button
+            onClick={onDuplicar}
+            title="Duplicar receta"
+            style={{ background:'rgba(255,255,255,0.05)', border:'1px solid var(--border)', borderRadius:8, color:'var(--text)', padding:'6px 10px', cursor:'pointer', fontSize:12, fontWeight:600 }}>
+            ⎘ Duplicar
+          </button>
+          <button
+            onClick={onEliminar}
+            title="Eliminar receta"
+            style={{ background:'rgba(196,0,90,0.08)', border:'1px solid rgba(196,0,90,0.3)', borderRadius:8, color:'var(--pink)', padding:'6px 10px', cursor:'pointer', fontSize:12, fontWeight:600 }}>
+            🗑 Eliminar
+          </button>
+          <button className="btn btn-primary btn-sm" onClick={onEditar}>✏ Editar</button>
+        </div>
       </div>
 
       <div className="card">
@@ -318,9 +442,12 @@ export default function Catalogo() {
   const [recetas, setRecetas] = useState([])
   const [insumos, setInsumos] = useState([])
   const [ingredientes, setIngredientes] = useState([])
+  const [ventasRecetas, setVentasRecetas] = useState({}) // { receta_nombre: cantidad de ventas }
   const [config, setConfig] = useState({ merma_pct: 0.08, costo_envase: 794.6 })
   const [seleccionada, setSeleccionada] = useState(null)
   const [editando, setEditando] = useState(false)
+  const [creando, setCreando] = useState(false)
+  const [confirmEliminar, setConfirmEliminar] = useState(null) // receta o null
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState('')
 
@@ -328,15 +455,22 @@ export default function Catalogo() {
 
   async function load() {
     setLoading(true)
-    const [{ data: r }, { data: i }, { data: ing }, { data: cfg }] = await Promise.all([
+    const [{ data: r }, { data: i }, { data: ing }, { data: cfg }, { data: vts }] = await Promise.all([
       supabase.from('recetas').select('*').order('nombre'),
       supabase.from('insumos').select('*'),
       supabase.from('receta_ingredientes').select('*'),
       supabase.from('config').select('*'),
+      supabase.from('ventas').select('receta_nombre'),
     ])
     setRecetas(r || [])
     setInsumos(i || [])
     setIngredientes(ing || [])
+    // Contar ventas por receta para bloquear eliminación si hay histórico
+    const conteo = {}
+    ;(vts || []).forEach(v => {
+      conteo[v.receta_nombre] = (conteo[v.receta_nombre] || 0) + 1
+    })
+    setVentasRecetas(conteo)
     const c = {}
     cfg?.forEach(x => { c[x.clave] = parseFloat(x.valor) || x.valor })
     setConfig({
@@ -347,6 +481,63 @@ export default function Catalogo() {
   }
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2800) }
+
+  // ── Duplicar receta ──────────────────────────────────────────────────────
+  // Crea una nueva receta con el sufijo "(copia)" y clona todos los
+  // ingredientes. Si ya existe "(copia)", incrementa: "(copia 2)", etc.
+  const duplicarReceta = async (recetaOrigen) => {
+    let nuevoNombre = `${recetaOrigen.nombre} (copia)`
+    let n = 2
+    while (recetas.some(r => r.nombre.toLowerCase() === nuevoNombre.toLowerCase())) {
+      nuevoNombre = `${recetaOrigen.nombre} (copia ${n++})`
+    }
+    const { error: errReceta } = await supabase.from('recetas').insert({
+      nombre: nuevoNombre,
+      envase_formato: recetaOrigen.envase_formato || '1lt',
+      precio_venta: recetaOrigen.precio_venta || 9000,
+    })
+    if (errReceta) { showToast('Error creando duplicado: ' + errReceta.message); return }
+
+    const ingsOrigen = getIngredientes(recetaOrigen.nombre)
+      .filter(i => i.insumo_nombre !== 'ENVASE')
+    if (ingsOrigen.length > 0) {
+      const { error: errIng } = await supabase.from('receta_ingredientes').insert(
+        ingsOrigen.map(i => ({
+          receta_nombre: nuevoNombre,
+          insumo_nombre: i.insumo_nombre,
+          cantidad: i.cantidad,
+          unidad: i.unidad || 'ml',
+        }))
+      )
+      if (errIng) { showToast('Receta creada pero falló copiar ingredientes: ' + errIng.message); return }
+    }
+    await load()
+    setSeleccionada(nuevoNombre)
+    setEditando(true)
+    showToast(`Duplicada como "${nuevoNombre}" ✓`)
+  }
+
+  // ── Eliminar receta ──────────────────────────────────────────────────────
+  // Solo permite borrar si no hay ventas asociadas (preserva histórico).
+  // Borra primero los ingredientes (FK lógica por nombre) y después la receta.
+  const eliminarReceta = async (receta) => {
+    const numVentas = ventasRecetas[receta.nombre] || 0
+    if (numVentas > 0) {
+      showToast(`No se puede eliminar: tiene ${numVentas} venta(s) asociada(s)`)
+      setConfirmEliminar(null)
+      return
+    }
+    const { error: errIng } = await supabase
+      .from('receta_ingredientes').delete().eq('receta_nombre', receta.nombre)
+    if (errIng) { showToast('Error borrando ingredientes: ' + errIng.message); return }
+    const { error: errRec } = await supabase
+      .from('recetas').delete().eq('nombre', receta.nombre)
+    if (errRec) { showToast('Error borrando receta: ' + errRec.message); return }
+    setConfirmEliminar(null)
+    setSeleccionada(null)
+    await load()
+    showToast(`Receta "${receta.nombre}" eliminada ✓`)
+  }
 
   const getIngredientes = (nombre) => ingredientes.filter(i => i.receta_nombre === nombre)
 
@@ -370,6 +561,8 @@ export default function Catalogo() {
     if (!receta) { setSeleccionada(null); return null }
     const ings = getIngredientes(seleccionada).filter(i => i.insumo_nombre !== 'ENVASE')
 
+    const numVentas = ventasRecetas[receta.nombre] || 0
+
     return (
       <div className="page">
         {toast && <div className="toast">{toast}</div>}
@@ -389,6 +582,21 @@ export default function Catalogo() {
           />
         )}
 
+        {confirmEliminar && (
+          <ConfirmModal
+            titulo={`Eliminar "${confirmEliminar.nombre}"`}
+            mensaje={numVentas > 0
+              ? `Esta receta tiene ${numVentas} venta(s) registrada(s) en el histórico. No se puede eliminar sin perder esos datos.`
+              : '¿Eliminar definitivamente esta receta y sus ingredientes? Esta acción no se puede deshacer.'}
+            confirmLabel={numVentas > 0 ? 'Entendido' : 'Eliminar'}
+            peligro={numVentas === 0}
+            onConfirm={numVentas > 0
+              ? () => setConfirmEliminar(null)
+              : () => eliminarReceta(confirmEliminar)}
+            onCancel={() => setConfirmEliminar(null)}
+          />
+        )}
+
         <div className="page-title">Catálogo</div>
         <DetalleReceta
           receta={receta}
@@ -397,6 +605,8 @@ export default function Catalogo() {
           config={config}
           onEditar={() => setEditando(true)}
           onVolver={() => setSeleccionada(null)}
+          onDuplicar={() => duplicarReceta(receta)}
+          onEliminar={() => setConfirmEliminar(receta)}
         />
       </div>
     )
@@ -406,7 +616,27 @@ export default function Catalogo() {
   return (
     <div className="page">
       {toast && <div className="toast">{toast}</div>}
-      <div className="page-title">Catálogo</div>
+
+      {creando && (
+        <NuevaRecetaModal
+          recetasExistentes={recetas}
+          onCreate={async (nombre) => {
+            setCreando(false)
+            await load()
+            setSeleccionada(nombre)
+            setEditando(true)
+            showToast(`Receta "${nombre}" creada ✓ — añade los ingredientes`)
+          }}
+          onCancel={() => setCreando(false)}
+        />
+      )}
+
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+        <div className="page-title" style={{ margin:0 }}>Catálogo</div>
+        <button className="btn btn-primary btn-sm" onClick={() => setCreando(true)}>
+          + Nueva receta
+        </button>
+      </div>
 
       <div className="card">
         {recetasFiltradas.length === 0 && (
