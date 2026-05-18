@@ -5,19 +5,31 @@
 //   - Un objeto receta { envase_formato: '1lt' | '475ml' | null } — en cuyo
 //     caso el costo se resuelve mirando el PPP del insumo correspondiente.
 //
-// Si se pasa una receta y existe el insumo del formato indicado, se usa su
-// PPP actualizado. Si no, cae al valor numérico legacy (794.6 por defecto).
+// Insumos con `aplica_merma = false` (Red Bull, frascos, etc.) suman al costo
+// sin el factor (1 + merma). El resto sí se ajusta por merma.
 export function calcularCostoReceta(ingredientes, insumos, merma = 0.08, costoEnvase = 794.6) {
   const insumoMap = {}
-  insumos.forEach(i => { insumoMap[i.nombre.toLowerCase()] = i.costo_ppp })
-
-  let costoInsumos = 0
-  ingredientes.forEach(ing => {
-    const ppp = insumoMap[ing.insumo_nombre.toLowerCase()] || 0
-    costoInsumos += ing.cantidad * ppp
+  insumos.forEach(i => {
+    insumoMap[i.nombre.toLowerCase()] = {
+      ppp: i.costo_ppp || 0,
+      aplicaMerma: i.aplica_merma !== false, // default true si no viene la flag
+    }
   })
 
-  const costoConMerma = costoInsumos * (1 + merma)
+  let costoConMerma = 0
+  let costoInsumosBase = 0   // suma de los insumos con merma (sin el factor)
+  ingredientes.forEach(ing => {
+    const meta = insumoMap[ing.insumo_nombre.toLowerCase()]
+    const ppp = meta?.ppp || 0
+    const aplica = meta ? meta.aplicaMerma : true
+    const sub = ing.cantidad * ppp
+    if (aplica) {
+      costoInsumosBase += sub
+      costoConMerma += sub * (1 + merma)
+    } else {
+      costoConMerma += sub
+    }
+  })
 
   // Resolver el costo del envase
   let costoEnvaseFinal = 794.6

@@ -337,9 +337,12 @@ function DetalleReceta({ receta, ingredientes, insumos, config, onEditar, onVolv
     { envase_formato: formato, costoLegacy: config.costo_envase })
   const precio = receta.precio_venta || 9000
   const margen = precio > 0 ? (precio - costo) / precio : 0
-  const costoInsumos = ings.reduce((s, ing) => {
+  // Para mostrar la línea "Merma" en el desglose, solo se cuentan los insumos
+  // que sí aplican merma (excluye Red Bull y otros marcados con aplica_merma=false).
+  const costoInsumosConMerma = ings.reduce((s, ing) => {
     const ins = insumos.find(i => i.nombre.toLowerCase() === ing.insumo_nombre.toLowerCase())
-    return s + (ins?.costo_ppp || 0) * ing.cantidad
+    if (!ins || ins.aplica_merma === false) return s
+    return s + (ins.costo_ppp || 0) * ing.cantidad
   }, 0)
   // Costo del envase resuelto desde el PPP del insumo del formato
   const insumoEnvase = insumos.find(
@@ -420,7 +423,7 @@ function DetalleReceta({ receta, ingredientes, insumos, config, onEditar, onVolv
         <div style={{ borderTop:'1px solid var(--border)', paddingTop:10, marginTop:6 }}>
           <div className="list-item">
             <div className="list-item-name" style={{ fontSize:13 }}>Merma ({Math.round(config.merma_pct * 100)}%)</div>
-            <div style={{ color:'var(--muted)', fontSize:13 }}>{formatCLP(costoInsumos * config.merma_pct)}</div>
+            <div style={{ color:'var(--muted)', fontSize:13 }}>{formatCLP(costoInsumosConMerma * config.merma_pct)}</div>
           </div>
           <div className="list-item">
             <div className="list-item-name" style={{ fontSize:13 }}>Envase ({formato})</div>

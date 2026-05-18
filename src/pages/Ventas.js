@@ -381,7 +381,9 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
 // monto que se descontó originalmente (con merma incluida) para que el reverso
 // sea exacto. ENVASE se cuenta como un insumo más, EXCEPTO si la venta tiene
 // "envase devuelto" (en cuyo caso el frasco vuelve al stock al instante).
-function calcularMovimientosStock(itemsValidos, ingredientesPorReceta, signo) {
+// Acepta opcionalmente `insumosMap` = { nombre.toLowerCase: { aplica_merma } }.
+// Si un insumo tiene aplica_merma=false, su descuento no se infla con merma.
+function calcularMovimientosStock(itemsValidos, ingredientesPorReceta, signo, insumosMap = {}) {
   const MERMA = 0.08
   const movs = {} // { insumo_nombre: cantidad (con signo) }
   itemsValidos.forEach(it => {
@@ -394,9 +396,12 @@ function calcularMovimientosStock(itemsValidos, ingredientesPorReceta, signo) {
       const esEnvase = nombre === 'ENVASE' || nombre.startsWith('Frascos ')
       // Si el cliente devuelve el envase, no se descuenta ni se reintegra.
       if (esEnvase && devuelve) return
-      // Merma solo aplica a insumos consumibles, no al envase (es reutilizable
-      // físicamente; lo que se "pierde" se modela aparte).
-      const factorMerma = esEnvase ? 1 : (1 + MERMA)
+      // Merma aplica a insumos consumibles fraccionables. Se excluye:
+      // - Cualquier envase/frasco (reutilizable).
+      // - Insumos marcados aplica_merma=false en BD (latas cerradas, etc.).
+      const meta = insumosMap[nombre.toLowerCase()]
+      const aplicaMermaInsumo = meta ? meta.aplica_merma !== false : true
+      const factorMerma = (esEnvase || !aplicaMermaInsumo) ? 1 : (1 + MERMA)
       const cantidad = ing.cantidad * litros * factorMerma
       movs[nombre] = (movs[nombre] || 0) + cantidad * signo
     })
@@ -456,17 +461,34 @@ async function cargarIngredientes(itemsValidos) {
   return porReceta
 }
 
+// Carga la flag aplica_merma de todos los insumos relevantes.
+// Devuelve un map { nombre.toLowerCase: { aplica_merma } }.
+async function cargarInsumosMeta() {
+  const { data } = await supabase.from('insumos').select('nombre, aplica_merma')
+  const map = {}
+  ;(data || []).forEach(i => {
+    map[(i.nombre || '').toLowerCase()] = { aplica_merma: i.aplica_merma !== false }
+  })
+  return map
+}
+
 // Descuenta ingredientes del stock al registrar una venta (api pública).
 async function descontarStock(itemsValidos) {
-  const ingredientes = await cargarIngredientes(itemsValidos)
-  const movs = calcularMovimientosStock(itemsValidos, ingredientes, -1)
+  const [ingredientes, insumosMap] = await Promise.all([
+    cargarIngredientes(itemsValidos),
+    cargarInsumosMeta(),
+  ])
+  const movs = calcularMovimientosStock(itemsValidos, ingredientes, -1, insumosMap)
   await aplicarMovimientosStock(movs)
 }
 
 // Reintegra stock cuando se borra o edita una venta (lo opuesto a descontar).
 async function reintegrarStock(itemsAnteriores) {
-  const ingredientes = await cargarIngredientes(itemsAnteriores)
-  const movs = calcularMovimientosStock(itemsAnteriores, ingredientes, +1)
+  const [ingredientes, insumosMap] = await Promise.all([
+    cargarIngredientes(itemsAnteriores),
+    cargarInsumosMeta(),
+  ])
+  const movs = calcularMovimientosStock(itemsAnteriores, ingredientes, +1, insumosMap)
   await aplicarMovimientosStock(movs)
 }
 
