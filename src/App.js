@@ -14,6 +14,7 @@ import Proyecciones from './pages/Proyecciones'
 import Conciliacion from './pages/Conciliacion'
 import Horas from './pages/Horas'
 import Alertas, { useAlertasCount } from './pages/Alertas'
+import MiDinero from './pages/MiDinero'
 import DeliveryLogin, { isDeliveryUnlocked } from './pages/DeliveryLogin'
 import DeliveryPanel from './pages/DeliveryPanel'
 import PinLock, { isPinUnlocked } from './pages/PinLock'
@@ -118,6 +119,12 @@ const TABS_MAS = [
       <path d="M13.7 21a2 2 0 0 1-3.4 0"/>
     </svg>
   )},
+  { id: 'mi-dinero', label: 'Mi Dinero', icon: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <line x1="12" y1="1" x2="12" y2="23"/>
+      <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+    </svg>
+  )},
 ]
 
 // Detectar si la URL es /delivery
@@ -177,6 +184,7 @@ export default function App() {
       {tab === 'conciliacion' && <Conciliacion />}
       {tab === 'horas' && <Horas />}
       {tab === 'alertas' && <Alertas />}
+      {tab === 'mi-dinero' && <MiDinero />}
 
       {/* Menú "Más" desplegable */}
       {menuMas && (
