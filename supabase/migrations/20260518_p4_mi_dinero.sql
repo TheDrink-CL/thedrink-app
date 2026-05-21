@@ -62,8 +62,35 @@ where not exists (
 );
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- 3. Claves para "Retirable hoy" — separar utilidad devengada de caja realizable
+--    El sueldo del 45% es lo que el NEGOCIO genera. Pero la plata puede estar
+--    atrapada en inventario, deliveries por cobrar, etc. La "reserva intocable"
+--    define cuánto debe quedar SIEMPRE en caja para operar tranquilo. Retirable
+--    hoy = caja - reserva. La reserva puede ser calculada automática o manual.
+-- ─────────────────────────────────────────────────────────────────────────────
+insert into public.config (clave, valor)
+select v.clave, v.valor
+from (values
+  -- modo: 1 = automática (N meses de COGS + colchón), 0 = manual
+  ('caja_reserva_modo',         1),
+  -- monto manual (CLP) — solo se usa si modo = 0
+  ('caja_reserva_manual',       0),
+  -- cuántos meses de COGS cubre la reserva automática (default 1 mes)
+  ('caja_reserva_meses_cogs',   1),
+  -- colchón extra sobre la base de COGS (default 10%)
+  ('caja_reserva_colchon_pct',  0.10)
+) as v(clave, valor)
+where not exists (
+  select 1 from public.config c where c.clave = v.clave
+);
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- Rollback manual:
 -- drop trigger if exists trg_historial_personal_updated_at on public.historial_personal;
 -- drop function if exists public.touch_historial_personal_updated_at();
 -- drop table if exists public.historial_personal;
--- delete from public.config where clave in ('split_sueldo_pct','split_reposicion_pct');
+-- delete from public.config where clave in (
+--   'split_sueldo_pct','split_reposicion_pct',
+--   'caja_reserva_modo','caja_reserva_manual',
+--   'caja_reserva_meses_cogs','caja_reserva_colchon_pct'
+-- );

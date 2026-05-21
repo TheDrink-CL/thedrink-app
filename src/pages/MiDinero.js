@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatCLP } from '../lib/calculos'
-import { calcularFinanzasMensuales, sueldoPromedio, calcularRunway } from '../lib/finanzasMes'
+import { calcularFinanzasMensuales, sueldoPromedio, calcularRunway,
+         calcularReservaSugerida, calcularRetirable, proyectarMesActual } from '../lib/finanzasMes'
 import { descargarCSV, BotonExportar } from '../lib/exportar'
 
 const MESES_ES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
@@ -103,6 +104,100 @@ function HistorialModal({ mes, registro, onSave, onCancel }) {
   )
 }
 
+// ─── Modal: configurar reserva intocable de caja ────────────────────────────
+function ReservaModal({ config, reservaSugerida, onSave, onCancel }) {
+  const [modo, setModo] = useState(parseInt(config.caja_reserva_modo) || 1) // 1=auto, 0=manual
+  const [manual, setManual] = useState(String(config.caja_reserva_manual || 0))
+  const [mesesCogs, setMesesCogs] = useState(String(config.caja_reserva_meses_cogs ?? 1))
+  const [colchonPct, setColchonPct] = useState(String(Math.round((parseFloat(config.caja_reserva_colchon_pct) || 0.10) * 100)))
+  const [saving, setSaving] = useState(false)
+
+  const handleSave = async () => {
+    setSaving(true)
+    const updates = [
+      { clave: 'caja_reserva_modo',        valor: modo },
+      { clave: 'caja_reserva_manual',      valor: parseFloat(manual) || 0 },
+      { clave: 'caja_reserva_meses_cogs',  valor: parseFloat(mesesCogs) || 1 },
+      { clave: 'caja_reserva_colchon_pct', valor: (parseFloat(colchonPct) || 0) / 100 },
+    ]
+    for (const u of updates) {
+      const { data: existe } = await supabase.from('config').select('clave').eq('clave', u.clave).maybeSingle()
+      if (existe) await supabase.from('config').update({ valor: u.valor }).eq('clave', u.clave)
+      else await supabase.from('config').insert(u)
+    }
+    setSaving(false)
+    onSave()
+  }
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.8)', display:'flex', alignItems:'flex-start', justifyContent:'center', zIndex:300, padding:24, overflowY:'auto' }}>
+      <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:16, padding:22, maxWidth:380, width:'100%', marginTop:28 }}>
+        <div style={{ fontSize:16, fontWeight:800, color:'var(--text-strong)', marginBottom:4 }}>
+          Reserva intocable de caja
+        </div>
+        <div style={{ fontSize:12, color:'var(--muted)', marginBottom:18, lineHeight:1.6 }}>
+          Cuánto debe quedar siempre en caja para operar tranquilo. Lo que sobre, lo puedes retirar.
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Modo</label>
+          <div className="chip-row">
+            <button type="button" className={`chip ${modo === 1 ? 'selected' : ''}`} onClick={() => setModo(1)}>
+              Auto (calculada)
+            </button>
+            <button type="button" className={`chip ${modo === 0 ? 'selected' : ''}`} onClick={() => setModo(0)}>
+              Manual
+            </button>
+          </div>
+        </div>
+
+        {modo === 1 ? (
+          <>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+              <div className="form-group">
+                <label className="form-label">Meses de COGS</label>
+                <input type="number" step="0.5" className="form-input" value={mesesCogs}
+                  onChange={e => setMesesCogs(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Colchón (%)</label>
+                <input type="number" className="form-input" value={colchonPct}
+                  onChange={e => setColchonPct(e.target.value)} />
+              </div>
+            </div>
+            <div style={{
+              padding:'10px 14px', background:'rgba(0,180,180,0.06)', border:'1px solid var(--border)',
+              borderRadius:10, fontSize:13, color:'var(--text)', marginBottom:14, lineHeight:1.7,
+            }}>
+              Reserva sugerida: <strong style={{ color:'var(--cyan)' }}>{formatCLP(reservaSugerida)}</strong>
+              <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>
+                = promedio COGS últimos 3 meses × {mesesCogs} × {(1 + (parseFloat(colchonPct)||0)/100).toFixed(2)}
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="form-group">
+            <label className="form-label">Monto manual (CLP)</label>
+            <input type="number" className="form-input" value={manual}
+              placeholder="ej: 200000" autoFocus
+              onChange={e => setManual(e.target.value)} />
+            <div style={{ fontSize:11, color:'var(--muted)', marginTop:4 }}>
+              Reserva sugerida automática para referencia: {formatCLP(reservaSugerida)}
+            </div>
+          </div>
+        )}
+
+        <div style={{ display:'flex', gap:10, marginTop:8 }}>
+          <button className="btn btn-secondary" style={{ flex:1 }} onClick={onCancel}>Cancelar</button>
+          <button className="btn btn-primary" style={{ flex:1 }} onClick={handleSave} disabled={saving}>
+            {saving ? 'Guardando...' : 'Guardar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Modal: editar split sueldo/reposición ──────────────────────────────────
 function SplitModal({ splitSueldo, onSave, onCancel }) {
   const [valor, setValor] = useState(String(Math.round(splitSueldo * 100)))
@@ -162,7 +257,7 @@ function SplitModal({ splitSueldo, onSave, onCancel }) {
 }
 
 // ─── Vista: TABLERO mes a mes ────────────────────────────────────────────────
-function TableroMensual({ filas, splitSueldo, onEditMes, onEditSplit, historialMap }) {
+function TableroMensual({ filas, splitSueldo, onEditMes, onEditSplit, onEditReserva, historialMap, cajaActual, reservaSugerida, retirable }) {
   const mesActual = mesActualISO()
 
   // Totales últimos 6 meses (excluyendo el actual incompleto)
@@ -178,6 +273,63 @@ function TableroMensual({ filas, splitSueldo, onEditMes, onEditSplit, historialM
 
   return (
     <>
+      {/* Card RETIRABLE HOY: caja real - reserva intocable */}
+      <div className="card" style={{
+        background: retirable.descapitalizado
+          ? 'rgba(196,0,90,0.10)'
+          : (retirable.disponible > 0 ? 'rgba(34,197,94,0.10)' : 'rgba(245,158,11,0.10)'),
+        border: '1px solid ' + (retirable.descapitalizado
+          ? 'rgba(196,0,90,0.4)'
+          : (retirable.disponible > 0 ? 'rgba(34,197,94,0.4)' : 'rgba(245,158,11,0.4)')),
+      }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:10 }}>
+          <div>
+            <div className="card-title" style={{ margin:0,
+              color: retirable.descapitalizado
+                ? 'var(--pink)'
+                : (retirable.disponible > 0 ? 'var(--green)' : '#f59e0b') }}>
+              {retirable.descapitalizado ? '⚠️ Retirable hoy' : (retirable.disponible > 0 ? '💵 Retirable hoy' : '🟡 Retirable hoy')}
+            </div>
+            <div style={{ fontSize:11, color:'var(--muted)', marginTop:3 }}>
+              caja − reserva intocable
+            </div>
+          </div>
+          <button onClick={onEditReserva}
+            style={{ background:'none', border:'1px solid var(--border)', borderRadius:7, color:'var(--muted)', cursor:'pointer', fontSize:11, padding:'3px 9px' }}>
+            ⚙️ Reserva
+          </button>
+        </div>
+
+        <div style={{ fontSize:30, fontWeight:900,
+          color: retirable.descapitalizado
+            ? 'var(--pink)'
+            : (retirable.disponible > 0 ? 'var(--green)' : '#f59e0b'),
+          marginBottom:10 }}>
+          {formatCLP(retirable.disponible)}
+        </div>
+
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:10 }}>
+          <Stat label="Caja actual" valor={cajaActual} color="var(--text)" />
+          <Stat label="Reserva intocable" valor={retirable.reservaUsada} color="var(--cyan)" />
+        </div>
+
+        <div style={{
+          padding:'9px 12px', background:'rgba(255,255,255,0.03)', borderRadius:8,
+          fontSize:11, color:'var(--muted)', lineHeight:1.7,
+        }}>
+          {retirable.descapitalizado
+            ? <>⚠️ Tu caja está por debajo de la reserva sugerida ({formatCLP(retirable.reservaUsada)}). No retires nada hoy y prioriza generar flujo o ajustar la reserva.</>
+            : retirable.disponible > 0
+              ? <>Esto es lo que puedes sacar HOY sin descapitalizar. Tu sueldo "devengado" (lo que el negocio te debe) puede ser mayor, pero está atrapado en stock o gastos del ciclo.</>
+              : <>Cubres exactamente la reserva: no hay margen para retirar sin descapitalizar. Espera que crezca la caja o ajusta la reserva.</>}
+          {reservaSugerida > 0 && Math.abs(retirable.reservaUsada - reservaSugerida) > 1 && (
+            <div style={{ marginTop:4 }}>
+              Sugerida automática: {formatCLP(reservaSugerida)}
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Card de configuración split */}
       <div className="card" style={{
         background: 'rgba(123,47,190,0.08)', border: '1px solid rgba(123,47,190,0.3)',
@@ -248,32 +400,78 @@ function TableroMensual({ filas, splitSueldo, onEditMes, onEditSplit, historialM
               </div>
 
               {/* Sueldo y reposición */}
-              <div style={{
-                display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginTop:6,
-                padding:'10px 0 0', borderTop:'1px solid rgba(255,255,255,0.06)',
-              }}>
-                <div style={{ background:'rgba(34,197,94,0.10)', borderRadius:10, padding:'10px 12px', border:'1px solid rgba(34,197,94,0.25)' }}>
-                  <div style={{ fontSize:10, color:'var(--muted)', textTransform:'uppercase', letterSpacing:0.5, marginBottom:3 }}>
-                    Tu sueldo
-                  </div>
-                  <div style={{ fontSize:16, fontWeight:800, color:'var(--green)' }}>
-                    {formatCLP(sueldoEfectivo)}
-                  </div>
-                  {sueldoReal != null && Math.abs(sueldoReal - f.sueldo) > 1 && (
-                    <div style={{ fontSize:10, color:'var(--muted)', marginTop:2 }}>
-                      calculado: {formatCLP(f.sueldo)}
+              {esActual ? (
+                // ── Mes en curso: mostrar devengado a HOY + proyección fin de mes ──
+                (() => {
+                  const proy = proyectarMesActual(f)
+                  return (
+                    <div style={{
+                      marginTop:6, padding:'10px 0 0',
+                      borderTop:'1px solid rgba(255,255,255,0.06)',
+                    }}>
+                      <div style={{ fontSize:10, color:'var(--cyan)', textTransform:'uppercase', letterSpacing:1, fontWeight:700, marginBottom:8 }}>
+                        Tu sueldo · día {proy.diasTranscurridos} de {proy.diasMes}
+                      </div>
+                      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+                        <div style={{ background:'rgba(34,197,94,0.10)', borderRadius:10, padding:'10px 12px', border:'1px solid rgba(34,197,94,0.25)' }}>
+                          <div style={{ fontSize:10, color:'var(--muted)', textTransform:'uppercase', letterSpacing:0.5, marginBottom:3 }}>
+                            Devengado a hoy
+                          </div>
+                          <div style={{ fontSize:16, fontWeight:800, color:'var(--green)' }}>
+                            {formatCLP(proy.devengadoSueldo)}
+                          </div>
+                          <div style={{ fontSize:10, color:'var(--muted)', marginTop:2 }}>
+                            real acumulado
+                          </div>
+                        </div>
+                        <div style={{ background:'rgba(127,119,221,0.10)', borderRadius:10, padding:'10px 12px', border:'1px solid rgba(127,119,221,0.3)' }}>
+                          <div style={{ fontSize:10, color:'var(--muted)', textTransform:'uppercase', letterSpacing:0.5, marginBottom:3 }}>
+                            Proyectado fin de mes
+                          </div>
+                          <div style={{ fontSize:16, fontWeight:800, color:'#AFA9EC' }}>
+                            {formatCLP(proy.proyectadoSueldo)}
+                          </div>
+                          <div style={{ fontSize:10, color:'var(--muted)', marginTop:2 }}>
+                            si mantienes ritmo
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ marginTop:8, padding:'8px 12px', background:'rgba(255,255,255,0.03)', borderRadius:8, fontSize:11, color:'var(--muted)', lineHeight:1.6 }}>
+                        Reposición devengada: <strong style={{ color:'var(--cyan)' }}>{formatCLP(f.reposicion)}</strong>
+                        {' · '}proyectada fin de mes: <strong style={{ color:'#AFA9EC' }}>{formatCLP(f.reposicion * (proy.diasMes / Math.max(1, proy.diasTranscurridos)))}</strong>
+                      </div>
                     </div>
-                  )}
-                </div>
-                <div style={{ background:'rgba(0,180,180,0.08)', borderRadius:10, padding:'10px 12px', border:'1px solid rgba(0,180,180,0.25)' }}>
-                  <div style={{ fontSize:10, color:'var(--muted)', textTransform:'uppercase', letterSpacing:0.5, marginBottom:3 }}>
-                    Reposición
+                  )
+                })()
+              ) : (
+                // ── Meses cerrados: número único como antes ─────────────
+                <div style={{
+                  display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginTop:6,
+                  padding:'10px 0 0', borderTop:'1px solid rgba(255,255,255,0.06)',
+                }}>
+                  <div style={{ background:'rgba(34,197,94,0.10)', borderRadius:10, padding:'10px 12px', border:'1px solid rgba(34,197,94,0.25)' }}>
+                    <div style={{ fontSize:10, color:'var(--muted)', textTransform:'uppercase', letterSpacing:0.5, marginBottom:3 }}>
+                      Tu sueldo
+                    </div>
+                    <div style={{ fontSize:16, fontWeight:800, color:'var(--green)' }}>
+                      {formatCLP(sueldoEfectivo)}
+                    </div>
+                    {sueldoReal != null && Math.abs(sueldoReal - f.sueldo) > 1 && (
+                      <div style={{ fontSize:10, color:'var(--muted)', marginTop:2 }}>
+                        calculado: {formatCLP(f.sueldo)}
+                      </div>
+                    )}
                   </div>
-                  <div style={{ fontSize:16, fontWeight:800, color:'var(--cyan)' }}>
-                    {formatCLP(f.reposicion)}
+                  <div style={{ background:'rgba(0,180,180,0.08)', borderRadius:10, padding:'10px 12px', border:'1px solid rgba(0,180,180,0.25)' }}>
+                    <div style={{ fontSize:10, color:'var(--muted)', textTransform:'uppercase', letterSpacing:0.5, marginBottom:3 }}>
+                      Reposición
+                    </div>
+                    <div style={{ fontSize:16, fontWeight:800, color:'var(--cyan)' }}>
+                      {formatCLP(f.reposicion)}
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
 
               {reg?.nota && (
                 <div style={{ fontSize:11, color:'var(--muted)', fontStyle:'italic', marginTop:8 }}>
@@ -463,9 +661,14 @@ export default function MiDinero() {
   const [filas, setFilas] = useState([])
   const [historial, setHistorial] = useState([])
   const [splitSueldo, setSplitSueldo] = useState(0.45)
+  const [cfgFull, setCfgFull] = useState({})
+  const [cajaActual, setCajaActual] = useState(0)
+  const [reservaSugerida, setReservaSugerida] = useState(0)
+  const [retirable, setRetirable] = useState({ reservaUsada: 0, disponible: 0, descapitalizado: false })
   const [loading, setLoading] = useState(true)
   const [editMes, setEditMes] = useState(null)
   const [editSplit, setEditSplit] = useState(false)
+  const [editReserva, setEditReserva] = useState(false)
   const [toast, setToast] = useState('')
   const [error, setError] = useState(null)
 
@@ -474,11 +677,14 @@ export default function MiDinero() {
   async function load() {
     try {
       const [
-        { data: vts }, { data: cja }, { data: recIng },
-        { data: ins }, { data: cfg }, { data: hist },
+        { data: vts }, { data: cjaSalidas }, { data: cjaTodo },
+        { data: cmp }, { data: recIng }, { data: ins },
+        { data: cfg }, { data: hist },
       ] = await Promise.all([
         supabase.from('ventas').select('fecha, litros, precio_venta, delivery, receta_nombre'),
         supabase.from('caja').select('fecha, monto, categoria, tipo').eq('tipo', 'salida'),
+        supabase.from('caja').select('fecha, monto, categoria, tipo'),
+        supabase.from('compras').select('precio_total, es_inversion'),
         supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad'),
         supabase.from('insumos').select('nombre, costo_ppp'),
         supabase.from('config').select('*'),
@@ -487,12 +693,13 @@ export default function MiDinero() {
 
       const cfgMap = {}
       ;(cfg || []).forEach(c => { cfgMap[c.clave] = c.valor })
+      setCfgFull(cfgMap)
       const ssueldo = parseFloat(cfgMap.split_sueldo_pct) || 0.45
       setSplitSueldo(ssueldo)
 
       const f = calcularFinanzasMensuales({
         ventas: vts || [],
-        gastosCaja: cja || [],
+        gastosCaja: cjaSalidas || [],
         recetaIngredientes: recIng || [],
         insumosPPP: ins || [],
         config: {
@@ -504,6 +711,31 @@ export default function MiDinero() {
       })
       setFilas(f)
       setHistorial(hist || [])
+
+      // ── Caja disponible HOY (mismo cálculo que el Dashboard) ─────────────
+      const totalVentas = (vts || []).reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0)
+      const totalCompras = (cmp || []).reduce((s, c) => s + (c.es_inversion ? 0 : c.precio_total), 0)
+      const todasCja = cjaTodo || []
+      const movExtraEntradas = todasCja.filter(m => m.tipo === 'entrada' && m.categoria !== 'Venta' && m.categoria !== 'Delivery').reduce((s, m) => s + m.monto, 0)
+      const movExtraSalidas = todasCja.filter(m => m.tipo === 'salida' && m.categoria !== 'Insumos').reduce((s, m) => s + m.monto, 0)
+      const saldoCaja = totalVentas - totalCompras + movExtraEntradas - movExtraSalidas
+      setCajaActual(saldoCaja)
+
+      // ── Reserva sugerida + retirable ─────────────────────────────────────
+      const mesesCogs = parseFloat(cfgMap.caja_reserva_meses_cogs) || 1
+      const colchonPct = parseFloat(cfgMap.caja_reserva_colchon_pct) || 0.10
+      const reservaSug = calcularReservaSugerida(f, mesesCogs, colchonPct)
+      setReservaSugerida(reservaSug)
+
+      const modoManual = parseInt(cfgMap.caja_reserva_modo) === 0
+      const reservaMan = parseFloat(cfgMap.caja_reserva_manual) || 0
+      const r = calcularRetirable({
+        cajaActual: saldoCaja,
+        reservaSugerida: reservaSug,
+        reservaManual: reservaMan,
+        usarManual: modoManual,
+      })
+      setRetirable(r)
     } catch (e) {
       console.error('MiDinero - error:', e)
       setError(e.message || String(e))
@@ -551,6 +783,11 @@ export default function MiDinero() {
           onSave={() => { setEditSplit(false); showToast('Reparto actualizado ✓'); load() }}
           onCancel={() => setEditSplit(false)} />
       )}
+      {editReserva && (
+        <ReservaModal config={cfgFull} reservaSugerida={reservaSugerida}
+          onSave={() => { setEditReserva(false); showToast('Reserva actualizada ✓'); load() }}
+          onCancel={() => setEditReserva(false)} />
+      )}
 
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
         <div className="page-title" style={{ marginBottom:0 }}>Mi Dinero</div>
@@ -587,8 +824,12 @@ export default function MiDinero() {
           filas={filas}
           splitSueldo={splitSueldo}
           historialMap={historialMap}
+          cajaActual={cajaActual}
+          reservaSugerida={reservaSugerida}
+          retirable={retirable}
           onEditMes={setEditMes}
           onEditSplit={() => setEditSplit(true)}
+          onEditReserva={() => setEditReserva(true)}
         />
       ) : (
         <Runway

@@ -144,3 +144,46 @@ export function calcularRunway(sueldoMensual, gasto, colchon) {
     : (deficit > 0 ? colchon / deficit : Infinity)
   return { autosostenible, deficit, superavit, mesesAire }
 }
+
+
+/**
+ * Reserva intocable de caja SUGERIDA por el sistema.
+ * Calcula: (promedio COGS últimos 3 meses completos) × meses × (1 + colchon)
+ */
+export function calcularReservaSugerida(filas, mesesCogs = 1, colchonPct = 0.10) {
+  if (!filas || filas.length === 0) return 0
+  const mesActual = new Date().toISOString().slice(0, 7)
+  const completos = filas.filter(f => f.mes !== mesActual).slice(0, 3)
+  if (completos.length === 0) return 0
+  const cogsPromedio = completos.reduce((s, f) => s + f.cogs, 0) / completos.length
+  return cogsPromedio * mesesCogs * (1 + colchonPct)
+}
+
+/**
+ * Cuánto puedes retirar HOY sin descapitalizar el negocio.
+ */
+export function calcularRetirable({ cajaActual = 0, reservaSugerida = 0, reservaManual = 0, usarManual = false }) {
+  const reservaUsada = usarManual ? reservaManual : reservaSugerida
+  const disponible = Math.max(0, cajaActual - reservaUsada)
+  const descapitalizado = cajaActual < reservaUsada
+  return { reservaUsada, disponible, descapitalizado }
+}
+
+/**
+ * Para el mes en curso: estima la proyección a fin de mes según el ritmo
+ * acumulado hasta el día actual.
+ */
+export function proyectarMesActual(filaMesActual, hoy = new Date()) {
+  if (!filaMesActual) return null
+  const diaActual = hoy.getDate()
+  const ultimoDiaMes = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0).getDate()
+  const factor = ultimoDiaMes / Math.max(1, diaActual)
+  return {
+    diasTranscurridos: diaActual,
+    diasMes: ultimoDiaMes,
+    devengadoSueldo: filaMesActual.sueldo,
+    devengadoMargenOp: filaMesActual.margenOperativo,
+    proyectadoSueldo: filaMesActual.sueldo * factor,
+    proyectadoMargenOp: filaMesActual.margenOperativo * factor,
+  }
+}
