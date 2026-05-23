@@ -144,6 +144,11 @@ const isComandasRoute = () => {
   return path === '/comandas' || path.startsWith('/comandas/')
 }
 
+const isImportarRoute = () => {
+  const path = window.location.pathname
+  return path === '/importar' || path.startsWith('/importar/')
+}
+
 export default function App() {
   const [tab, setTab] = useState('dashboard')
   const [menuMas, setMenuMas] = useState(false)
@@ -153,9 +158,8 @@ export default function App() {
 
   const isEnMas = TABS_MAS.some(t => t.id === tab)
 
-  if (isComandasRoute()) {
-    return <Comandas />
-  }
+  if (isComandasRoute()) return <Comandas />
+  if (isImportarRoute()) return <ImportarPedido />
 
   if (isDeliveryRoute()) {
     if (!deliveryDesbloqueado) {
@@ -182,22 +186,22 @@ export default function App() {
 
   return (
     <div>
-      {tab === 'dashboard'  && <Dashboard />}
-      {tab === 'ventas'     && <Ventas />}
-      {tab === 'compras'    && <Compras />}
-      {tab === 'caja'       && <Caja />}
-      {tab === 'analisis'   && <Analisis />}
-      {tab === 'proyectos'  && <Proyectos />}
-      {tab === 'cuentas'    && <Cuentas />}
-      {tab === 'catalogo'   && <Catalogo />}
-      {tab === 'stock'      && <Stock />}
-      {tab === 'clientes'   && <Clientes />}
+      {tab === 'dashboard'    && <Dashboard />}
+      {tab === 'ventas'       && <Ventas />}
+      {tab === 'compras'      && <Compras />}
+      {tab === 'caja'         && <Caja />}
+      {tab === 'analisis'     && <Analisis />}
+      {tab === 'proyectos'    && <Proyectos />}
+      {tab === 'cuentas'      && <Cuentas />}
+      {tab === 'catalogo'     && <Catalogo />}
+      {tab === 'stock'        && <Stock />}
+      {tab === 'clientes'     && <Clientes />}
       {tab === 'aprendizajes' && <Aprendizajes />}
       {tab === 'proyecciones' && <Proyecciones />}
       {tab === 'conciliacion' && <Conciliacion />}
-      {tab === 'horas' && <Horas />}
-      {tab === 'alertas' && <Alertas />}
-      {tab === 'mi-dinero' && <MiDinero />}
+      {tab === 'horas'        && <Horas />}
+      {tab === 'alertas'      && <Alertas />}
+      {tab === 'mi-dinero'    && <MiDinero />}
       {tab === 'importar-pedido' && <ImportarPedido />}
 
       {menuMas && (
@@ -233,24 +237,20 @@ export default function App() {
 
             <div style={{ borderTop:'1px solid var(--border)', margin:'6px 0' }} />
 
-            <button
-              onClick={() => window.open('/delivery', '_blank')}
+            <button onClick={() => window.open('/delivery', '_blank')}
               style={{
-                display:'flex', alignItems:'center', gap:12,
-                width:'100%', background:'none',
-                border:'none', borderRadius:10, padding:'10px 14px',
+                display:'flex', alignItems:'center', gap:12, width:'100%',
+                background:'none', border:'none', borderRadius:10, padding:'10px 14px',
                 color:'var(--muted)', cursor:'pointer', fontSize:14, fontWeight:400
               }}>
               <span style={{ fontSize:16 }}>{"🏍️"}</span>
               Panel Delivery
             </button>
 
-            <button
-              onClick={() => window.open('/comandas', '_blank')}
+            <button onClick={() => window.open('/comandas', '_blank')}
               style={{
-                display:'flex', alignItems:'center', gap:12,
-                width:'100%', background:'none',
-                border:'none', borderRadius:10, padding:'10px 14px',
+                display:'flex', alignItems:'center', gap:12, width:'100%',
+                background:'none', border:'none', borderRadius:10, padding:'10px 14px',
                 color:'var(--muted)', cursor:'pointer', fontSize:14, fontWeight:400
               }}>
               <span style={{ fontSize:16 }}>{"📺"}</span>
@@ -262,13 +262,13 @@ export default function App() {
 
       <nav className="bottom-nav">
         {TABS_MAIN.map(t => (
-          <button key={t.id} className={`nav-btn ${tab === t.id ? 'active' : ''}`}
+          <button key={t.id} className={"nav-btn " + (tab === t.id ? 'active' : '')}
             onClick={() => { setMenuMas(false); setTab(t.id) }}>
             {t.icon}
             {t.label}
           </button>
         ))}
-        <button className={`nav-btn ${isEnMas ? 'active' : ''}`}
+        <button className={"nav-btn " + (isEnMas ? 'active' : '')}
           onClick={() => setMenuMas(m => !m)}
           style={{ position: 'relative' }}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
