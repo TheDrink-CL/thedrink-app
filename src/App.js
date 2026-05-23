@@ -18,6 +18,8 @@ import MiDinero from './pages/MiDinero'
 import DeliveryLogin, { isDeliveryUnlocked } from './pages/DeliveryLogin'
 import DeliveryPanel from './pages/DeliveryPanel'
 import PinLock, { isPinUnlocked } from './pages/PinLock'
+import ImportarPedido from './pages/ImportarPedido'
+import Comandas from './pages/Comandas'
 
 const TABS_MAIN = [
   { id: 'dashboard', label: 'Inicio', icon: (
@@ -43,7 +45,7 @@ const TABS_MAIN = [
       <line x1="2" y1="10" x2="22" y2="10"/>
     </svg>
   )},
-  { id: 'analisis', label: 'Análisis', icon: (
+  { id: 'analisis', label: 'Analisis', icon: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
     </svg>
@@ -99,7 +101,7 @@ const TABS_MAS = [
       <line x1="6" y1="20" x2="6" y2="14"/>
     </svg>
   )},
-  { id: 'conciliacion', label: 'Conciliación', icon: (
+  { id: 'conciliacion', label: 'Conciliacion', icon: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M3 3v18h18"/>
       <path d="M7 14l4-4 4 4 5-7"/>
@@ -119,6 +121,11 @@ const TABS_MAS = [
       <path d="M13.7 21a2 2 0 0 1-3.4 0"/>
     </svg>
   )},
+  { id: 'importar-pedido', label: 'Importar WA', icon: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+    </svg>
+  )},
   { id: 'mi-dinero', label: 'Mi Dinero', icon: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <line x1="12" y1="1" x2="12" y2="23"/>
@@ -127,10 +134,14 @@ const TABS_MAS = [
   )},
 ]
 
-// Detectar si la URL es /delivery
 const isDeliveryRoute = () => {
   const path = window.location.pathname
   return path === '/delivery' || path.startsWith('/delivery/')
+}
+
+const isComandasRoute = () => {
+  const path = window.location.pathname
+  return path === '/comandas' || path.startsWith('/comandas/')
 }
 
 export default function App() {
@@ -142,7 +153,10 @@ export default function App() {
 
   const isEnMas = TABS_MAS.some(t => t.id === tab)
 
-  // ── Ruta /delivery — solo PIN ──────────────────────────────────────────────
+  if (isComandasRoute()) {
+    return <Comandas />
+  }
+
   if (isDeliveryRoute()) {
     if (!deliveryDesbloqueado) {
       return <DeliveryLogin onLogin={() => setDeliveryDesbloqueado(true)} />
@@ -157,7 +171,6 @@ export default function App() {
     )
   }
 
-  // ── PIN lock app principal ─────────────────────────────────────────────────
   if (!desbloqueado) {
     return <PinLock onUnlock={() => setDesbloqueado(true)} />
   }
@@ -185,8 +198,8 @@ export default function App() {
       {tab === 'horas' && <Horas />}
       {tab === 'alertas' && <Alertas />}
       {tab === 'mi-dinero' && <MiDinero />}
+      {tab === 'importar-pedido' && <ImportarPedido />}
 
-      {/* Menú "Más" desplegable */}
       {menuMas && (
         <>
           <div onClick={() => setMenuMas(false)}
@@ -218,23 +231,30 @@ export default function App() {
               </button>
             ))}
 
-            {/* Divisor */}
             <div style={{ borderTop:'1px solid var(--border)', margin:'6px 0' }} />
 
-            {/* Acceso a Delivery */}
             <button
               onClick={() => window.open('/delivery', '_blank')}
               style={{
                 display:'flex', alignItems:'center', gap:12,
                 width:'100%', background:'none',
                 border:'none', borderRadius:10, padding:'10px 14px',
-                color:'var(--muted)',
-                cursor:'pointer', fontSize:14, fontWeight:400
+                color:'var(--muted)', cursor:'pointer', fontSize:14, fontWeight:400
               }}>
-              <span style={{ width:20, height:20, display:'flex', alignItems:'center', justifyContent:'center', fontSize:16 }}>
-                🏍️
-              </span>
+              <span style={{ fontSize:16 }}>{"🏍️"}</span>
               Panel Delivery
+            </button>
+
+            <button
+              onClick={() => window.open('/comandas', '_blank')}
+              style={{
+                display:'flex', alignItems:'center', gap:12,
+                width:'100%', background:'none',
+                border:'none', borderRadius:10, padding:'10px 14px',
+                color:'var(--muted)', cursor:'pointer', fontSize:14, fontWeight:400
+              }}>
+              <span style={{ fontSize:16 }}>{"📺"}</span>
+              Panel Comandas
             </button>
           </div>
         </>
@@ -248,7 +268,6 @@ export default function App() {
             {t.label}
           </button>
         ))}
-        {/* Botón "Más" */}
         <button className={`nav-btn ${isEnMas ? 'active' : ''}`}
           onClick={() => setMenuMas(m => !m)}
           style={{ position: 'relative' }}>
@@ -257,7 +276,7 @@ export default function App() {
             <circle cx="12" cy="12" r="1" fill="currentColor"/>
             <circle cx="12" cy="19" r="1" fill="currentColor"/>
           </svg>
-          Más
+          {"Mas"}
           {alertasCount > 0 && (
             <span style={{
               position: 'absolute', top: 2, right: 6,
