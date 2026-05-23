@@ -20,6 +20,7 @@ import DeliveryPanel from './pages/DeliveryPanel'
 import PinLock, { isPinUnlocked } from './pages/PinLock'
 import ImportarPedido from './pages/ImportarPedido'
 import Comandas from './pages/Comandas'
+import ComandasPendientes from './pages/ComandasPendientes'
 
 const TABS_MAIN = [
   { id: 'dashboard', label: 'Inicio', icon: (
@@ -121,6 +122,13 @@ const TABS_MAS = [
       <path d="M13.7 21a2 2 0 0 1-3.4 0"/>
     </svg>
   )},
+  { id: 'comandas-pendientes', label: 'Comandas', icon: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+      <rect x="9" y="3" width="6" height="4" rx="1"/>
+      <line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="15" y2="16"/>
+    </svg>
+  )},
   { id: 'importar-pedido', label: 'Importar WA', icon: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
@@ -203,6 +211,7 @@ export default function App() {
       {tab === 'alertas'      && <Alertas />}
       {tab === 'mi-dinero'    && <MiDinero />}
       {tab === 'importar-pedido' && <ImportarPedido />}
+      {tab === 'comandas-pendientes' && <ComandasPendientes />}
 
       {menuMas && (
         <>
