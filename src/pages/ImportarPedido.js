@@ -331,7 +331,7 @@ export default function ImportarPedido() {
       <div style={{ fontSize:22, fontWeight:800, color:'var(--cyan)', marginBottom:8 }}>Comanda ingresada</div>
       <div style={{ color:'var(--muted)', marginBottom:32 }}>Ya aparece en el panel de comandas.</div>
       <button onClick={handleNuevo} style={sty.btnP}>Importar otro pedido</button>
-      <button onClick={() => window.open('/comandas','_blank')} style={{ ...sty.btnS, marginTop:10, width:'100%', display:'block' }}>Ver panel comandas →</button>
+      <button onClick={() => window.open('/tv','_blank')} style={{ ...sty.btnS, marginTop:10, width:'100%', display:'block' }}>Ver panel comandas →</button>
     </div>
   )
 

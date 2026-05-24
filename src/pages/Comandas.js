@@ -210,7 +210,7 @@ export default function Comandas() {
 
   const marcarListo = async (id) => {
     await supabase.from('comandas').update({ estado: 'listo' }).eq('id', id)
-    setComandas(prev => prev.filter(c => c.id !== id))
+    // No filtramos localmente — el realtime lo actualiza solo
   }
 
   // ─── Layout ───────────────────────────────────────────────────────────────

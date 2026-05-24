@@ -147,9 +147,9 @@ const isDeliveryRoute = () => {
   return path === '/delivery' || path.startsWith('/delivery/')
 }
 
-const isComandasRoute = () => {
+const isTVRoute = () => {
   const path = window.location.pathname
-  return path === '/comandas' || path.startsWith('/comandas/')
+  return path === '/tv' || path.startsWith('/tv/')
 }
 
 const isImportarRoute = () => {
@@ -166,7 +166,7 @@ export default function App() {
 
   const isEnMas = TABS_MAS.some(t => t.id === tab)
 
-  if (isComandasRoute()) return <Comandas />
+  if (isTVRoute()) return <Comandas />
   if (isImportarRoute()) return <ImportarPedido />
 
   if (isDeliveryRoute()) {
@@ -256,7 +256,7 @@ export default function App() {
               Panel Delivery
             </button>
 
-            <button onClick={() => window.open('/comandas', '_blank')}
+            <button onClick={() => window.open('/tv', '_blank')}
               style={{
                 display:'flex', alignItems:'center', gap:12, width:'100%',
                 background:'none', border:'none', borderRadius:10, padding:'10px 14px',

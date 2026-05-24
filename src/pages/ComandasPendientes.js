@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 
 const fechaHoy = () => {
@@ -38,7 +38,6 @@ function ModalVenta({ comanda, recetas, onGuardar, onCerrar }) {
   const [origen, setOrigen] = useState('Cliente habitual')
   const [guardando, setGuardando] = useState(false)
 
-  // Items pre-llenados desde la comanda
   const iniciarItems = () => (comanda.items || []).map((it, i) => {
     const receta = recetas.find(r => r.nombre === it.receta_nombre)
     return {
@@ -74,7 +73,6 @@ function ModalVenta({ comanda, recetas, onGuardar, onCerrar }) {
     if (!validos.length) { alert('Agrega al menos un item con receta y precio'); return }
     setGuardando(true)
     try {
-      // Orden
       const { data: orden, error: errOrden } = await supabase.from('ordenes').insert({
         fecha, hora: hora || null,
         cliente_nombre: comanda.cliente_nombre || null,
@@ -91,7 +89,6 @@ function ModalVenta({ comanda, recetas, onGuardar, onCerrar }) {
 
       if (errOrden || !orden) throw new Error(errOrden?.message || 'Error orden')
 
-      // Ventas
       await supabase.from('ventas').insert(validos.map(it => ({
         fecha,
         receta_nombre: it.receta_nombre,
@@ -103,9 +100,8 @@ function ModalVenta({ comanda, recetas, onGuardar, onCerrar }) {
         orden_id: orden.id,
       })))
 
-      // Marcar comanda como lista
-      await supabase.from('comandas').update({ estado: 'listo' }).eq('id', comanda.id)
-
+      // Archivar la comanda
+      await supabase.from('comandas').update({ estado: 'archivado' }).eq('id', comanda.id)
       onGuardar()
     } catch(e) {
       alert('Error: ' + e.message)
@@ -121,27 +117,24 @@ function ModalVenta({ comanda, recetas, onGuardar, onCerrar }) {
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.85)', display:'flex', alignItems:'flex-start', justifyContent:'center', zIndex:300, padding:'20px 16px', overflowY:'auto' }}>
       <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:16, padding:22, maxWidth:480, width:'100%', marginTop:10 }}>
 
-        {/* Header */}
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:18 }}>
           <div>
             <div style={{ fontSize:16, fontWeight:800, color:'var(--text-strong)' }}>Registrar venta</div>
             {comanda.cliente_nombre && <div style={{ fontSize:12, color:'var(--muted)', marginTop:2 }}>{comanda.cliente_nombre}</div>}
           </div>
-          <button onClick={onCerrar} style={{ background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:22 }}>×</button>
+          <button onClick={onCerrar} style={{ background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:22 }}>x</button>
         </div>
 
-        {/* Fecha y hora */}
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:14 }}>
           <div><span style={lbl}>Fecha</span><input type="date" style={inp} value={fecha} onChange={e=>setFecha(e.target.value)} /></div>
           <div><span style={lbl}>Hora</span><input type="time" style={inp} value={hora} onChange={e=>setHora(e.target.value)} /></div>
         </div>
 
-        {/* Items */}
         <span style={lbl}>Items</span>
         {items.map(it => (
           <div key={it.key} style={{ display:'flex', gap:8, marginBottom:8, alignItems:'center' }}>
             <select style={{ ...inp, flex:2 }} value={it.receta_nombre} onChange={e=>updateItem(it.key,'receta_nombre',e.target.value)}>
-              <option value="">— Receta —</option>
+              <option value="">Receta...</option>
               {recetas.map(r => <option key={r.nombre} value={r.nombre}>{r.nombre}</option>)}
             </select>
             <input type="number" style={{ ...inp, width:52, textAlign:'center', flexShrink:0 }} value={it.litros}
@@ -151,8 +144,7 @@ function ModalVenta({ comanda, recetas, onGuardar, onCerrar }) {
           </div>
         ))}
 
-        {/* Medio de pago */}
-        <div style={{ marginBottom:14 }}>
+        <div style={{ marginBottom:14, marginTop:4 }}>
           <span style={lbl}>Medio de pago</span>
           <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
             {MEDIOS_PAGO.map(m => (
@@ -165,7 +157,6 @@ function ModalVenta({ comanda, recetas, onGuardar, onCerrar }) {
           </div>
         </div>
 
-        {/* Delivery */}
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:14 }}>
           <div>
             <span style={lbl}>Costo delivery</span>
@@ -174,13 +165,12 @@ function ModalVenta({ comanda, recetas, onGuardar, onCerrar }) {
           <div>
             <span style={lbl}>Tipo</span>
             <select style={inp} value={deliveryTipo} onChange={e=>setDeliveryTipo(e.target.value)}>
-              <option value="">— Ninguno —</option>
+              <option value="">Ninguno</option>
               {TIPOS_DELIVERY.map(t=><option key={t.id} value={t.id}>{t.label}</option>)}
             </select>
           </div>
         </div>
 
-        {/* Origen */}
         <div style={{ marginBottom:14 }}>
           <span style={lbl}>Origen</span>
           <select style={inp} value={origen} onChange={e=>setOrigen(e.target.value)}>
@@ -188,13 +178,11 @@ function ModalVenta({ comanda, recetas, onGuardar, onCerrar }) {
           </select>
         </div>
 
-        {/* Nota */}
         <div style={{ marginBottom:18 }}>
           <span style={lbl}>Nota</span>
           <input style={inp} value={nota} onChange={e=>setNota(e.target.value)} placeholder="Opcional..." />
         </div>
 
-        {/* Total */}
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'12px 0', borderTop:'1px solid var(--border)', marginBottom:16 }}>
           <span style={{ fontSize:14, color:'var(--muted)' }}>Total neto</span>
           <span style={{ fontSize:22, fontWeight:900, color:'var(--green)' }}>{formatCLP(totalNeto)}</span>
@@ -211,7 +199,7 @@ function ModalVenta({ comanda, recetas, onGuardar, onCerrar }) {
   )
 }
 
-// ─── Tarjeta de comanda pendiente ─────────────────────────────────────────────
+// ─── Cronómetro ───────────────────────────────────────────────────────────────
 function useTiempo(createdAt) {
   const [seg, setSeg] = useState(0)
   useEffect(() => {
@@ -222,34 +210,38 @@ function useTiempo(createdAt) {
   return { texto: `${String(mm).padStart(2,'0')}:${String(ss).padStart(2,'0')}`, minutos: mm }
 }
 
-function TarjetaComandaApp({ comanda, onConvertir, onDescartar }) {
+// ─── Tarjeta de comanda ───────────────────────────────────────────────────────
+function TarjetaComanda({ comanda, onConvertir, onArchivar }) {
   const { texto, minutos } = useTiempo(comanda.created_at)
-  const color = minutos < 5 ? '#48c78e' : minutos < 10 ? '#ffc832' : '#ff5082'
+  const esListo = comanda.estado === 'listo'
+  const color = esListo ? '#00b4b4' : minutos < 5 ? '#48c78e' : minutos < 10 ? '#ffc832' : '#ff5082'
   const items = comanda.items || []
 
   return (
     <div style={{
-      background:'var(--card)', border:`1.5px solid ${color}33`,
-      borderRadius:14, padding:16, marginBottom:12
+      background: esListo ? 'rgba(0,180,180,0.06)' : 'var(--card)',
+      border: `1.5px solid ${color}44`,
+      borderRadius:14, padding:16, marginBottom:10
     }}>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:12 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:10 }}>
         <div>
+          {esListo && <span style={{ fontSize:10, fontWeight:800, color:'#00b4b4', letterSpacing:1, display:'block', marginBottom:3 }}>ELABORADO</span>}
           <div style={{ fontSize:15, fontWeight:800, color:'var(--text-strong)' }}>
             {comanda.cliente_nombre || 'Sin nombre'}
           </div>
           {comanda.cliente_direccion && (
             <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>
-              📍 {comanda.cliente_direccion}
+              {comanda.cliente_direccion}
             </div>
           )}
         </div>
-        <div style={{ fontFamily:'monospace', fontSize:22, fontWeight:900, color, lineHeight:1 }}>{texto}</div>
+        <div style={{ fontFamily:'monospace', fontSize:20, fontWeight:900, color, lineHeight:1 }}>{texto}</div>
       </div>
 
       <div style={{ marginBottom:12 }}>
         {items.map((it, i) => (
-          <div key={i} style={{ display:'flex', gap:8, alignItems:'center', marginBottom:4 }}>
-            <span style={{ fontSize:15, fontWeight:800, color, minWidth:28 }}>{it.cantidad}×</span>
+          <div key={i} style={{ display:'flex', gap:8, alignItems:'center', marginBottom:3 }}>
+            <span style={{ fontSize:14, fontWeight:800, color, minWidth:28 }}>{it.cantidad}x</span>
             <span style={{ fontSize:14, color:'var(--text-strong)', fontWeight:600 }}>
               {it.receta_nombre || it.nombre}
             </span>
@@ -260,7 +252,7 @@ function TarjetaComandaApp({ comanda, onConvertir, onDescartar }) {
             )}
           </div>
         ))}
-        {comanda.nota && <div style={{ fontSize:11, color:'var(--muted)', fontStyle:'italic', marginTop:6 }}>💬 {comanda.nota}</div>}
+        {comanda.nota && <div style={{ fontSize:11, color:'var(--muted)', fontStyle:'italic', marginTop:6 }}>"{comanda.nota}"</div>}
       </div>
 
       <div style={{ display:'flex', gap:8 }}>
@@ -268,13 +260,13 @@ function TarjetaComandaApp({ comanda, onConvertir, onDescartar }) {
           flex:1, background:'var(--cyan)', color:'#000', fontWeight:800, fontSize:13,
           border:'none', borderRadius:10, padding:'10px', cursor:'pointer'
         }}>
-          ✓ Registrar venta
+          Registrar venta
         </button>
-        <button onClick={() => onDescartar(comanda.id)} style={{
-          background:'rgba(255,255,255,0.06)', color:'var(--muted)', fontWeight:600, fontSize:13,
-          border:'1px solid var(--border)', borderRadius:10, padding:'10px 14px', cursor:'pointer'
+        <button onClick={() => onArchivar(comanda.id)} style={{
+          background:'rgba(255,255,255,0.05)', color:'var(--muted)', fontWeight:600, fontSize:12,
+          border:'1px solid var(--border)', borderRadius:10, padding:'10px 12px', cursor:'pointer'
         }}>
-          Descartar
+          Archivar
         </button>
       </div>
     </div>
@@ -293,7 +285,9 @@ export default function ComandasPendientes() {
 
   const cargar = async () => {
     const [{ data: cmd }, { data: rec }] = await Promise.all([
-      supabase.from('comandas').select('*').eq('estado','pendiente').order('created_at', { ascending: true }),
+      supabase.from('comandas').select('*')
+        .in('estado', ['pendiente', 'listo'])
+        .order('created_at', { ascending: true }),
       supabase.from('recetas').select('nombre, precio_venta').order('nombre')
     ])
     setComandas(cmd || [])
@@ -309,10 +303,18 @@ export default function ComandasPendientes() {
     return () => supabase.removeChannel(canal)
   }, [])
 
-  const handleDescartar = async (id) => {
-    await supabase.from('comandas').update({ estado:'listo' }).eq('id', id)
+  const handleArchivar = async (id) => {
+    await supabase.from('comandas').update({ estado: 'archivado' }).eq('id', id)
     setComandas(prev => prev.filter(c => c.id !== id))
-    showToast('Comanda descartada')
+    showToast('Comanda archivada')
+  }
+
+  const handleArchivarTodas = async () => {
+    const ids = comandas.filter(c => c.estado === 'listo').map(c => c.id)
+    if (!ids.length) { showToast('No hay comandas elaboradas para archivar'); return }
+    await supabase.from('comandas').update({ estado: 'archivado' }).in('id', ids)
+    setComandas(prev => prev.filter(c => !ids.includes(c.id)))
+    showToast(`${ids.length} comanda${ids.length > 1 ? 's' : ''} archivada${ids.length > 1 ? 's' : ''}`)
   }
 
   const handleVentaGuardada = () => {
@@ -320,6 +322,9 @@ export default function ComandasPendientes() {
     cargar()
     showToast('Venta registrada correctamente')
   }
+
+  const pendientes = comandas.filter(c => c.estado === 'pendiente')
+  const listos = comandas.filter(c => c.estado === 'listo')
 
   return (
     <div className="page">
@@ -333,27 +338,46 @@ export default function ComandasPendientes() {
         />
       )}
 
-      <div className="page-title">Comandas pendientes</div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+        <div className="page-title" style={{ marginBottom:16 }}>Comandas</div>
+        {listos.length > 0 && (
+          <button onClick={handleArchivarTodas} style={{
+            fontSize:11, fontWeight:700, padding:'5px 10px', borderRadius:8, cursor:'pointer',
+            background:'rgba(255,255,255,0.06)', border:'1px solid var(--border)',
+            color:'var(--muted)'
+          }}>
+            Archivar elaboradas ({listos.length})
+          </button>
+        )}
+      </div>
 
       {cargando && <div style={{ textAlign:'center', padding:40, color:'var(--muted)' }}>Cargando...</div>}
 
       {!cargando && comandas.length === 0 && (
         <div style={{ textAlign:'center', padding:'60px 20px' }}>
           <div style={{ fontSize:40, marginBottom:12, opacity:0.2 }}>🍹</div>
-          <div style={{ fontSize:16, color:'var(--muted)' }}>Sin comandas pendientes</div>
+          <div style={{ fontSize:16, color:'var(--muted)' }}>Sin comandas activas</div>
           <div style={{ fontSize:13, color:'var(--muted)', marginTop:6, opacity:0.6 }}>
             Los pedidos importados desde WhatsApp aparecen aqui.
           </div>
         </div>
       )}
 
-      {comandas.map(c => (
-        <TarjetaComandaApp
-          key={c.id}
-          comanda={c}
-          onConvertir={setActiva}
-          onDescartar={handleDescartar}
-        />
+      {/* Pendientes primero */}
+      {pendientes.map(c => (
+        <TarjetaComanda key={c.id} comanda={c} onConvertir={setActiva} onArchivar={handleArchivar} />
+      ))}
+
+      {/* Separador si hay ambos estados */}
+      {pendientes.length > 0 && listos.length > 0 && (
+        <div style={{ fontSize:11, color:'var(--muted)', fontWeight:700, letterSpacing:1, textTransform:'uppercase', margin:'16px 0 10px', opacity:0.5 }}>
+          Elaborados — pendiente de registrar
+        </div>
+      )}
+
+      {/* Elaborados */}
+      {listos.map(c => (
+        <TarjetaComanda key={c.id} comanda={c} onConvertir={setActiva} onArchivar={handleArchivar} />
       ))}
     </div>
   )
