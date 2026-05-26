@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatCLP, calcularCostoReceta } from '../lib/calculos'
 import { calcularRentabilidad } from '../lib/rentabilidad'
+import RankingRecetas from '../components/RankingRecetas'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -1470,6 +1471,34 @@ function AnalisisRecetas({ ventas, ordenes, recetaIngredientes, insumos, cliente
             </div>
           </>
         )
+      )}
+
+      {/* Botón "Ver todas las recetas" — expande inline el ranking completo */}
+      <RankingTodasInline ventas={ventas} costoPorReceta={costoPorReceta} />
+    </div>
+  )
+}
+
+// Componente auxiliar para Análisis: botón + expansión del ranking completo
+function RankingTodasInline({ ventas, costoPorReceta }) {
+  const [expandido, setExpandido] = React.useState(false)
+  if (!ventas || ventas.length === 0) return null
+  return (
+    <div style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 12 }}>
+      <button
+        onClick={() => setExpandido(e => !e)}
+        style={{
+          width: '100%', background: 'rgba(0,180,180,0.06)',
+          border: '1px solid var(--cyan-dim)', borderRadius: 10,
+          color: 'var(--cyan)', cursor: 'pointer', fontSize: 12, fontWeight: 700,
+          padding: '9px 0', textTransform: 'uppercase', letterSpacing: 0.8,
+        }}>
+        {expandido ? '▲ Ocultar ranking completo' : '▼ Ver TODAS las recetas'}
+      </button>
+      {expandido && (
+        <div style={{ marginTop: 12 }}>
+          <RankingRecetas ventas={ventas} costoPorReceta={costoPorReceta} />
+        </div>
       )}
     </div>
   )

@@ -3,8 +3,9 @@ import { supabase } from '../lib/supabase'
 import { calcularCostoReceta, formatCLP, formatPct } from '../lib/calculos'
 import { calcularRentabilidad } from '../lib/rentabilidad'
 import CaminoAlBar from './CaminoAlBar'
+import RankingRecetas from '../components/RankingRecetas'
 
-function RecetasComparativo({ topVolumen, topGanancia }) {
+function RecetasComparativo({ topVolumen, topGanancia, todasVentas, costoPorReceta }) {
   const [tab, setTab] = useState('volumen')
   if (!topVolumen || topVolumen.length === 0) return null
 
@@ -64,6 +65,37 @@ function RecetasComparativo({ topVolumen, topGanancia }) {
           </div>
         )
       })}
+
+      {/* Botón "Ver todas las recetas" — expande inline el ranking completo */}
+      {todasVentas && todasVentas.length > 0 && (
+        <ExpandirRanking todasVentas={todasVentas} costoPorReceta={costoPorReceta} />
+      )}
+    </div>
+  )
+}
+
+// Componente auxiliar: muestra botón y al tocarlo expande el ranking completo.
+function ExpandirRanking({ todasVentas, costoPorReceta }) {
+  var expRef = React.useState(false)
+  var expandido = expRef[0]
+  var setExpandido = expRef[1]
+  return (
+    <div style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 12 }}>
+      <button
+        onClick={() => setExpandido(e => !e)}
+        style={{
+          width: '100%', background: 'rgba(0,180,180,0.06)',
+          border: '1px solid var(--cyan-dim)', borderRadius: 10,
+          color: 'var(--cyan)', cursor: 'pointer', fontSize: 12, fontWeight: 700,
+          padding: '9px 0', textTransform: 'uppercase', letterSpacing: 0.8,
+        }}>
+        {expandido ? '▲ Ocultar' : '▼ Ver todas las recetas'}
+      </button>
+      {expandido && (
+        <div style={{ marginTop: 12 }}>
+          <RankingRecetas ventas={todasVentas} costoPorReceta={costoPorReceta} />
+        </div>
+      )}
     </div>
   )
 }
@@ -483,7 +515,7 @@ export default function Dashboard() {
       setTransferenciasMes(transferencias)
 
       setData({ inversion, ingresoTotal, litrosTotales, costoTotalReal, saldoCaja, ingresoMes, ticketPromedio, ticketMediana, totalOrdenes, clientesRecurrentes: clientesRecurrentes.length, totalClientesNombrados, pctRecurrentes, topRecurrentes, totalActivosFijos, ingresoSemAct, ingresoSemAnt, deltaSem, canalTop, proximoEvento, diasHastaEvento, rentabilidad, inventarioRotable, capitalTrabajoStock, comparacionRent })
-      setVentas({ topRecetas, topPorGanancia, recientes: vts?.slice(0, 5) || [] })
+      setVentas({ topRecetas, topPorGanancia, recientes: vts?.slice(0, 5) || [], todasVentas: vts || [], costoPorReceta })
       setLoading(false)
     }
     load()
@@ -750,7 +782,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      <RecetasComparativo topVolumen={ventas.topRecetas} topGanancia={ventas.topPorGanancia} />
+      <RecetasComparativo topVolumen={ventas.topRecetas} topGanancia={ventas.topPorGanancia} todasVentas={ventas.todasVentas} costoPorReceta={ventas.costoPorReceta} />
 
       <div className="card">
         <div className="card-title">Ultimas ventas</div>
