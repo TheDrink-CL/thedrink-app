@@ -170,9 +170,11 @@ export default function App() {
   if (isImportarRoute()) return <ImportarPedido />
 
   if (isDeliveryRoute()) {
-    if (!deliveryDesbloqueado) {
-      return <DeliveryLogin onLogin={() => setDeliveryDesbloqueado(true)} />
-    }
+    // Acceso libre al panel delivery (PIN deshabilitado por decisión del usuario).
+    // Para reactivar la protección, descomenta el bloque de abajo.
+    // if (!deliveryDesbloqueado) {
+    //   return <DeliveryLogin onLogin={() => setDeliveryDesbloqueado(true)} />
+    // }
     return (
       <DeliveryPanel
         onLogout={() => {
@@ -183,9 +185,11 @@ export default function App() {
     )
   }
 
-  if (!desbloqueado) {
-    return <PinLock onUnlock={() => setDesbloqueado(true)} />
-  }
+  // Acceso libre al sitio principal (PIN deshabilitado por decisión del usuario).
+  // Para reactivar la protección, descomenta el bloque de abajo.
+  // if (!desbloqueado) {
+  //   return <PinLock onUnlock={() => setDesbloqueado(true)} />
+  // }
 
   const handleNavClick = (id) => {
     setTab(id)
