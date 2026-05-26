@@ -179,10 +179,10 @@ export default function RankingRecetas({ ventas = [], costoPorReceta = {} }) {
           ? Math.max(0, Math.min(1, valor / maxValor))
           : 0
         const cBarra = colorBase(r)
-        // Top #1 con gradiente para destacar
-        const fillStyle = i === 0
-          ? `linear-gradient(90deg, ${cBarra}, ${cBarra}cc)`
-          : cBarra
+        // Top #1: barra del color completo (sin gradiente roto) y con un brillo
+        // sutil via box-shadow inset blanco para destacar visualmente.
+        const fillStyle = cBarra
+        const esTop = i === 0
         return (
           <div key={r.nombre} style={{
             padding: '10px 0',
@@ -248,6 +248,7 @@ export default function RankingRecetas({ ventas = [], costoPorReceta = {} }) {
                   height: '100%', borderRadius: 3,
                   width: (pctBarra * 100) + '%',
                   background: fillStyle,
+                  boxShadow: esTop ? 'inset 0 0 0 1px rgba(255,255,255,0.4)' : 'none',
                   transition: 'width 0.4s ease',
                 }} />
               </div>
