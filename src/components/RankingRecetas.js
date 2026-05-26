@@ -119,10 +119,37 @@ export default function RankingRecetas({ ventas = [], costoPorReceta = {} }) {
     </button>
   )
 
+  // ── Para la barra de magnitud: máximo de la columna ordenada ──
+  // Si la columna activa es "margen" usamos escala 0-100% (absoluta).
+  // Si es "nombre" o "dias", no tiene sentido visualizar magnitud → ocultamos barra.
+  const colActiva = orden
+  const usaEscalaAbsoluta = colActiva === 'margen'
+  const valorPara = (r) => {
+    if (colActiva === 'velocidad') return r.velocidad
+    if (colActiva === 'ganancia') return r.ganancia
+    if (colActiva === 'margen') return r.margen
+    if (colActiva === 'dias') return r.dias
+    return r.litros // default
+  }
+  const muestraBarra = colActiva !== 'nombre' && colActiva !== 'dias'
+  const maxValor = usaEscalaAbsoluta
+    ? 1
+    : Math.max(...ordenadas.map(r => Math.max(0, valorPara(r))), 0.0001)
+
+  // Color de la barra según columna activa
+  const colorBase = (r) => {
+    if (colActiva === 'ganancia') return r.ganancia >= 0 ? 'var(--green)' : 'var(--pink)'
+    if (colActiva === 'velocidad') return 'var(--cyan)'
+    if (colActiva === 'margen') {
+      return r.margen >= 0.65 ? 'var(--green)' : r.margen >= 0.50 ? 'var(--cyan)' : 'var(--pink)'
+    }
+    return 'var(--cyan)' // litros default
+  }
+
   return (
     <div>
       <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.6 }}>
-        Toca una columna para ordenar. Las recetas con menos de {UMBRAL_NUEVA_DIAS} días en carta llevan el badge 🆕 — no compares sus volúmenes absolutos con las antiguas.
+        Toca una columna para ordenar. La barra muestra la magnitud de la columna activa. Las recetas con menos de {UMBRAL_NUEVA_DIAS} días en carta llevan el badge 🆕 — la columna <strong style={{ color: 'var(--cyan)' }}>u/sem</strong> las compara justamente.
       </div>
 
       {/* Header de columnas */}
@@ -142,56 +169,89 @@ export default function RankingRecetas({ ventas = [], costoPorReceta = {} }) {
         <TH campo="margen" label="Margen" alignRight />
       </div>
 
-      {/* Filas */}
+      {/* Filas con barra de magnitud */}
       {ordenadas.map((r, i) => {
         const colorMargen = r.margen >= 0.65 ? 'var(--green)'
                           : r.margen >= 0.50 ? 'var(--cyan)'
                           : 'var(--pink)'
+        const valor = valorPara(r)
+        const pctBarra = muestraBarra
+          ? Math.max(0, Math.min(1, valor / maxValor))
+          : 0
+        const cBarra = colorBase(r)
+        // Top #1 con gradiente para destacar
+        const fillStyle = i === 0
+          ? `linear-gradient(90deg, ${cBarra}, ${cBarra}cc)`
+          : cBarra
         return (
           <div key={r.nombre} style={{
-            display: 'grid',
-            gridTemplateColumns: '24px 1.6fr 0.9fr 0.9fr 1fr 0.7fr',
-            gap: 6, alignItems: 'center',
-            padding: '8px 0',
+            padding: '10px 0',
             borderBottom: i < ordenadas.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
-            fontSize: 12,
           }}>
-            <span style={{
-              width: 20, height: 20, borderRadius: '50%',
-              background: i === 0 ? 'var(--cyan)' : 'rgba(255,255,255,0.06)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 10, fontWeight: 700, color: i === 0 ? '#000' : 'var(--muted)',
-              flexShrink: 0,
-            }}>{i + 1}</span>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: '24px 1.6fr 0.9fr 0.9fr 1fr 0.7fr',
+              gap: 6, alignItems: 'center', fontSize: 12, marginBottom: muestraBarra ? 5 : 0,
+            }}>
+              <span style={{
+                width: 20, height: 20, borderRadius: '50%',
+                background: i === 0 ? cBarra : 'rgba(255,255,255,0.06)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 10, fontWeight: 700, color: i === 0 ? '#000' : 'var(--muted)',
+                flexShrink: 0,
+              }}>{i + 1}</span>
 
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {r.nombre}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {r.nombre}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--muted)', display: 'flex', gap: 4, alignItems: 'center', marginTop: 1 }}>
+                  {r.esNueva && (
+                    <span style={{
+                      fontSize: 9, padding: '1px 5px', borderRadius: 6,
+                      background: 'rgba(127,119,221,0.15)', color: '#AFA9EC',
+                      fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.3,
+                    }}>🆕 Nueva</span>
+                  )}
+                  <span>{r.dias}d</span>
+                </div>
               </div>
-              <div style={{ fontSize: 10, color: 'var(--muted)', display: 'flex', gap: 4, alignItems: 'center', marginTop: 1 }}>
-                {r.esNueva && (
-                  <span style={{
-                    fontSize: 9, padding: '1px 5px', borderRadius: 6,
-                    background: 'rgba(127,119,221,0.15)', color: '#AFA9EC',
-                    fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.3,
-                  }}>🆕 Nueva</span>
-                )}
-                <span>{r.dias}d en carta</span>
+
+              <div style={{ textAlign: 'right', fontWeight: colActiva === 'litros' ? 800 : 600,
+                color: colActiva === 'litros' ? 'var(--text-strong)' : 'var(--muted)' }}>
+                {r.litros % 1 === 0 ? r.litros : r.litros.toFixed(1)}L
+              </div>
+              <div style={{ textAlign: 'right',
+                color: colActiva === 'velocidad' ? 'var(--cyan)' : 'var(--muted)',
+                fontWeight: colActiva === 'velocidad' ? 800 : 600 }}>
+                {r.velocidad.toFixed(1)}
+              </div>
+              <div style={{ textAlign: 'right',
+                color: colActiva === 'ganancia' ? (r.ganancia >= 0 ? 'var(--green)' : 'var(--pink)') : 'var(--muted)',
+                fontWeight: colActiva === 'ganancia' ? 800 : 600 }}>
+                {formatCLP(r.ganancia)}
+              </div>
+              <div style={{ textAlign: 'right',
+                color: colActiva === 'margen' ? colorMargen : 'var(--muted)',
+                fontWeight: colActiva === 'margen' ? 800 : 600 }}>
+                {formatPct(r.margen)}
               </div>
             </div>
 
-            <div style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text)' }}>
-              {r.litros % 1 === 0 ? r.litros : r.litros.toFixed(1)}L
-            </div>
-            <div style={{ textAlign: 'right', color: 'var(--cyan)', fontWeight: 600 }}>
-              {r.velocidad.toFixed(1)}
-            </div>
-            <div style={{ textAlign: 'right', color: r.ganancia >= 0 ? 'var(--green)' : 'var(--pink)', fontWeight: 700 }}>
-              {formatCLP(r.ganancia)}
-            </div>
-            <div style={{ textAlign: 'right', color: colorMargen, fontWeight: 700 }}>
-              {formatPct(r.margen)}
-            </div>
+            {/* Barra de magnitud de la columna ordenada */}
+            {muestraBarra && (
+              <div style={{
+                background: 'rgba(255,255,255,0.05)', borderRadius: 3,
+                height: 5, overflow: 'hidden', marginLeft: 30,
+              }}>
+                <div style={{
+                  height: '100%', borderRadius: 3,
+                  width: (pctBarra * 100) + '%',
+                  background: fillStyle,
+                  transition: 'width 0.4s ease',
+                }} />
+              </div>
+            )}
           </div>
         )
       })}
