@@ -1,14 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
+import { ventanaCountdownMin } from '../lib/comandasTiming'
 
 // ─── Cronómetro consciente de hora objetivo ─────────────────────────────────
 // Si NO hay hora_objetivo → cuenta desde created_at (igual que antes).
 // Si HAY hora_objetivo:
 //   - Antes de hora_objetivo - 30min → estado 'futuro' (sin urgencia)
 //   - Desde hora_objetivo - 30min → countdown desde ese punto
-const VENTANA_PROGRAMADO_MIN = 30
-
-function useTiempoTranscurrido(createdAt, horaObjetivo) {
+function useTiempoTranscurrido(createdAt, horaObjetivo, ventanaMin = 30) {
   const [tick, setTick] = useState(0)
   useEffect(() => {
     const t = setInterval(() => setTick(x => x + 1), 1000)
@@ -17,7 +16,7 @@ function useTiempoTranscurrido(createdAt, horaObjetivo) {
 
   const ahora = Date.now()
   const objMs = horaObjetivo ? new Date(horaObjetivo).getTime() : null
-  const inicioCountdown = objMs != null ? objMs - VENTANA_PROGRAMADO_MIN * 60 * 1000 : null
+  const inicioCountdown = objMs != null ? objMs - ventanaMin * 60 * 1000 : null
 
   if (objMs != null && ahora < inicioCountdown) {
     const faltanSeg = Math.max(0, Math.floor((inicioCountdown - ahora) / 1000))
@@ -58,8 +57,16 @@ function colorUrgencia(minutos) {
 }
 
 // ─── Tarjeta de comanda ───────────────────────────────────────────────────────
-function TarjetaComanda({ comanda, onListo }) {
-  const t = useTiempoTranscurrido(comanda.created_at, comanda.hora_objetivo)
+function TarjetaComanda({ comanda, onListo, comandasConfig = {}, clientesPorNombre = {} }) {
+  // Resolver distancia: del cliente vinculado o del cliente_nombre
+  const cli = clientesPorNombre[(comanda.cliente_nombre || '').trim().toLowerCase()]
+  const distanciaKm = cli ? cli.distancia_km : null
+  const ventanaMin = ventanaCountdownMin({
+    config: comandasConfig,
+    tiempoDeliveryExplicito: comanda.tiempo_delivery_min,
+    distanciaKmCliente: distanciaKm,
+  })
+  const t = useTiempoTranscurrido(comanda.created_at, comanda.hora_objetivo, ventanaMin)
   const esFutura = t.estado === 'futuro'
   const urgencia = esFutura
     ? { bg: 'rgba(127,119,221,0.06)', border: 'rgba(127,119,221,0.35)', texto: '#AFA9EC', label: '⏰' }
@@ -191,17 +198,31 @@ function TarjetaComanda({ comanda, onListo }) {
 // ─── Página principal Comandas ────────────────────────────────────────────────
 export default function Comandas() {
   const [comandas, setComandas] = useState([])
+  const [comandasConfig, setComandasConfig] = useState({})
+  const [clientesPorNombre, setClientesPorNombre] = useState({})
   const [cargando, setCargando] = useState(true)
   const [ultimaActualizacion, setUltimaActualizacion] = useState(null)
   const audioRef = useRef(null)
 
   const cargarComandas = async () => {
-    const { data } = await supabase
-      .from('comandas')
-      .select('*')
-      .eq('estado', 'pendiente')
-      .order('created_at', { ascending: true })
+    const [{ data }, { data: cfg }, { data: cls }] = await Promise.all([
+      supabase.from('comandas').select('*').eq('estado', 'pendiente').order('created_at', { ascending: true }),
+      supabase.from('config').select('clave, valor').in('clave', ['comandas_prep_minutos','comandas_delivery_min_por_km','comandas_delivery_buffer_min']),
+      supabase.from('clientes').select('nombre, distancia_km'),
+    ])
     setComandas(data || [])
+    const cfgMap = {}
+    ;(cfg || []).forEach(c => {
+      if (c.clave === 'comandas_prep_minutos') cfgMap.prep_minutos = parseFloat(c.valor)
+      if (c.clave === 'comandas_delivery_min_por_km') cfgMap.delivery_min_por_km = parseFloat(c.valor)
+      if (c.clave === 'comandas_delivery_buffer_min') cfgMap.delivery_buffer_min = parseFloat(c.valor)
+    })
+    setComandasConfig(cfgMap)
+    const cMap = {}
+    ;(cls || []).forEach(c => {
+      if (c.nombre) cMap[c.nombre.trim().toLowerCase()] = c
+    })
+    setClientesPorNombre(cMap)
     setCargando(false)
     setUltimaActualizacion(new Date())
   }
@@ -329,22 +350,29 @@ export default function Comandas() {
           alignItems: 'start'
         }}>
           {(() => {
-            // Separar activas vs futuras según ventana de 30min
+            // Separar activas vs futuras según ventana variable (prep + delivery)
             const ahora = Date.now()
-            const VENT = 30 * 60 * 1000
+            const ventanaDe = (c) => {
+              const cli = clientesPorNombre[(c.cliente_nombre || '').trim().toLowerCase()]
+              return ventanaCountdownMin({
+                config: comandasConfig,
+                tiempoDeliveryExplicito: c.tiempo_delivery_min,
+                distanciaKmCliente: cli ? cli.distancia_km : null,
+              })
+            }
             const activas = []
             const futuras = []
             ;(comandas || []).forEach(c => {
               const objMs = c.hora_objetivo ? new Date(c.hora_objetivo).getTime() : null
-              if (objMs != null && ahora < (objMs - VENT)) futuras.push(c)
+              const ventanaMs = ventanaDe(c) * 60 * 1000
+              if (objMs != null && ahora < (objMs - ventanaMs)) futuras.push(c)
               else activas.push(c)
             })
-            // Activas: ordenar por antigüedad (created_at ascendente)
             activas.sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
-            // Futuras: ordenar por hora objetivo ascendente (la más próxima primero)
             futuras.sort((a, b) => new Date(a.hora_objetivo) - new Date(b.hora_objetivo))
             return [...activas, ...futuras].map(c => (
-              <TarjetaComanda key={c.id} comanda={c} onListo={marcarListo} />
+              <TarjetaComanda key={c.id} comanda={c} onListo={marcarListo}
+                comandasConfig={comandasConfig} clientesPorNombre={clientesPorNombre} />
             ))
           })()}
         </div>

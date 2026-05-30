@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
+import { estimarTiempoDelivery, ventanaCountdownMin } from '../lib/comandasTiming'
 
 // ─── Normalización y similitud ───────────────────────────────────────────────
 function norm(str = '') {
@@ -235,11 +236,15 @@ export default function ImportarPedido() {
   const [parsed, setParsed] = useState(null)
   const [clienteInfo, setClienteInfo] = useState(null)
   const [editItems, setEditItems] = useState([])
-  const [editCliente, setEditCliente] = useState({ nombre:'', telefono:'', direccion:'', id:null })
+  const [editCliente, setEditCliente] = useState({ nombre:'', telefono:'', direccion:'', distancia_km:null, id:null })
   const [clienteOp, setClienteOp] = useState('vinculado')
   const [nota, setNota] = useState('')
   // null = "para ahora"; string "HH:MM" = pedido programado para esa hora HOY
   const [horaObjetivo, setHoraObjetivo] = useState(null)
+  // tiempo de delivery en minutos. '' = no escrito todavía (se sugiere desde cliente)
+  const [tiempoDelivery, setTiempoDelivery] = useState('')
+  // config global cargada de Supabase (prep, delivery por km, buffer)
+  const [comandasConfig, setComandasConfig] = useState({})
   const [guardando, setGuardando] = useState(false)
   const textareaRef = useRef(null)
 
@@ -250,6 +255,21 @@ export default function ImportarPedido() {
 
   useEffect(() => {
     if (paso === 'pegar' && textareaRef.current) textareaRef.current.focus()
+    // Cargar config de timing solo la primera vez
+    if (Object.keys(comandasConfig).length === 0) {
+      supabase.from('config').select('clave, valor')
+        .in('clave', ['comandas_prep_minutos','comandas_delivery_min_por_km','comandas_delivery_buffer_min'])
+        .then(({ data }) => {
+          if (!data) return
+          const m = {}
+          data.forEach(c => {
+            if (c.clave === 'comandas_prep_minutos') m.prep_minutos = parseFloat(c.valor)
+            if (c.clave === 'comandas_delivery_min_por_km') m.delivery_min_por_km = parseFloat(c.valor)
+            if (c.clave === 'comandas_delivery_buffer_min') m.delivery_buffer_min = parseFloat(c.valor)
+          })
+          setComandasConfig(m)
+        })
+    }
   }, [paso])
 
   const handleParsear = async () => {
@@ -261,13 +281,13 @@ export default function ImportarPedido() {
     setClienteInfo(info)
     if (info.tipo === 'exacto') {
       setClienteOp('vinculado')
-      setEditCliente({ nombre: info.cliente.nombre||'', telefono: info.cliente.telefono||'', direccion: resultado.direccion||info.cliente.direccion||'', id: info.cliente.id })
+      setEditCliente({ nombre: info.cliente.nombre||'', telefono: info.cliente.telefono||'', direccion: resultado.direccion||info.cliente.direccion||'', distancia_km: info.cliente.distancia_km||null, id: info.cliente.id })
     } else if (info.tipo === 'probable') {
       setClienteOp('vinculado')
-      setEditCliente({ nombre: info.sugerencia.nombre||nombreChat||'', telefono: resultado.telefono||info.sugerencia.telefono||'', direccion: resultado.direccion||info.sugerencia.direccion||'', id: info.sugerencia.id })
+      setEditCliente({ nombre: info.sugerencia.nombre||nombreChat||'', telefono: resultado.telefono||info.sugerencia.telefono||'', direccion: resultado.direccion||info.sugerencia.direccion||'', distancia_km: info.sugerencia.distancia_km||null, id: info.sugerencia.id })
     } else {
       setClienteOp('nuevo')
-      setEditCliente({ nombre: nombreChat||'', telefono: resultado.telefono||'', direccion: resultado.direccion||'', id: null })
+      setEditCliente({ nombre: nombreChat||'', telefono: resultado.telefono||'', direccion: resultado.direccion||'', distancia_km: null, id: null })
     }
     setPaso('revision')
   }
@@ -315,6 +335,7 @@ export default function ImportarPedido() {
         estado: 'pendiente',
         origen_texto: textoChat,
         hora_objetivo: horaObjISO,
+        tiempo_delivery_min: tiempoDelivery !== '' ? (parseInt(tiempoDelivery) || 0) : null,
       })
       setPaso('listo')
     } catch (e) {
@@ -326,7 +347,7 @@ export default function ImportarPedido() {
 
   const handleNuevo = () => {
     setTextoChat(''); setNombreChat(''); setParsed(null); setClienteInfo(null)
-    setEditItems([]); setEditCliente({ nombre:'', telefono:'', direccion:'', id:null }); setNota(''); setHoraObjetivo(null); setPaso('pegar')
+    setEditItems([]); setEditCliente({ nombre:'', telefono:'', direccion:'', distancia_km:null, id:null }); setNota(''); setHoraObjetivo(null); setTiempoDelivery(''); setPaso('pegar')
   }
 
   const sty = {
@@ -377,7 +398,7 @@ export default function ImportarPedido() {
             <div style={{ marginBottom:10 }}>
               <span style={sty.label}>Es este cliente?</span>
               {[clienteInfo.sugerencia,...(clienteInfo.alternativas||[])].map(c => (
-                <button key={c.id} onClick={() => setEditCliente({ nombre:c.nombre, telefono:c.telefono||'', direccion:parsed.direccion||c.direccion||'', id:c.id })}
+                <button key={c.id} onClick={() => setEditCliente({ nombre:c.nombre, telefono:c.telefono||'', direccion:parsed.direccion||c.direccion||'', distancia_km:c.distancia_km||null, id:c.id })}
                   style={{ display:'flex', alignItems:'center', justifyContent:'space-between', width:'100%', background:editCliente.id===c.id?'rgba(0,180,180,0.1)':'rgba(255,255,255,0.04)', border:`1px solid ${editCliente.id===c.id?'rgba(0,180,180,0.4)':'var(--border)'}`, borderRadius:8, padding:'8px 12px', marginBottom:6, cursor:'pointer', textAlign:'left' }}>
                   <div>
                     <div style={{ fontSize:13, fontWeight:700, color:'var(--text-strong)' }}>{c.nombre}</div>
@@ -389,7 +410,7 @@ export default function ImportarPedido() {
             </div>
           )}
           {clienteInfo?.tipo === 'nuevo' && clienteOp === 'vinculado' && (
-            <BuscadorCliente todos={clienteInfo.todos} onSelect={c => setEditCliente({ nombre:c.nombre, telefono:c.telefono||'', direccion:parsed.direccion||c.direccion||'', id:c.id })} seleccionado={editCliente.id} />
+            <BuscadorCliente todos={clienteInfo.todos} onSelect={c => setEditCliente({ nombre:c.nombre, telefono:c.telefono||'', direccion:parsed.direccion||c.direccion||'', distancia_km:c.distancia_km||null, id:c.id })} seleccionado={editCliente.id} />
           )}
           <span style={sty.label}>Nombre</span>
           <input style={{ ...sty.input, marginBottom:8 }} value={editCliente.nombre} onChange={e => setEditCliente(c=>({...c,nombre:e.target.value}))} placeholder="Nombre del cliente" />
@@ -475,16 +496,59 @@ export default function ImportarPedido() {
             ⏰ Programado
           </button>
         </div>
-        {horaObjetivo !== null && (
-          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-            <input type="time" value={horaObjetivo}
-              onChange={e => setHoraObjetivo(e.target.value)}
-              style={{ ...sty.input, fontSize:15, fontWeight:700, flex:1 }} />
-            <span style={{ fontSize:11, color:'var(--muted)', flex:'0 0 auto', lineHeight:1.4 }}>
-              countdown<br/>arranca 30min<br/>antes
-            </span>
-          </div>
-        )}
+        {horaObjetivo !== null && (() => {
+          // Tiempo de delivery sugerido (auto desde distancia o manual)
+          const tiempoSugerido = estimarTiempoDelivery({
+            tiempoExplicito: tiempoDelivery,
+            distanciaKm: editCliente.distancia_km,
+            config: comandasConfig,
+          })
+          const ventana = ventanaCountdownMin({
+            config: comandasConfig,
+            tiempoDeliveryExplicito: tiempoDelivery,
+            distanciaKmCliente: editCliente.distancia_km,
+          })
+          // calcular "preparar desde HH:MM"
+          let prepDesdeTxt = ''
+          if (horaObjetivo) {
+            const [hh, mm] = horaObjetivo.split(':').map(Number)
+            const obj = new Date()
+            obj.setHours(hh, mm, 0, 0)
+            const inicio = new Date(obj.getTime() - ventana * 60 * 1000)
+            prepDesdeTxt = String(inicio.getHours()).padStart(2,'0') + ':' + String(inicio.getMinutes()).padStart(2,'0')
+          }
+          const usaDistancia = (tiempoDelivery === '' || tiempoDelivery == null) && editCliente.distancia_km
+          return (
+            <>
+              <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10 }}>
+                <input type="time" value={horaObjetivo}
+                  onChange={e => setHoraObjetivo(e.target.value)}
+                  style={{ ...sty.input, fontSize:15, fontWeight:700, flex:1 }} />
+                <span style={{ fontSize:11, color:'var(--muted)', flex:'0 0 auto', lineHeight:1.4 }}>
+                  hora de<br/>entrega
+                </span>
+              </div>
+              <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10 }}>
+                <input type="number" min="0" value={tiempoDelivery}
+                  placeholder={usaDistancia ? String(tiempoSugerido) : '0'}
+                  onChange={e => setTiempoDelivery(e.target.value)}
+                  style={{ ...sty.input, fontSize:15, fontWeight:700, flex:1 }} />
+                <span style={{ fontSize:11, color:'var(--muted)', flex:'0 0 auto', lineHeight:1.4 }}>
+                  minutos de<br/>delivery{usaDistancia ? <><br/><span style={{ color:'var(--cyan)' }}>auto: {tiempoSugerido}</span></> : ''}
+                </span>
+              </div>
+              <div style={{
+                background:'rgba(127,119,221,0.10)', border:'1px solid rgba(127,119,221,0.35)',
+                borderRadius:10, padding:'8px 12px', fontSize:12, color:'#AFA9EC', lineHeight:1.6,
+              }}>
+                ⏰ Preparar desde <strong>{prepDesdeTxt}</strong>
+                <div style={{ fontSize:10, color:'var(--muted)', marginTop:2 }}>
+                  ventana = {comandasConfig.prep_minutos || 30}min prep + {tiempoSugerido}min delivery = {ventana}min antes
+                </div>
+              </div>
+            </>
+          )
+        })()}
       </div>
 
       {/* NOTA */}
