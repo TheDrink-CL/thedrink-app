@@ -103,6 +103,17 @@ function TarjetaComanda({ comanda, onListo, comandasConfig = {}, clientesPorNomb
               📍 {comanda.cliente_direccion}
             </div>
           )}
+          {comanda.venta_orden_id && (
+            <div style={{
+              display: 'inline-block', marginTop: 6,
+              fontSize: 'clamp(9px, 1vw, 12px)', fontWeight: 700,
+              color: '#48c78e', background: 'rgba(72,199,142,0.15)',
+              borderRadius: 6, padding: '2px 8px',
+              textTransform: 'uppercase', letterSpacing: 0.5,
+            }}>
+              ✓ Registrada
+            </div>
+          )}
         </div>
 
         {/* Cronómetro */}

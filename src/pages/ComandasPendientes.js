@@ -100,8 +100,15 @@ function ModalVenta({ comanda, recetas, onGuardar, onCerrar }) {
         orden_id: orden.id,
       })))
 
-      // Archivar la comanda
-      await supabase.from('comandas').update({ estado: 'archivado' }).eq('id', comanda.id)
+      // Vincular la comanda con la venta creada. NO archivamos automáticamente:
+      // si la comanda estaba "pendiente" sigue ahí (la TV la sigue mostrando con
+      // cronómetro hasta que el cocinero toque ✓ LISTO). Si estaba "listo" o ya
+      // tenía venta vinculada, sí la archivamos.
+      const update = { venta_orden_id: orden.id }
+      if (comanda.estado === 'listo' || comanda.venta_orden_id) {
+        update.estado = 'archivado'
+      }
+      await supabase.from('comandas').update(update).eq('id', comanda.id)
       onGuardar()
     } catch(e) {
       alert('Error: ' + e.message)
