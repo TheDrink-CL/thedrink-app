@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { calcularCostoReceta, formatCLP, formatPct } from '../lib/calculos'
 import { calcularRentabilidad } from '../lib/rentabilidad'
 import CaminoAlBar from './CaminoAlBar'
+import SaludNegocio from './SaludNegocio'
 import RankingRecetas from '../components/RankingRecetas'
 
 function RecetasComparativo({ topVolumen, topGanancia, todasVentas, costoPorReceta }) {
@@ -570,6 +571,8 @@ export default function Dashboard() {
       <div className="page-title">The Drink</div>
 
       <CaminoAlBar />
+
+      <SaludNegocio />
 
       {bannerCtx && (
         <div style={{ background: bannerCtx.color, border: `1px solid ${bannerCtx.borde}`, borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: bannerCtx.txt, lineHeight: 1.6, fontWeight: 600 }}>
