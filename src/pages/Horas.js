@@ -421,6 +421,7 @@ export default function Horas() {
   const [roles, setRoles] = useState([])
   const [atajos, setAtajos] = useState([])
   const [ingresoTotal, setIngresoTotal] = useState(0)
+  const [fechaInicioCalculo, setFechaInicioCalculo] = useState(null)
   const [ventasData, setVentasData] = useState([])
   const [ordenesData, setOrdenesData] = useState([])
   const [loading, setLoading] = useState(true)
@@ -446,7 +447,14 @@ export default function Horas() {
     setPersonas(pers || [])
     setRoles(rs || [])
     setAtajos(ats || [])
-    setIngresoTotal((vts || []).reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0))
+    // Para que el "ingreso por hora" no quede inflado: usar solo ingresos
+    // desde la fecha del primer bloque registrado. Si no hay bloques, queda 0.
+    const fechaMinBloque = (hrs || []).reduce((min, b) => (!min || b.fecha < min) ? b.fecha : min, null)
+    const vtsRelevantes = fechaMinBloque
+      ? (vts || []).filter(v => v.fecha && v.fecha >= fechaMinBloque)
+      : []
+    setIngresoTotal(vtsRelevantes.reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0))
+    setFechaInicioCalculo(fechaMinBloque)
     setVentasData(vts || [])
     setOrdenesData(ords || [])
 
@@ -763,6 +771,11 @@ export default function Horas() {
           <div style={{ fontSize:11, color:'var(--muted)', lineHeight:1.7 }}>
             Tu hora promedio en The Drink genera <strong style={{ color:'var(--text)' }}>{formatCLP(ingresoPorHora)}</strong> de ingreso bruto vs tu tarifa ponderada de <strong style={{ color:'#AFA9EC' }}>{formatCLP(costoOportTotal/totalHoras)}</strong>/h.
             {ingresoPorHora >= (costoOportTotal/totalHoras) ? ' El negocio paga su tiempo ✓' : ' Aún están trabajando bajo tarifa.'}
+            {fechaInicioCalculo && (
+              <div style={{ fontSize:10, color:'var(--muted)', marginTop:6, fontStyle:'italic' }}>
+                ⓘ Cálculo basado en ingresos desde {labelFecha(fechaInicioCalculo)} (primer bloque registrado). Los ingresos anteriores no se incluyen porque no tienen horas asociadas.
+              </div>
+            )}
           </div>
         </div>
       )}
