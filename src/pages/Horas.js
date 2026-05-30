@@ -207,8 +207,24 @@ function ConfigModal({ personas, roles, onSave, onCancel }) {
 
   const handleSave = async () => {
     setSaving(true)
+    // IDs originales que ya no están en persEdit → desactivar (no borrar, mantiene historial)
+    const idsActuales = new Set(persEdit.filter(p => p.id).map(p => p.id))
+    const aDesactivar = personas.filter(p => !idsActuales.has(p.id))
+    // Personas nuevas (sin id) → insertar
+    const aInsertar = persEdit.filter(p => !p.id && p.nombre.trim())
+    // Personas existentes → actualizar nombre
+    const aActualizar = persEdit.filter(p => p.id)
+
     await Promise.all([
-      ...persEdit.map(p => supabase.from('personas').update({ nombre: p.nombre }).eq('id', p.id)),
+      ...aActualizar.map(p => supabase.from('personas').update({ nombre: p.nombre }).eq('id', p.id)),
+      ...aDesactivar.map(p => supabase.from('personas').update({ activa: false }).eq('id', p.id)),
+      ...(aInsertar.length > 0
+        ? [supabase.from('personas').insert(aInsertar.map((p, idx) => ({
+            nombre: p.nombre.trim(),
+            activa: true,
+            orden: personas.length + idx + 1,
+          })))]
+        : []),
       ...rolesEdit.map(r => supabase.from('roles').update({ tarifa_hora: parseFloat(r.tarifa_hora) || 0 }).eq('id', r.id)),
     ])
     setSaving(false)
@@ -222,16 +238,33 @@ function ConfigModal({ personas, roles, onSave, onCancel }) {
           Personas y tarifas
         </div>
         <div style={{ fontSize:12, color:'var(--muted)', marginBottom:18 }}>
-          Edita nombres del equipo y las tarifas por rol. Los cambios aplican a partir de ahora.
+          Agrega, edita o quita miembros del equipo. Quitar a alguien lo desactiva (su historial se conserva). Las tarifas por rol son globales.
         </div>
 
         <div style={{ fontSize:11, color:'var(--cyan)', textTransform:'uppercase', letterSpacing:1, fontWeight:700, marginBottom:8 }}>Personas</div>
         {persEdit.map((p, i) => (
-          <div key={p.id} className="form-group" style={{ marginBottom:8 }}>
+          <div key={p.id || `nueva_${i}`} className="form-group" style={{ marginBottom:8, display:'flex', gap:8, alignItems:'center' }}>
             <input type="text" className="form-input" value={p.nombre}
+              placeholder={!p.id ? 'Nombre de la persona' : ''}
+              style={{ flex:1 }}
               onChange={e => setPersEdit(prev => prev.map((x, idx) => idx === i ? { ...x, nombre: e.target.value } : x))} />
+            {persEdit.length > 1 && (
+              <button type="button"
+                onClick={() => setPersEdit(prev => prev.filter((_, idx) => idx !== i))}
+                style={{ background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:18, padding:'0 6px', lineHeight:1 }}
+                title="Quitar persona">×</button>
+            )}
           </div>
         ))}
+        <button type="button"
+          onClick={() => setPersEdit(prev => [...prev, { nombre: '', id: null }])}
+          style={{
+            width:'100%', background:'rgba(0,180,180,0.06)', border:'1px dashed var(--cyan-dim)',
+            borderRadius:10, padding:'8px 0', color:'var(--cyan)', cursor:'pointer',
+            fontSize:13, marginTop:4,
+          }}>
+          + Agregar persona
+        </button>
 
         <div style={{ fontSize:11, color:'var(--cyan)', textTransform:'uppercase', letterSpacing:1, fontWeight:700, marginTop:16, marginBottom:8 }}>Tarifa por rol ($/hora)</div>
         {rolesEdit.map((r, i) => (
