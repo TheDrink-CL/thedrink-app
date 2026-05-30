@@ -363,6 +363,8 @@ export default function Horas() {
   const [roles, setRoles] = useState([])
   const [atajos, setAtajos] = useState([])
   const [ingresoTotal, setIngresoTotal] = useState(0)
+  const [ventasData, setVentasData] = useState([])
+  const [ordenesData, setOrdenesData] = useState([])
   const [loading, setLoading] = useState(true)
   const [modal, setModal] = useState(null)           // null | 'nuevo' | bloque
   const [prefillModal, setPrefillModal] = useState(null) // atajo seleccionado
@@ -374,18 +376,21 @@ export default function Horas() {
   useEffect(() => { load() }, [])
 
   async function load() {
-    const [{ data: hrs }, { data: pers }, { data: rs }, { data: ats }, { data: vts }] = await Promise.all([
+    const [{ data: hrs }, { data: pers }, { data: rs }, { data: ats }, { data: vts }, { data: ords }] = await Promise.all([
       supabase.from('horas_trabajadas').select('*').order('fecha', { ascending: false }).order('hora_inicio', { ascending: false }),
       supabase.from('personas').select('*').eq('activa', true).order('orden'),
       supabase.from('roles').select('*').eq('activo', true).order('orden'),
       supabase.from('atajos_horas').select('*').order('orden').order('id'),
-      supabase.from('ventas').select('litros, precio_venta, delivery'),
+      supabase.from('ventas').select('fecha, litros, precio_venta, delivery, orden_id'),
+      supabase.from('ordenes').select('id, fecha, hora'),
     ])
     setBloques(hrs || [])
     setPersonas(pers || [])
     setRoles(rs || [])
     setAtajos(ats || [])
     setIngresoTotal((vts || []).reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0))
+    setVentasData(vts || [])
+    setOrdenesData(ords || [])
 
     // Sincronizar config.horas_trabajadas_total y costo_hora_operador para
     // que el Dashboard calcule margen neto sin re-hacer toda la lógica.
@@ -454,11 +459,50 @@ export default function Horas() {
   const ingresoPorHora = totalHoras > 0 ? ingresoTotal / totalHoras : 0
 
   // Por persona
+  // Construir índice de pedidos por (fecha, hora) para cruzar con bloques.
+  // Cada bloque cuenta TODOS los pedidos que cayeron dentro de su ventana (no se divide).
+  function pedidosDeBloque(b) {
+    if (!b.fecha || !b.hora_inicio || !b.hora_fin) return []
+    const ini = hhmmToMin(b.hora_inicio)
+    const fin = hhmmToMin(b.hora_fin)
+    return ordenesData.filter(o => {
+      if (o.fecha !== b.fecha) return false
+      if (!o.hora) return false
+      const m = hhmmToMin(o.hora)
+      return m >= ini && m <= fin
+    })
+  }
+  // Para cada orden traigo su monto total desde las ventas asociadas
+  const ventasPorOrden = {}
+  ventasData.forEach(v => {
+    if (!v.orden_id) return
+    if (!ventasPorOrden[v.orden_id]) ventasPorOrden[v.orden_id] = 0
+    ventasPorOrden[v.orden_id] += (v.litros || 1) * (v.precio_venta || 0) - (v.delivery || 0)
+  })
+
   const porPersona = personas.map(p => {
     const bs = bloques.filter(b => b.persona_id === p.id)
     const horas = bs.reduce((s, b) => s + horasBloque(b), 0)
     const costo = bs.reduce((s, b) => s + costoBloque(b), 0)
-    return { ...p, horas, costo }
+    // Pedidos atribuidos: todos los que cayeron en sus bloques
+    const pedidosUnicos = new Set()
+    let ingresosTurnos = 0
+    bs.forEach(b => {
+      const peds = pedidosDeBloque(b)
+      peds.forEach(o => {
+        if (!pedidosUnicos.has(o.id)) {
+          pedidosUnicos.add(o.id)
+          ingresosTurnos += ventasPorOrden[o.id] || 0
+        }
+      })
+    })
+    const ingresoPorHora = horas > 0 ? ingresosTurnos / horas : 0
+    return {
+      ...p, horas, costo,
+      pedidosTurnos: pedidosUnicos.size,
+      ingresosTurnos,
+      ingresoPorHora,
+    }
   })
 
   // Por rol (ultimos 30 dias para mostrar mix actual)
@@ -671,17 +715,37 @@ export default function Horas() {
         {porPersona.map(p => {
           const pct = totalHoras > 0 ? p.horas / totalHoras : 0
           return (
-            <div key={p.id} style={{ marginBottom:12 }}>
+            <div key={p.id} style={{ marginBottom:16 }}>
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
                 <span style={{ fontSize:13, fontWeight:700, color:'var(--text-strong)' }}>{p.nombre}</span>
                 <div style={{ textAlign:'right' }}>
                   <span style={{ fontSize:14, fontWeight:700, color:'var(--cyan)' }}>{p.horas.toFixed(1)}h</span>
-                  <span style={{ fontSize:11, color:'var(--muted)', marginLeft:6 }}>· {formatCLP(p.costo)}</span>
+                  {p.costo > 0 && <span style={{ fontSize:11, color:'var(--muted)', marginLeft:6 }}>· {formatCLP(p.costo)}</span>}
                 </div>
               </div>
-              <div style={{ background:'rgba(255,255,255,0.06)', borderRadius:4, height:5, overflow:'hidden' }}>
+              <div style={{ background:'rgba(255,255,255,0.06)', borderRadius:4, height:5, overflow:'hidden', marginBottom:6 }}>
                 <div style={{ height:'100%', background:'var(--cyan)', width:(pct*100)+'%', borderRadius:4 }} />
               </div>
+              {/* Productividad: pedidos en sus turnos + ingreso/h */}
+              {p.horas > 0 && (
+                <div style={{
+                  display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6,
+                  background:'rgba(255,255,255,0.03)', borderRadius:8, padding:'7px 10px',
+                }}>
+                  <div>
+                    <div style={{ fontSize:9, color:'var(--muted)', textTransform:'uppercase', letterSpacing:0.4 }}>Pedidos</div>
+                    <div style={{ fontSize:13, fontWeight:700, color:'var(--text)' }}>{p.pedidosTurnos}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:9, color:'var(--muted)', textTransform:'uppercase', letterSpacing:0.4 }}>Ingreso turno</div>
+                    <div style={{ fontSize:13, fontWeight:700, color:'var(--green)' }}>{formatCLP(p.ingresosTurnos)}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:9, color:'var(--muted)', textTransform:'uppercase', letterSpacing:0.4 }}>$/hora</div>
+                    <div style={{ fontSize:13, fontWeight:700, color:'var(--cyan)' }}>{formatCLP(p.ingresoPorHora)}</div>
+                  </div>
+                </div>
+              )}
             </div>
           )
         })}
