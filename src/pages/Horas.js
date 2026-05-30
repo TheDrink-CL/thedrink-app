@@ -115,7 +115,12 @@ function BloqueModal({ bloque, personas, roles, prefill, onSave, onCancel }) {
   const horas = horaInicio && horaFin ? horasTotalCruce(horaInicio, horaFin) : 0
   const cruza = cruzaMedianoche(horaInicio, horaFin)
   const rolSeleccionado = roles.find(r => r.id === rolId)
-  const costoEstimado = horas * (rolSeleccionado?.tarifa_hora || 0)
+  const personaSeleccionada = personas.find(p => p.id === personaId)
+  // Tarifa: persona primero, rol como fallback
+  const tarifaUsada = (personaSeleccionada?.tarifa_hora != null && !isNaN(parseFloat(personaSeleccionada.tarifa_hora)))
+    ? parseFloat(personaSeleccionada.tarifa_hora)
+    : (rolSeleccionado?.tarifa_hora || 0)
+  const costoEstimado = horas * tarifaUsada
 
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.8)', display:'flex', alignItems:'flex-start', justifyContent:'center', zIndex:300, padding:24, overflowY:'auto' }}>
@@ -169,7 +174,7 @@ function BloqueModal({ bloque, personas, roles, prefill, onSave, onCancel }) {
           <div style={{ textAlign:'center', marginBottom:14 }}>
             <div style={{ fontSize:12, color:'var(--cyan)' }}>
               = {horas.toFixed(1)} horas
-              {rolSeleccionado?.tarifa_hora > 0 && ` · costo oportunidad ${formatCLP(costoEstimado)}`}
+              {tarifaUsada > 0 && ` · costo oportunidad ${formatCLP(costoEstimado)}`}
             </div>
             {cruza && (
               <div style={{ fontSize:11, color:'#f59e0b', marginTop:4, lineHeight:1.5 }}>
@@ -215,14 +220,24 @@ function ConfigModal({ personas, roles, onSave, onCancel }) {
     // Personas existentes → actualizar nombre
     const aActualizar = persEdit.filter(p => p.id)
 
+    // Helper: parsea tarifa o devuelve null si está vacía (cae al fallback del rol)
+    const parseTarifa = (v) => {
+      if (v === '' || v == null) return null
+      const n = parseFloat(v)
+      return isNaN(n) ? null : n
+    }
     await Promise.all([
-      ...aActualizar.map(p => supabase.from('personas').update({ nombre: p.nombre }).eq('id', p.id)),
+      ...aActualizar.map(p => supabase.from('personas').update({
+        nombre: p.nombre,
+        tarifa_hora: parseTarifa(p.tarifa_hora),
+      }).eq('id', p.id)),
       ...aDesactivar.map(p => supabase.from('personas').update({ activa: false }).eq('id', p.id)),
       ...(aInsertar.length > 0
         ? [supabase.from('personas').insert(aInsertar.map((p, idx) => ({
             nombre: p.nombre.trim(),
             activa: true,
             orden: personas.length + idx + 1,
+            tarifa_hora: parseTarifa(p.tarifa_hora),
           })))]
         : []),
       ...rolesEdit.map(r => supabase.from('roles').update({ tarifa_hora: parseFloat(r.tarifa_hora) || 0 }).eq('id', r.id)),
@@ -238,22 +253,31 @@ function ConfigModal({ personas, roles, onSave, onCancel }) {
           Personas y tarifas
         </div>
         <div style={{ fontSize:12, color:'var(--muted)', marginBottom:18 }}>
-          Agrega, edita o quita miembros del equipo. Quitar a alguien lo desactiva (su historial se conserva). Las tarifas por rol son globales.
+          Agrega, edita o quita miembros del equipo. Si dejas la tarifa de una persona vacía, se usa la del rol. Si la pones distinta (ej. ayudante a $4.000/h), eso aplica a TODOS sus bloques.
         </div>
 
         <div style={{ fontSize:11, color:'var(--cyan)', textTransform:'uppercase', letterSpacing:1, fontWeight:700, marginBottom:8 }}>Personas</div>
         {persEdit.map((p, i) => (
-          <div key={p.id || `nueva_${i}`} className="form-group" style={{ marginBottom:8, display:'flex', gap:8, alignItems:'center' }}>
-            <input type="text" className="form-input" value={p.nombre}
-              placeholder={!p.id ? 'Nombre de la persona' : ''}
-              style={{ flex:1 }}
-              onChange={e => setPersEdit(prev => prev.map((x, idx) => idx === i ? { ...x, nombre: e.target.value } : x))} />
-            {persEdit.length > 1 && (
-              <button type="button"
-                onClick={() => setPersEdit(prev => prev.filter((_, idx) => idx !== i))}
-                style={{ background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:18, padding:'0 6px', lineHeight:1 }}
-                title="Quitar persona">×</button>
-            )}
+          <div key={p.id || `nueva_${i}`} style={{ marginBottom:10, padding:10, background:'rgba(255,255,255,0.03)', borderRadius:10 }}>
+            <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:6 }}>
+              <input type="text" className="form-input" value={p.nombre}
+                placeholder={!p.id ? 'Nombre de la persona' : ''}
+                style={{ flex:1, fontSize:13 }}
+                onChange={e => setPersEdit(prev => prev.map((x, idx) => idx === i ? { ...x, nombre: e.target.value } : x))} />
+              {persEdit.length > 1 && (
+                <button type="button"
+                  onClick={() => setPersEdit(prev => prev.filter((_, idx) => idx !== i))}
+                  style={{ background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:18, padding:'0 6px', lineHeight:1 }}
+                  title="Quitar persona">×</button>
+              )}
+            </div>
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <span style={{ fontSize:11, color:'var(--muted)', flex:'0 0 auto' }}>Tarifa $/h:</span>
+              <input type="number" className="form-input" value={p.tarifa_hora ?? ''}
+                placeholder="usa la del rol si dejas vacío"
+                style={{ flex:1, fontSize:12, padding:'6px 8px' }}
+                onChange={e => setPersEdit(prev => prev.map((x, idx) => idx === i ? { ...x, tarifa_hora: e.target.value } : x))} />
+            </div>
           </div>
         ))}
         <button type="button"
@@ -266,7 +290,8 @@ function ConfigModal({ personas, roles, onSave, onCancel }) {
           + Agregar persona
         </button>
 
-        <div style={{ fontSize:11, color:'var(--cyan)', textTransform:'uppercase', letterSpacing:1, fontWeight:700, marginTop:16, marginBottom:8 }}>Tarifa por rol ($/hora)</div>
+        <div style={{ fontSize:11, color:'var(--cyan)', textTransform:'uppercase', letterSpacing:1, fontWeight:700, marginTop:16, marginBottom:4 }}>Tarifa por rol ($/hora) — fallback</div>
+        <div style={{ fontSize:11, color:'var(--muted)', marginBottom:8, lineHeight:1.5 }}>Se usa solo cuando la persona del bloque no tiene tarifa propia configurada arriba.</div>
         {rolesEdit.map((r, i) => (
           <div key={r.id} style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
             <span style={{ fontSize:13, color: r.color || 'var(--text)', flex:1, fontWeight:600 }}>{r.nombre}</span>
@@ -483,7 +508,13 @@ export default function Horas() {
   const inicioSem = inicioSemanaISO()
   const inicioMes = inicioMesISO()
   const horasBloque = b => horasEntre(b.hora_inicio, b.hora_fin)
-  const costoBloque = b => horasBloque(b) * (rolPorId[b.rol_id]?.tarifa_hora || 0)
+  // Tarifa $/h: la propia de la persona si existe; si no, la del rol.
+  const tarifaDeBloque = b => {
+    const pTar = personaPorId[b.persona_id]?.tarifa_hora
+    if (pTar != null && pTar !== '' && !isNaN(parseFloat(pTar))) return parseFloat(pTar)
+    return rolPorId[b.rol_id]?.tarifa_hora || 0
+  }
+  const costoBloque = b => horasBloque(b) * tarifaDeBloque(b)
 
   const totalHoras = bloques.reduce((s, b) => s + horasBloque(b), 0)
   const horasSemana = bloques.filter(b => b.fecha >= inicioSem).reduce((s, b) => s + horasBloque(b), 0)
@@ -622,7 +653,7 @@ export default function Horas() {
                 rolPorId[b.rol_id]?.nombre || '',
                 b.hora_inicio, b.hora_fin,
                 horasBloque(b).toFixed(2),
-                rolPorId[b.rol_id]?.tarifa_hora || 0,
+                tarifaDeBloque(b),
                 Math.round(costoBloque(b)),
                 b.descripcion || '',
               ])
