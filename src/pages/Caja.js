@@ -20,7 +20,7 @@ function ConfirmModal({ mensaje, onConfirm, onCancel }) {
 }
 
 const CATEGORIAS_SALIDA = [
-  'Publicidad', 'Equipamiento', 'Suscripciones', 'Otro gasto'
+  'Publicidad', 'Personal', 'Equipamiento', 'Suscripciones', 'Otro gasto'
 ]
 const CATEGORIAS_ENTRADA = [
   'Venta', 'Delivery', 'Aporte socio', 'Otro ingreso'
