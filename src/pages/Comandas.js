@@ -1,26 +1,53 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 
-// ─── Cronómetro por comanda ───────────────────────────────────────────────────
-function useTiempoTranscurrido(createdAt) {
-  const [segundos, setSegundos] = useState(0)
+// ─── Cronómetro consciente de hora objetivo ─────────────────────────────────
+// Si NO hay hora_objetivo → cuenta desde created_at (igual que antes).
+// Si HAY hora_objetivo:
+//   - Antes de hora_objetivo - 30min → estado 'futuro' (sin urgencia)
+//   - Desde hora_objetivo - 30min → countdown desde ese punto
+const VENTANA_PROGRAMADO_MIN = 30
 
+function useTiempoTranscurrido(createdAt, horaObjetivo) {
+  const [tick, setTick] = useState(0)
   useEffect(() => {
-    const calc = () => {
-      const diff = Math.floor((Date.now() - new Date(createdAt).getTime()) / 1000)
-      setSegundos(Math.max(0, diff))
-    }
-    calc()
-    const t = setInterval(calc, 1000)
+    const t = setInterval(() => setTick(x => x + 1), 1000)
     return () => clearInterval(t)
-  }, [createdAt])
+  }, [])
 
+  const ahora = Date.now()
+  const objMs = horaObjetivo ? new Date(horaObjetivo).getTime() : null
+  const inicioCountdown = objMs != null ? objMs - VENTANA_PROGRAMADO_MIN * 60 * 1000 : null
+
+  if (objMs != null && ahora < inicioCountdown) {
+    const faltanSeg = Math.max(0, Math.floor((inicioCountdown - ahora) / 1000))
+    const horas = Math.floor(faltanSeg / 3600)
+    const mins = Math.floor((faltanSeg % 3600) / 60)
+    return {
+      estado: 'futuro',
+      texto: horas > 0 ? `${horas}h ${mins}m` : `${mins} min`,
+      minutos: 0,
+      horaObjetivoMs: objMs,
+      tick,
+    }
+  }
+
+  const referencia = objMs != null ? inicioCountdown : new Date(createdAt).getTime()
+  const segundos = Math.max(0, Math.floor((ahora - referencia) / 1000))
   const mm = Math.floor(segundos / 60)
   const ss = segundos % 60
   return {
+    estado: 'activa',
     texto: `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`,
-    minutos: mm
+    minutos: mm,
+    horaObjetivoMs: objMs,
+    tick,
   }
+}
+
+function formatHoraObjetivo(ms) {
+  const d = new Date(ms)
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
 }
 
 // ─── Colores por urgencia ─────────────────────────────────────────────────────
@@ -32,8 +59,11 @@ function colorUrgencia(minutos) {
 
 // ─── Tarjeta de comanda ───────────────────────────────────────────────────────
 function TarjetaComanda({ comanda, onListo }) {
-  const { texto: timerTexto, minutos } = useTiempoTranscurrido(comanda.created_at)
-  const urgencia = colorUrgencia(minutos)
+  const t = useTiempoTranscurrido(comanda.created_at, comanda.hora_objetivo)
+  const esFutura = t.estado === 'futuro'
+  const urgencia = esFutura
+    ? { bg: 'rgba(127,119,221,0.06)', border: 'rgba(127,119,221,0.35)', texto: '#AFA9EC', label: '⏰' }
+    : colorUrgencia(t.minutos)
   const items = Array.isArray(comanda.items) ? comanda.items : []
 
   return (
@@ -78,10 +108,10 @@ function TarjetaComanda({ comanda, onListo }) {
             lineHeight: 1,
             letterSpacing: '0.05em'
           }}>
-            {timerTexto}
+            {t.texto}
           </div>
           <div style={{ fontSize: 'clamp(9px, 1vw, 12px)', color: urgencia.texto, opacity: 0.7, marginTop: 2 }}>
-            {urgencia.label} {minutos < 5 ? 'OK' : minutos < 10 ? 'APURAR' : '¡URGENTE!'}
+            {urgencia.label} {esFutura ? `PROGRAMADO ${t.horaObjetivoMs ? formatHoraObjetivo(t.horaObjetivoMs) : ''}` : (t.minutos < 5 ? 'OK' : t.minutos < 10 ? 'APURAR' : '¡URGENTE!')}
           </div>
         </div>
       </div>
@@ -136,21 +166,23 @@ function TarjetaComanda({ comanda, onListo }) {
 
       {/* Botón listo — solo visible en modo no-TV (para uso desde la app normal) */}
       <button
-        onClick={() => onListo(comanda.id)}
+        onClick={() => { if (!esFutura) onListo(comanda.id) }}
+        disabled={esFutura}
         style={{
-          background: 'rgba(255,255,255,0.08)',
+          background: esFutura ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.08)',
           border: `1px solid ${urgencia.border}`,
           color: urgencia.texto,
           fontWeight: 800,
           fontSize: 'clamp(12px, 1.5vw, 16px)',
           padding: '10px 0',
           borderRadius: 12,
-          cursor: 'pointer',
+          cursor: esFutura ? 'not-allowed' : 'pointer',
           letterSpacing: '0.05em',
           width: '100%',
-          marginTop: 4
+          marginTop: 4,
+          opacity: esFutura ? 0.7 : 1,
         }}>
-        ✓ LISTO
+        {esFutura ? `🔒 Aún no es hora (faltan ${t.texto})` : '✓ LISTO'}
       </button>
     </div>
   )
@@ -296,9 +328,25 @@ export default function Comandas() {
           gap: 20,
           alignItems: 'start'
         }}>
-          {comandas.map(c => (
-            <TarjetaComanda key={c.id} comanda={c} onListo={marcarListo} />
-          ))}
+          {(() => {
+            // Separar activas vs futuras según ventana de 30min
+            const ahora = Date.now()
+            const VENT = 30 * 60 * 1000
+            const activas = []
+            const futuras = []
+            ;(comandas || []).forEach(c => {
+              const objMs = c.hora_objetivo ? new Date(c.hora_objetivo).getTime() : null
+              if (objMs != null && ahora < (objMs - VENT)) futuras.push(c)
+              else activas.push(c)
+            })
+            // Activas: ordenar por antigüedad (created_at ascendente)
+            activas.sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+            // Futuras: ordenar por hora objetivo ascendente (la más próxima primero)
+            futuras.sort((a, b) => new Date(a.hora_objetivo) - new Date(b.hora_objetivo))
+            return [...activas, ...futuras].map(c => (
+              <TarjetaComanda key={c.id} comanda={c} onListo={marcarListo} />
+            ))
+          })()}
         </div>
       )}
 

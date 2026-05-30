@@ -238,6 +238,8 @@ export default function ImportarPedido() {
   const [editCliente, setEditCliente] = useState({ nombre:'', telefono:'', direccion:'', id:null })
   const [clienteOp, setClienteOp] = useState('vinculado')
   const [nota, setNota] = useState('')
+  // null = "para ahora"; string "HH:MM" = pedido programado para esa hora HOY
+  const [horaObjetivo, setHoraObjetivo] = useState(null)
   const [guardando, setGuardando] = useState(false)
   const textareaRef = useRef(null)
 
@@ -293,6 +295,16 @@ export default function ImportarPedido() {
         precio_venta: parseFloat(it.precio_venta) || null,
         nota: it.nota || ''
       }))
+      // Construir timestamp de hora objetivo (hoy a HH:MM en local; si la
+      // hora ya pasó hoy, se asume mañana)
+      let horaObjISO = null
+      if (horaObjetivo) {
+        const [hh, mm] = horaObjetivo.split(':').map(Number)
+        const ahora = new Date()
+        const obj = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate(), hh, mm)
+        if (obj < ahora) obj.setDate(obj.getDate() + 1) // si la hora ya pasó, es mañana
+        horaObjISO = obj.toISOString()
+      }
       await supabase.from('comandas').insert({
         cliente_id: clienteId,
         cliente_nombre: editCliente.nombre||null,
@@ -301,7 +313,8 @@ export default function ImportarPedido() {
         items: itemsLimpios,
         nota: nota||null,
         estado: 'pendiente',
-        origen_texto: textoChat
+        origen_texto: textoChat,
+        hora_objetivo: horaObjISO,
       })
       setPaso('listo')
     } catch (e) {
@@ -313,7 +326,7 @@ export default function ImportarPedido() {
 
   const handleNuevo = () => {
     setTextoChat(''); setNombreChat(''); setParsed(null); setClienteInfo(null)
-    setEditItems([]); setEditCliente({ nombre:'', telefono:'', direccion:'', id:null }); setNota(''); setPaso('pegar')
+    setEditItems([]); setEditCliente({ nombre:'', telefono:'', direccion:'', id:null }); setNota(''); setHoraObjetivo(null); setPaso('pegar')
   }
 
   const sty = {
@@ -425,6 +438,53 @@ export default function ImportarPedido() {
           </div>
         ))}
         <button onClick={agregarItem} style={{ ...sty.btnS, fontSize:12, marginTop:4 }}>+ Agregar item</button>
+      </div>
+
+      {/* HORA DE ENTREGA: para ahora o programado */}
+      <div style={sty.card}>
+        <span style={sty.label}>Hora de entrega</span>
+        <div style={{ display:'flex', gap:8, marginTop:8, marginBottom: horaObjetivo != null ? 10 : 0 }}>
+          <button type="button"
+            onClick={() => setHoraObjetivo(null)}
+            style={{
+              flex:1, padding:'10px 12px', borderRadius:10, cursor:'pointer',
+              fontSize:13, fontWeight:700, border:'1px solid',
+              background: horaObjetivo === null ? 'rgba(0,180,180,0.15)' : 'rgba(255,255,255,0.04)',
+              color: horaObjetivo === null ? 'var(--cyan)' : 'var(--muted)',
+              borderColor: horaObjetivo === null ? 'var(--cyan-dim)' : 'rgba(255,255,255,0.1)',
+            }}>
+            ⚡ Para ahora
+          </button>
+          <button type="button"
+            onClick={() => {
+              if (horaObjetivo == null) {
+                // por defecto, hora actual + 1 hora redondeada a media hora
+                const d = new Date(); d.setHours(d.getHours() + 1)
+                const mm = d.getMinutes() < 30 ? '30' : '00'
+                const hh = (d.getMinutes() < 30 ? d.getHours() : d.getHours() + 1) % 24
+                setHoraObjetivo(String(hh).padStart(2,'0') + ':' + mm)
+              }
+            }}
+            style={{
+              flex:1, padding:'10px 12px', borderRadius:10, cursor:'pointer',
+              fontSize:13, fontWeight:700, border:'1px solid',
+              background: horaObjetivo !== null ? 'rgba(127,119,221,0.18)' : 'rgba(255,255,255,0.04)',
+              color: horaObjetivo !== null ? '#AFA9EC' : 'var(--muted)',
+              borderColor: horaObjetivo !== null ? 'rgba(127,119,221,0.45)' : 'rgba(255,255,255,0.1)',
+            }}>
+            ⏰ Programado
+          </button>
+        </div>
+        {horaObjetivo !== null && (
+          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+            <input type="time" value={horaObjetivo}
+              onChange={e => setHoraObjetivo(e.target.value)}
+              style={{ ...sty.input, fontSize:15, fontWeight:700, flex:1 }} />
+            <span style={{ fontSize:11, color:'var(--muted)', flex:'0 0 auto', lineHeight:1.4 }}>
+              countdown<br/>arranca 30min<br/>antes
+            </span>
+          </div>
+        )}
       </div>
 
       {/* NOTA */}
