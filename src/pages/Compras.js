@@ -392,10 +392,14 @@ export default function Compras() {
   const [proveedores, setProveedores] = useState([])
   const fechaHoy = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` }
   const [form, setForm] = useState({ fecha: '', insumo_nombre: '', unidad: 'ml', cantidad: '', precio_total: '', proveedor_id: '', nota: '' })
-  const [limonEnKg, setLimonEnKg] = useState(false) // toggle para ingresar limón en kg bruto
-  const LIMON_ML_POR_KG = 120 // rendimiento: ~120ml jugo exprimido por kg de limón bruto
+  const [limonEnKg, setLimonEnKg] = useState(false) // toggle para ingresar limón/naranja en kg bruto
+  const LIMON_ML_POR_KG = 120 // rendimiento: ~120ml jugo exprimido por kg de limón sutil bruto
+  const NARANJA_ML_POR_KG = 400 // rendimiento: ~400ml jugo exprimido por kg de naranja bruta
   const esLimon = form.insumo_nombre === 'Jugo limón'
-  const limonMlCalculado = limonEnKg && form.cantidad ? Math.round(parseFloat(form.cantidad) * LIMON_ML_POR_KG) : null
+  const esNaranja = form.insumo_nombre === 'Jugo naranja'
+  const esCitrico = esLimon || esNaranja
+  const citricoMlPorKg = esNaranja ? NARANJA_ML_POR_KG : LIMON_ML_POR_KG
+  const limonMlCalculado = limonEnKg && form.cantidad ? Math.round(parseFloat(form.cantidad) * citricoMlPorKg) : null
   const [esActivo, setEsActivo] = useState(false)
   const [activoForm, setActivoForm] = useState({ fecha: '', descripcion: '', precio: '', nota: '' })
   const [toast, setToast] = useState('')
@@ -437,7 +441,7 @@ export default function Compras() {
   const handleSelectInsumo = (nombre) => {
     const ins = insumos.find(i => i.nombre === nombre)
     setForm(f => ({ ...f, insumo_nombre: nombre, unidad: ins?.unidad || 'ml', cantidad: '', precio_total: '' }))
-    if (nombre !== 'Jugo limón') setLimonEnKg(false)
+    if (nombre !== 'Jugo limón' && nombre !== 'Jugo naranja') setLimonEnKg(false)
   }
 
   const handleSubmit = async (e) => {
@@ -445,12 +449,12 @@ export default function Compras() {
     if (!form.insumo_nombre || !form.cantidad || !form.precio_total) return
     setLoading(true)
 
-    // Para limón ingresado en kg: guardamos la cantidad convertida a ml
-    const cantidadFinal = esLimon && limonEnKg && limonMlCalculado
+    // Para limón/naranja ingresado en kg: guardamos la cantidad convertida a ml
+    const cantidadFinal = esCitrico && limonEnKg && limonMlCalculado
       ? limonMlCalculado
       : parseFloat(form.cantidad)
-    const unidadFinal = esLimon ? 'ml' : form.unidad
-    const notaFinal = esLimon && limonEnKg && form.cantidad
+    const unidadFinal = esCitrico ? 'ml' : form.unidad
+    const notaFinal = esCitrico && limonEnKg && form.cantidad
       ? `${parseFloat(form.cantidad).toFixed(2)}kg bruto → ${limonMlCalculado}ml exprimido${form.nota ? ' · ' + form.nota : ''}`
       : form.nota || null
 
@@ -466,8 +470,8 @@ export default function Compras() {
       tipo: 'insumo',
     })
     if (!error) {
-      const toastMsg = esLimon && limonEnKg
-        ? `Compra registrada · ${limonMlCalculado}ml limón · PPP actualizado`
+      const toastMsg = esCitrico && limonEnKg
+        ? `Compra registrada · ${limonMlCalculado}ml ${esNaranja ? 'naranja' : 'limón'} · PPP actualizado`
         : 'Compra registrada · PPP actualizado'
       showToast(toastMsg)
       setForm(f => ({ ...f, insumo_nombre: '', cantidad: '', precio_total: '', proveedor_id: '', nota: '' }))
@@ -542,7 +546,7 @@ export default function Compras() {
   }
 
   const costoPorUnidad = form.cantidad && form.precio_total
-    ? esLimon && limonEnKg && limonMlCalculado
+    ? esCitrico && limonEnKg && limonMlCalculado
       ? (parseFloat(form.precio_total) / limonMlCalculado).toFixed(2)
       : (parseFloat(form.precio_total) / parseFloat(form.cantidad)).toFixed(2)
     : null
@@ -664,10 +668,12 @@ export default function Compras() {
                   </div>
                 )}
 
-                {/* Toggle kg/ml para Jugo limón */}
-                {esLimon && (
+                {/* Toggle kg/ml para Jugo limón y Jugo naranja */}
+                {esCitrico && (
                   <div style={{ background: 'rgba(0,180,180,0.06)', border: '1px solid rgba(0,180,180,0.2)', borderRadius: 10, padding: '10px 14px', marginBottom: 12 }}>
-                    <div style={{ fontSize: 12, color: 'var(--cyan)', fontWeight: 600, marginBottom: 8 }}>🍋 Limón</div>
+                    <div style={{ fontSize: 12, color: 'var(--cyan)', fontWeight: 600, marginBottom: 8 }}>
+                      {esNaranja ? '🍊 Naranja' : '🍋 Limón'}
+                    </div>
                     <div style={{ display: 'flex', gap: 8, marginBottom: limonEnKg ? 8 : 0 }}>
                       <button type="button"
                         onClick={() => setLimonEnKg(false)}
@@ -686,7 +692,7 @@ export default function Compras() {
                     </div>
                     {limonEnKg && (
                       <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.5 }}>
-                        Factor: ~120ml exprimido por kg · La app guarda en ml automáticamente.
+                        Factor: ~{citricoMlPorKg}ml exprimido por kg · La app guarda en ml automáticamente.
                       </div>
                     )}
                   </div>
@@ -695,10 +701,10 @@ export default function Compras() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div className="form-group">
                     <label className="form-label">
-                      {esLimon && limonEnKg ? 'Cantidad (kg bruto)' : `Cantidad (${form.unidad})`}
+                      {esCitrico && limonEnKg ? 'Cantidad (kg bruto)' : `Cantidad (${form.unidad})`}
                     </label>
                     <input type="number" step="any" className="form-input" value={form.cantidad}
-                      placeholder={esLimon && limonEnKg ? 'ej: 18' : 'ej: 1000'}
+                      placeholder={esCitrico && limonEnKg ? 'ej: 10' : 'ej: 1000'}
                       onChange={e => setForm(f => ({ ...f, cantidad: e.target.value }))} />
                   </div>
                   <div className="form-group">
@@ -710,7 +716,7 @@ export default function Compras() {
                 </div>
 
                 {/* Conversión kg→ml en tiempo real */}
-                {esLimon && limonEnKg && limonMlCalculado && (
+                {esCitrico && limonEnKg && limonMlCalculado && (
                   <div style={{ background: 'rgba(0,180,180,0.08)', borderRadius: 8, padding: '8px 12px', marginBottom: 10, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ color: 'var(--muted)' }}>{parseFloat(form.cantidad).toFixed(2)} kg → </span>
                     <span style={{ color: 'var(--cyan)', fontWeight: 700 }}>~{limonMlCalculado} ml exprimido</span>
@@ -719,7 +725,7 @@ export default function Compras() {
 
                 {costoPorUnidad && (
                   <div style={{ color: 'var(--cyan)', fontSize: 13, marginBottom: 12, textAlign: 'center' }}>
-                    ${costoPorUnidad} por {esLimon && limonEnKg ? 'ml (ya convertido)' : form.unidad}
+                    ${costoPorUnidad} por {esCitrico && limonEnKg ? 'ml (ya convertido)' : form.unidad}
                   </div>
                 )}
                 <div className="form-group">
