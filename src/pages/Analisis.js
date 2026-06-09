@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { formatCLP, calcularCostoReceta } from '../lib/calculos'
+import { formatCLP, calcularCostoReceta, esOrigenIGAds } from '../lib/calculos'
 import { calcularRentabilidad } from '../lib/rentabilidad'
 import RankingRecetas from '../components/RankingRecetas'
 
@@ -578,7 +578,7 @@ function SemaforoPub({ ventas, gastosPub, margenBruto, roiIG }) {
 
 // ─── Bloque: Origen de ventas + CAC estimado ────────────────────────────────
 
-const ORIGEN_ICONS = { Instagram: '📱', Referido: '🤝', 'Cliente habitual': '⭐', Evento: '🎉', Otro: '•' }
+const ORIGEN_ICONS = { Instagram: '📱', 'IG Pauta': '🎯', 'IG Orgánico': '📱', Referido: '🤝', 'Cliente habitual': '⭐', Evento: '🎉', Otro: '•' }
 
 function OrigenVentas({ ventas, gastosPub }) {
   const ventasConOrigen = ventas.filter(v => v.origen)
@@ -603,9 +603,10 @@ function OrigenVentas({ ventas, gastosPub }) {
   const totalIngreso = Object.values(porOrigen).reduce((s, d) => s + d.ingreso, 0)
   const totalPub = gastosPub.reduce((s, m) => s + m.monto, 0)
 
-  // CAC estimado: gasto pub / ventas atribuidas a Instagram
-  const ventasIG = porOrigen['Instagram']?.ventas || 0
-  const ingresoIG = porOrigen['Instagram']?.ingreso || 0
+  // CAC estimado: gasto pub / ventas atribuidas a pauta IG
+  // ('IG Pauta' + legacy 'Instagram' — ver esOrigenIGAds en lib/calculos)
+  const ventasIG = ventasConOrigen.filter(v => esOrigenIGAds(v.origen)).length
+  const ingresoIG = ventasConOrigen.filter(v => esOrigenIGAds(v.origen)).reduce((s, v) => s + v.litros * v.precio_venta, 0)
   const cac = ventasIG > 0 && totalPub > 0 ? totalPub / ventasIG : null
   const roiIG = totalPub > 0 && ingresoIG > 0 ? ingresoIG / totalPub : null
 
@@ -630,7 +631,7 @@ function OrigenVentas({ ventas, gastosPub }) {
             <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 4, height: 6, overflow: 'hidden' }}>
               <div style={{
                 height: '100%', borderRadius: 4,
-                background: origen === 'Instagram' ? 'linear-gradient(90deg, var(--pink), var(--purple))' : 'rgba(0,180,180,0.5)',
+                background: esOrigenIGAds(origen) ? 'linear-gradient(90deg, var(--pink), var(--purple))' : 'rgba(0,180,180,0.5)',
                 width: (d.ingreso / maxIngreso * 100) + '%'
               }} />
             </div>
@@ -1578,7 +1579,7 @@ export default function Analisis() {
         const gastosPubArr = (cja || []).filter(m => m.categoria === 'Publicidad')
         const totalPubGlobal = gastosPubArr.reduce((s, m) => s + m.monto, 0)
         const ingresoIGGlobal = (vts || [])
-          .filter(v => v.origen === 'Instagram')
+          .filter(v => esOrigenIGAds(v.origen))
           .reduce((s, v) => s + v.litros * v.precio_venta, 0)
         setRoiIG(totalPubGlobal > 0 && ingresoIGGlobal > 0 ? ingresoIGGlobal / totalPubGlobal : null)
       } catch (err) {

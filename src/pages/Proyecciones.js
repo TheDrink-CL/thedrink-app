@@ -105,7 +105,8 @@ export default function Proyecciones() {
         c.tipo === 'activo_fijo' ? s + c.precio_total : s, 0)
       const totalVentas = (vts || []).reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0)
       const totalCompras = (cmp || []).reduce((s, c) => s + (c.es_inversion ? 0 : c.precio_total), 0)
-      const movExtraEntradas = caja.filter(m => m.tipo === 'entrada' && m.categoria !== 'Venta' && m.categoria !== 'Delivery').reduce((s, m) => s + m.monto, 0)
+      // 'Delivery' suma al saldo: es cobro al cliente, sin contraparte en otra tabla
+      const movExtraEntradas = caja.filter(m => m.tipo === 'entrada' && m.categoria !== 'Venta').reduce((s, m) => s + m.monto, 0)
       const movExtraSalidas = caja.filter(m => m.tipo === 'salida' && m.categoria !== 'Insumos').reduce((s, m) => s + m.monto, 0)
       const cajaActual = totalVentas - totalCompras + movExtraEntradas - movExtraSalidas
       const patrimonioActual = cajaActual + inventarioRotable + activosFijos

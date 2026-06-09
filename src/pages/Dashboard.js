@@ -422,7 +422,8 @@ export default function Dashboard() {
 
       const totalVentas = vts?.reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0) || 0
       const totalCompras = cmp?.reduce((s, c) => s + (c.es_inversion ? 0 : c.precio_total), 0) || 0
-      const movExtraEntradas = cja?.filter(m => m.tipo === 'entrada' && m.categoria !== 'Venta' && m.categoria !== 'Delivery').reduce((s, m) => s + m.monto, 0) || 0
+      // 'Delivery' suma al saldo: es cobro al cliente, sin contraparte en otra tabla
+      const movExtraEntradas = cja?.filter(m => m.tipo === 'entrada' && m.categoria !== 'Venta').reduce((s, m) => s + m.monto, 0) || 0
       const movExtraSalidas = cja?.filter(m => m.tipo === 'salida' && m.categoria !== 'Insumos').reduce((s, m) => s + m.monto, 0) || 0
       const saldoCaja = totalVentas - totalCompras + movExtraEntradas - movExtraSalidas
 

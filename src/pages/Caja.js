@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { formatCLP } from '../lib/calculos'
+import { formatCLP, esOrigenIGAds } from '../lib/calculos'
 
 function ConfirmModal({ mensaje, onConfirm, onCancel }) {
   return (
@@ -57,8 +57,8 @@ function TabPublicidad({ movimientos, ventas, ordenes }) {
   const roiGlobal = totalPub > 0 ? totalVentas / totalPub : null
 
   // CAC: gasto pub / clientes nuevos atribuidos a Instagram
-  const ventasIG = ventas.filter(v => v.origen === 'Instagram')
-  const ordenesIG = (ordenes || []).filter(o => o.origen === 'Instagram')
+  const ventasIG = ventas.filter(v => esOrigenIGAds(v.origen))
+  const ordenesIG = (ordenes || []).filter(o => esOrigenIGAds(o.origen))
   const clientesIGUnicos = new Set(ordenesIG.map(o => o.cliente_nombre?.trim().toLowerCase()).filter(Boolean)).size
   const cacEstimado = clientesIGUnicos > 0 && totalPub > 0 ? totalPub / clientesIGUnicos : null
   const ingresoIG = ventasIG.reduce((s, v) => s + v.litros * v.precio_venta, 0)
@@ -243,7 +243,10 @@ export default function Caja() {
 
     const totalVentas = (vts || []).reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0)
     const totalCompras = (compras || []).reduce((s, c) => s + (c.es_inversion ? 0 : c.precio_total), 0)
-    const movExtraEntradas = (mov || []).filter(m => m.tipo === 'entrada' && m.categoria !== 'Venta' && m.categoria !== 'Delivery').reduce((s, m) => s + m.monto, 0)
+    // Entradas manuales: se excluye 'Venta' (ya viene de la tabla ventas).
+    // 'Delivery' SÍ suma — es el cobro al cliente y no existe en ninguna otra tabla
+    // (ventas.delivery es lo que se PAGA a terceros, no lo que se cobra).
+    const movExtraEntradas = (mov || []).filter(m => m.tipo === 'entrada' && m.categoria !== 'Venta').reduce((s, m) => s + m.monto, 0)
     const movExtraSalidas = (mov || []).filter(m => m.tipo === 'salida' && m.categoria !== 'Insumos').reduce((s, m) => s + m.monto, 0)
 
     setSaldo(totalVentas - totalCompras + movExtraEntradas - movExtraSalidas)

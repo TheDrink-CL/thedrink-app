@@ -61,6 +61,14 @@ export function envaseDesdeReceta(recetaNombre, recetas, costoLegacy = 794.6) {
   }
 }
 
+// ── Atribución de canal Instagram Ads ────────────────────────────────────────
+// Históricamente el origen se registraba como 'Instagram'; hoy se separa en
+// 'IG Pauta' e 'IG Orgánico'. Para ROI/CAC de pauta se cuentan 'IG Pauta' y el
+// legacy 'Instagram' (de la época en que solo existía pauta). Un solo lugar
+// para que Caja y Análisis nunca diverjan.
+export const ORIGENES_IG_ADS = ['Instagram', 'IG Pauta']
+export const esOrigenIGAds = (o) => ORIGENES_IG_ADS.includes(o)
+
 export function formatCLP(n) {
   if (n == null) return '$0'
   return '$' + Math.round(n).toLocaleString('es-CL')
