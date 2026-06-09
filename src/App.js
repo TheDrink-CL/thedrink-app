@@ -21,6 +21,7 @@ import PinLock, { isPinUnlocked } from './pages/PinLock'
 import ImportarPedido from './pages/ImportarPedido'
 import Comandas from './pages/Comandas'
 import ComandasPendientes from './pages/ComandasPendientes'
+import Indicadores from './pages/Indicadores'
 
 const TABS_MAIN = [
   { id: 'dashboard', label: 'Inicio', icon: (
@@ -54,6 +55,13 @@ const TABS_MAIN = [
 ]
 
 const TABS_MAS = [
+  { id: 'indicadores', label: 'Indicadores', icon: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <line x1="12" y1="20" x2="12" y2="10"/>
+      <line x1="18" y1="20" x2="18" y2="4"/>
+      <line x1="6" y1="20" x2="6" y2="16"/>
+    </svg>
+  )},
   { id: 'clientes', label: 'Clientes', icon: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
@@ -199,6 +207,7 @@ export default function App() {
   return (
     <div>
       {tab === 'dashboard'    && <Dashboard />}
+      {tab === 'indicadores'  && <Indicadores />}
       {tab === 'ventas'       && <Ventas />}
       {tab === 'compras'      && <Compras />}
       {tab === 'caja'         && <Caja />}

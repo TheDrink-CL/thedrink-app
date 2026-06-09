@@ -4,7 +4,6 @@ import { calcularCostoReceta, formatCLP, formatPct } from '../lib/calculos'
 import { calcularRentabilidad } from '../lib/rentabilidad'
 import CaminoAlBar from './CaminoAlBar'
 import SaludNegocio from './SaludNegocio'
-import RankingRecetas from '../components/RankingRecetas'
 
 function RecetasComparativo({ topVolumen, topGanancia, todasVentas, costoPorReceta }) {
   const [tab, setTab] = useState('volumen')
@@ -67,36 +66,8 @@ function RecetasComparativo({ topVolumen, topGanancia, todasVentas, costoPorRece
         )
       })}
 
-      {/* Botón "Ver todas las recetas" — expande inline el ranking completo */}
-      {todasVentas && todasVentas.length > 0 && (
-        <ExpandirRanking todasVentas={todasVentas} costoPorReceta={costoPorReceta} />
-      )}
-    </div>
-  )
-}
-
-// Componente auxiliar: muestra botón y al tocarlo expande el ranking completo.
-function ExpandirRanking({ todasVentas, costoPorReceta }) {
-  var expRef = React.useState(false)
-  var expandido = expRef[0]
-  var setExpandido = expRef[1]
-  return (
-    <div style={{ marginTop: 14, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 12 }}>
-      <button
-        onClick={() => setExpandido(e => !e)}
-        style={{
-          width: '100%', background: 'rgba(0,180,180,0.06)',
-          border: '1px solid var(--cyan-dim)', borderRadius: 10,
-          color: 'var(--cyan)', cursor: 'pointer', fontSize: 12, fontWeight: 700,
-          padding: '9px 0', textTransform: 'uppercase', letterSpacing: 0.8,
-        }}>
-        {expandido ? '▲ Ocultar' : '▼ Ver todas las recetas'}
-      </button>
-      {expandido && (
-        <div style={{ marginTop: 12 }}>
-          <RankingRecetas ventas={todasVentas} costoPorReceta={costoPorReceta} />
-        </div>
-      )}
+      {/* El ranking completo de recetas vive en Análisis (se quitó de aquí
+          para no duplicar vistas — jun 2026) */}
     </div>
   )
 }
@@ -432,12 +403,17 @@ export default function Dashboard() {
       const ingresoMes = vtsMes.reduce((s, v) => s + (v.litros * v.precio_venta), 0)
 
       const totalOrdenes = (ordenes || []).length
-      const ticketPromedio = totalOrdenes > 0 ? ingresoTotal / totalOrdenes : 0
 
       const ticketsPorOrden = (ordenes || []).map(o => {
         const vo = (vts || []).filter(v => v.orden_id === o.id)
         return vo.reduce((s, v) => s + v.litros * v.precio_venta, 0)
       }).filter(t => t > 0).sort((a, b) => a - b)
+      // Promedio por orden real (mismo cálculo que Indicadores: excluye las
+      // ventas legacy sin orden_id — antes se dividía el ingreso TOTAL por las
+      // órdenes, lo que inflaba el ticket)
+      const ticketPromedio = ticketsPorOrden.length > 0
+        ? ticketsPorOrden.reduce((s, t) => s + t, 0) / ticketsPorOrden.length
+        : 0
       const mid = Math.floor(ticketsPorOrden.length / 2)
       const ticketMediana = ticketsPorOrden.length === 0 ? 0
         : ticketsPorOrden.length % 2 !== 0
