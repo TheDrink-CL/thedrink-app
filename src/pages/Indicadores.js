@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatCLP, formatPct } from '../lib/calculos'
-import { calcularMetricasDashboard, CANAL_META, labelSemana } from '../lib/dashboardMetrics'
+import { calcularMetricasDashboard, resumenParaIA, CANAL_META, labelSemana } from '../lib/dashboardMetrics'
 
 const SEMAFORO_COLOR = {
   verde: 'var(--green)',
@@ -208,7 +208,7 @@ function DondePonerElOjo({ m }) {
     { label: 'Ingreso habituales/semana', meta: '≥$100K', sem: s.habituales, fmt: v => formatCLP(v) },
     { label: 'Clientes nuevos/semana', meta: '≥10', sem: s.clientesNuevos, fmt: v => String(v) },
     { label: 'Ticket promedio', meta: '≥$17.500', sem: s.ticket, fmt: v => formatCLP(v) },
-    { label: 'Recompra acumulada', meta: '35%', sem: s.recompra, fmt: v => formatPct(v) },
+    { label: 'Clientes que vuelven', meta: '35%', sem: s.recompra, fmt: v => formatPct(v) },
     { label: 'Insumos/ingreso (mes)', meta: '≤50%', sem: s.ratioInsumos, fmt: v => formatPct(v) },
   ]
   return (
@@ -228,6 +228,149 @@ function DondePonerElOjo({ m }) {
       <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 6 }}>
         Semáforos semanales evaluados sobre la última semana COMPLETA (lun-dom), no la actual.
       </div>
+    </div>
+  )
+}
+
+// ── Clientes que vuelven vs dependencia de pauta ────────────────────────────
+// "Tasa de recompra" en jerga de marketing; renombrada en la UI porque en esta
+// app "Compras" son insumos y el término confundía.
+function RetencionVsPauta({ m }) {
+  const totalDona = Object.values(m.dona).reduce((s, v) => s + v, 0)
+  if (totalDona === 0 || m.clientesUnicos === 0) return null
+  const pctHab = Math.round(m.dona.habitual / totalDona * 100)
+  const pctPauta = Math.round(m.dona.pauta / totalDona * 100)
+  const pctRef = Math.round(m.ingresoReferido / totalDona * 100)
+  const unaCompra = m.clientesUnicos - m.clientesRecompra
+  const colorRet = SEMAFORO_COLOR[m.semaforos.recompra.estado]
+  const retPct = m.tasaRecompra * 100
+
+  const mix = [
+    { label: 'Habituales', valor: pctHab, meta: '≥40%', cumple: pctHab >= 40, color: 'var(--green)' },
+    { label: 'Pauta IG', valor: pctPauta, meta: '≤40%', cumple: pctPauta <= 40, color: 'var(--pink)' },
+    { label: 'Referidos', valor: pctRef, meta: '≥15%', cumple: pctRef >= 15, color: 'var(--cyan)' },
+  ]
+
+  return (
+    <div className="card" style={{ marginBottom: 12, border: '1px solid rgba(34,197,94,0.35)' }}>
+      <div className="card-title">🔁 Clientes que vuelven — tu palanca más barata</div>
+
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+        <span style={{ fontSize: 30, fontWeight: 800, color: colorRet }}>{formatPct(m.tasaRecompra)}</span>
+        <span style={{ fontSize: 12, color: 'var(--muted)' }}>de tus {m.clientesUnicos} clientes ha vuelto a comprar · meta 35%</span>
+      </div>
+      <div style={{ position: 'relative', height: 10, marginBottom: 8 }}>
+        <div style={{ position: 'absolute', inset: 0, background: 'rgba(255,255,255,0.06)', borderRadius: 4 }} />
+        <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${Math.min(100, retPct / 50 * 100)}%`, background: colorRet, borderRadius: 4 }} />
+        <div style={{ position: 'absolute', top: -2, bottom: -2, left: '70%', width: 2, background: 'var(--text-strong)' }} />
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 12, lineHeight: 1.6 }}>
+        {unaCompra} clientes compraron <b style={{ color: 'var(--text-strong)' }}>una sola vez</b> y no han vuelto.
+        Adquirir cada uno costó {m.cac != null ? `~${formatCLP(m.cac)}` : 'plata'} en pauta — hacerlos volver cuesta $0.
+        La línea blanca marca la meta (35%).
+      </div>
+
+      <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 10 }}>
+        <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
+          De dónde viene el ingreso · hoy vs meta sana
+        </div>
+        {mix.map(f => (
+          <div key={f.label} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
+            <div style={{ width: 76, fontSize: 12, color: 'var(--text)' }}>{f.label}</div>
+            <div style={{ flex: 1, background: 'rgba(255,255,255,0.06)', borderRadius: 4, height: 7, overflow: 'hidden' }}>
+              <div style={{ height: '100%', borderRadius: 4, background: f.color, width: `${Math.min(100, f.valor)}%` }} />
+            </div>
+            <div style={{ width: 96, fontSize: 12, textAlign: 'right' }}>
+              <span style={{ fontWeight: 700, color: 'var(--text-strong)' }}>{f.valor}%</span>
+              <span style={{ color: f.cumple ? 'var(--green)' : '#f59e0b', marginLeft: 6 }}>{f.cumple ? '✓' : '→'} {f.meta}</span>
+            </div>
+          </div>
+        ))}
+        <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 6, lineHeight: 1.5 }}>
+          Pauta en {pctPauta}% = crecimiento arrendado: se apaga cuando dejas de pagar. Habituales y referidos son el ingreso que se acumula. Metas a 90 días — cuando referidos pase 15%, se sube la vara.
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Análisis de la semana (insights vía API de Claude, cacheado 1/día) ──────
+function AnalisisIA({ m }) {
+  const [estado, setEstado] = useState('idle') // idle | cargando | ok | error
+  const [insight, setInsight] = useState(null)
+  const [errorMsg, setErrorMsg] = useState('')
+
+  useEffect(() => {
+    let cancelado = false
+    async function fetchInsight() {
+      setEstado('cargando')
+      try {
+        const res = await fetch('/api/insights', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ metricas: resumenParaIA(m) }),
+        })
+        if (!res.ok) {
+          const e = await res.json().catch(() => ({}))
+          throw new Error(e.error || `HTTP ${res.status}`)
+        }
+        const data = await res.json()
+        if (!cancelado) { setInsight(data); setEstado('ok') }
+      } catch (e) {
+        if (!cancelado) {
+          setErrorMsg(e.message || String(e))
+          setEstado('error')
+        }
+      }
+    }
+    fetchInsight()
+    return () => { cancelado = true }
+  }, [m])
+
+  return (
+    <div className="card" style={{ marginBottom: 12, borderColor: 'rgba(123,47,190,0.35)' }}>
+      <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        🧠 Análisis de la semana
+        {insight?.cached && <span style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 400 }}>· generado hoy</span>}
+      </div>
+
+      {estado === 'cargando' && (
+        <div style={{ color: 'var(--muted)', fontSize: 13, padding: '8px 0' }}>Analizando los números...</div>
+      )}
+
+      {estado === 'error' && (
+        <div style={{ color: 'var(--muted)', fontSize: 12, lineHeight: 1.6 }}>
+          No se pudo generar el análisis ({errorMsg}).
+          {window.location.hostname === 'localhost' && ' En desarrollo local no hay /api — solo funciona en la app deployada en Vercel.'}
+        </div>
+      )}
+
+      {estado === 'ok' && insight && (
+        <div style={{ fontSize: 13, lineHeight: 1.7 }}>
+          <div style={{ color: 'var(--text)', marginBottom: 10 }}>{insight.resumen}</div>
+          {(insight.alertas || []).map((a, i) => (
+            <div key={i} style={{
+              display: 'flex', gap: 8, marginBottom: 8, padding: '8px 10px',
+              background: 'rgba(255,255,255,0.03)', borderRadius: 8,
+            }}>
+              <span style={{ flexShrink: 0 }}>{i === 0 ? '⚠️' : '·'}</span>
+              <span style={{ color: 'var(--text)' }}>{a}</span>
+            </div>
+          ))}
+          {insight.recomendacion_principal && (
+            <div style={{
+              marginTop: 10, padding: '10px 12px', borderRadius: 8,
+              background: 'rgba(123,47,190,0.10)', border: '1px solid rgba(123,47,190,0.3)',
+            }}>
+              <span style={{ fontWeight: 700, color: '#AFA9EC' }}>Esta semana: </span>
+              <span style={{ color: 'var(--text)' }}>{insight.recomendacion_principal}</span>
+            </div>
+          )}
+          <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 8 }}>
+            Interpretación generada por IA sobre KPIs calculados de forma determinista — las cifras vienen de la app, no de la IA.
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -306,7 +449,7 @@ export default function Indicadores() {
       </div>
       <div className="kpi-grid" style={{ marginBottom: 12 }}>
         <div className="kpi-card">
-          <div className="kpi-label">Recompra</div>
+          <div className="kpi-label">Clientes que vuelven</div>
           <div className="kpi-value" style={{ fontSize: 22, color: SEMAFORO_COLOR[m.semaforos.recompra.estado] }}>{formatPct(m.tasaRecompra)}</div>
           <div className="kpi-sub">{m.clientesUnicos} clientes únicos · meta 35%</div>
         </div>
@@ -317,6 +460,8 @@ export default function Indicadores() {
         </div>
       </div>
 
+      <RetencionVsPauta m={m} />
+      <AnalisisIA m={m} />
       <DondePonerElOjo m={m} />
       <GraficoCanales m={m} />
       <IngresoSemanal m={m} />

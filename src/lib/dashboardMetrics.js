@@ -156,8 +156,11 @@ export function calcularMetricasDashboard({
 
   // ── Dona: origen del ingreso acumulado ─────────────────────────────────────
   const dona = { habitual: 0, pauta: 0, otros: 0, sinOrigen: 0 }
+  let ingresoReferido = 0
   ventas.forEach(v => {
-    dona[canalDe(v.origen)] += parseFloat(v.ingreso_total) || v.litros * v.precio_venta
+    const monto = parseFloat(v.ingreso_total) || v.litros * v.precio_venta
+    dona[canalDe(v.origen)] += monto
+    if (v.origen === 'Referido') ingresoReferido += monto
   })
 
   // ── Margen $/litro por receta (teórico, vía calculos.js) ──────────────────
@@ -259,12 +262,61 @@ export function calcularMetricasDashboard({
     // canal / pauta
     gastoPautaTotal, roasGlobal, cac, clientesNuevosPauta,
     // clientes
-    clientesUnicos, tasaRecompra,
+    clientesUnicos, clientesRecompra, tasaRecompra, ingresoReferido,
     // margen
     margenPorReceta, margenPonderado,
     // costos
     insumosPorMes, ingresoPorMes, ratioInsumosMes, mesActual,
     // semáforos
     semaforos,
+  }
+}
+
+/**
+ * Versión compacta de las métricas para enviar a la API de insights.
+ * Solo números ya calculados — la IA jamás consulta tablas ni calcula nada.
+ * Se limita a las últimas 8 semanas para mantener el payload chico.
+ */
+export function resumenParaIA(m) {
+  const semanas = m.semanasOrdenadas.slice(-8).map(k => {
+    const w = m.semanas[k]
+    return {
+      semana_lunes: k,
+      en_curso: k === m.semanaActualKey,
+      ingreso_total: Math.round(w.total),
+      ingreso_habituales: Math.round(w.habitual),
+      ingreso_pauta_ig: Math.round(w.pauta),
+      ingreso_otros: Math.round(w.otros + w.sinOrigen),
+      gasto_pauta: Math.round(w.gastoPauta),
+      roas: w.roas != null ? Math.round(w.roas * 10) / 10 : null,
+      clientes_nuevos: w.clientesNuevos,
+    }
+  })
+  const semaforos = {}
+  Object.entries(m.semaforos).forEach(([k, s]) => {
+    semaforos[k] = { estado: s.estado, valor: typeof s.valor === 'number' ? Math.round(s.valor * 100) / 100 : s.valor, detalle: s.detalle }
+  })
+  return {
+    moneda: 'CLP',
+    kpis: {
+      ingreso_total_acumulado: Math.round(m.ingresoTotal),
+      litros_vendidos: Math.round(m.litrosTotal),
+      ticket_promedio_por_orden: Math.round(m.ticketPromedio),
+      precio_promedio_litro: Math.round(m.precioPorLitro),
+      roas_pauta_acumulado: m.roasGlobal != null ? Math.round(m.roasGlobal * 10) / 10 : null,
+      cac_pauta: m.cac != null ? Math.round(m.cac) : null,
+      clientes_unicos: m.clientesUnicos,
+      tasa_recompra: Math.round(m.tasaRecompra * 1000) / 1000,
+      margen_ponderado_por_litro: m.margenPonderado != null ? Math.round(m.margenPonderado) : null,
+      ratio_insumos_ingreso_mes_actual: m.ratioInsumosMes != null ? Math.round(m.ratioInsumosMes * 1000) / 1000 : null,
+    },
+    metas: {
+      gasto_pauta_semanal: '50000-60000', roas_semanal_minimo: 3,
+      ingreso_habituales_semanal_minimo: 100000, clientes_nuevos_semana_minimo: 10,
+      ticket_promedio_minimo: 17500, tasa_recompra_meta: 0.35,
+      ratio_insumos_maximo: 0.5,
+    },
+    semaforos,
+    semanas,
   }
 }
