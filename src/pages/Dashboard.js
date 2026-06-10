@@ -5,6 +5,32 @@ import { calcularRentabilidad } from '../lib/rentabilidad'
 import CaminoAlBar from './CaminoAlBar'
 import SaludNegocio from './SaludNegocio'
 
+// Camino al Bar colapsado por defecto y al final del Dashboard (pedido del
+// usuario, jun 2026): es una proyección de largo plazo, no info operativa
+// diaria. Bonus: sus datos solo se cargan al expandir.
+function CaminoColapsable() {
+  const [abierto, setAbierto] = React.useState(false)
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <button
+        onClick={() => setAbierto(a => !a)}
+        style={{
+          width: '100%', background: 'rgba(123,47,190,0.06)',
+          border: '1px solid rgba(123,47,190,0.25)', borderRadius: 12,
+          color: '#AFA9EC', cursor: 'pointer', fontSize: 13, fontWeight: 700,
+          padding: '12px 14px', textAlign: 'left',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+        <span>🍸 El camino al bar</span>
+        <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 400 }}>
+          {abierto ? 'ocultar ▲' : 'ver proyección ▼'}
+        </span>
+      </button>
+      {abierto && <div style={{ marginTop: 12 }}><CaminoAlBar /></div>}
+    </div>
+  )
+}
+
 function RecetasComparativo({ topVolumen, topGanancia, todasVentas, costoPorReceta }) {
   const [tab, setTab] = useState('volumen')
   if (!topVolumen || topVolumen.length === 0) return null
@@ -547,8 +573,6 @@ export default function Dashboard() {
     <div className="page">
       <div className="page-title">The Drink</div>
 
-      <CaminoAlBar />
-
       <SaludNegocio />
 
       {bannerCtx && (
@@ -778,6 +802,8 @@ export default function Dashboard() {
           </div>
         ))}
       </div>
+
+      <CaminoColapsable />
     </div>
   )
 }
