@@ -5,7 +5,11 @@ import { formatCLP } from '../lib/calculos'
 // ─────────────────────────────────────────────────────────────────────────────
 // REACTIVAR — gestión de clientes de 1 compra (la palanca barata del Panel).
 // Flujo: pendiente → contactado (toque 1) → contactado_2 (toque 2) → frío.
-// 'excluido' saca al cliente de esta lista Y de las estadísticas del Panel.
+// 'no_contactar': el cliente CUENTA en todas las estadísticas (su historia es
+//   real) pero la app jamás lo sugiere para contacto/venta (ej: Abel, intento
+//   de estafa con comprobante falso — jun 2026).
+// 'excluido' (legacy): además lo saca de las estadísticas del Panel. Sin botón
+//   en la UI; solo restaurable si quedó alguno marcado.
 // Política de delivery vigente: GRATIS con 2+ tragos (no se cobra, se usa
 // como gancho de venta). Los mensajes la reflejan.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -92,10 +96,10 @@ function FilaCliente({ c, onEstado }) {
             background: 'none', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 9,
             color: 'var(--muted)', cursor: 'pointer', fontSize: 12, padding: '7px 9px',
           }}>❄</button>
-          <button onClick={() => onEstado(c, 'excluido')} title="Excluir de la lista y de las estadísticas" style={{
+          <button onClick={() => onEstado(c, 'no_contactar')} title="No contactar nunca (sigue contando en estadísticas)" style={{
             background: 'none', border: '1px solid rgba(196,0,90,0.25)', borderRadius: 9,
             color: 'var(--pink)', cursor: 'pointer', fontSize: 12, padding: '7px 9px',
-          }}>✕</button>
+          }}>🚫</button>
         </div>
       </div>
     </div>
@@ -105,12 +109,15 @@ function FilaCliente({ c, onEstado }) {
 export default function Reactivar() {
   const [lista, setLista] = useState([])
   const [frios, setFrios] = useState([])
+  const [noContactar, setNoContactar] = useState([])
   const [excluidos, setExcluidos] = useState([])
   const [verFrios, setVerFrios] = useState(false)
+  const [verNoContactar, setVerNoContactar] = useState(false)
   const [verExcluidos, setVerExcluidos] = useState(false)
+  const [busqueda, setBusqueda] = useState('')
+  const [todos, setTodos] = useState([])
   const [cargando, setCargando] = useState(true)
   const [toast, setToast] = useState('')
-  const [confirmarExcluir, setConfirmarExcluir] = useState(null)
 
   useEffect(() => { load() }, [])
 
@@ -144,7 +151,9 @@ export default function Reactivar() {
 
     const unaCompra = []
     const friosArr = []
+    const noContactarArr = []
     const excluidosArr = []
+    const todosArr = []
     Object.entries(porCliente).forEach(([id, pc]) => {
       const ficha = clientesMap[id] || {}
       const estado = ficha.estado_contacto || null
@@ -164,7 +173,9 @@ export default function Reactivar() {
         fecha_contacto: ficha.fecha_contacto,
         tieneFicha: !!clientesMap[id],
       }
+      todosArr.push(item)
       if (estado === 'excluido') { excluidosArr.push(item); return }
+      if (estado === 'no_contactar') { noContactarArr.push(item); return }
       if (estado === 'frio') { friosArr.push(item); return }
       if (pc.ordenes.length === 1) unaCompra.push(item)
     })
@@ -177,18 +188,15 @@ export default function Reactivar() {
     })
     setLista(unaCompra)
     setFrios(friosArr)
+    setNoContactar(noContactarArr)
     setExcluidos(excluidosArr)
+    setTodos(todosArr)
     setCargando(false)
   }
 
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(''), 2500) }
 
-  async function cambiarEstado(c, estado, directo = false) {
-    if (estado === 'excluido' && !directo) {
-      setConfirmarExcluir(c)
-      return
-    }
-    setConfirmarExcluir(null)
+  async function cambiarEstado(c, estado) {
     const payload = {
       estado_contacto: estado === 'pendiente' ? null : estado,
       fecha_contacto: estado.startsWith('contactado') ? hoyISO() : c.fecha_contacto,
@@ -202,7 +210,7 @@ export default function Reactivar() {
       contactado: `Mensaje abierto — ${c.nombre} marcado como contactado`,
       contactado_2: `2do toque registrado para ${c.nombre}`,
       frio: `${c.nombre} marcado frío`,
-      excluido: `${c.nombre} excluido de las estadísticas`,
+      no_contactar: `${c.nombre} vetado — no se le volverá a escribir`,
       pendiente: `${c.nombre} de vuelta en la lista`,
     }
     showToast(msgs[estado] || 'Estado actualizado')
@@ -218,21 +226,6 @@ export default function Reactivar() {
   return (
     <div className="page">
       {toast && <div className="toast">{toast}</div>}
-
-      {confirmarExcluir && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: 24 }}>
-          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24, maxWidth: 340, width: '100%' }}>
-            <div style={{ fontSize: 15, color: 'var(--text)', marginBottom: 8, fontWeight: 700 }}>¿Excluir a {confirmarExcluir.nombre}?</div>
-            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 20, lineHeight: 1.6 }}>
-              Sale de esta lista Y de todas las estadísticas del Panel (clientes, recompra, ingresos por canal). Reversible desde la sección Excluidos.
-            </div>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={() => setConfirmarExcluir(null)}>Cancelar</button>
-              <button className="btn btn-primary btn-sm" style={{ flex: 1, background: 'var(--pink)' }} onClick={() => cambiarEstado(confirmarExcluir, 'excluido', true)}>Excluir</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <div className="page-title">Reactivar</div>
 
@@ -285,10 +278,32 @@ export default function Reactivar() {
         <button onClick={() => setVerFrios(v => !v)} style={{ flex: 1, background: 'none', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, color: 'var(--muted)', cursor: 'pointer', fontSize: 12, padding: '9px 0' }}>
           ❄ Fríos ({frios.length}) {verFrios ? '▲' : '▼'}
         </button>
-        <button onClick={() => setVerExcluidos(v => !v)} style={{ flex: 1, background: 'none', border: '1px solid rgba(196,0,90,0.2)', borderRadius: 10, color: 'var(--muted)', cursor: 'pointer', fontSize: 12, padding: '9px 0' }}>
-          ✕ Excluidos ({excluidos.length}) {verExcluidos ? '▲' : '▼'}
+        <button onClick={() => setVerNoContactar(v => !v)} style={{ flex: 1, background: 'none', border: '1px solid rgba(196,0,90,0.2)', borderRadius: 10, color: 'var(--muted)', cursor: 'pointer', fontSize: 12, padding: '9px 0' }}>
+          🚫 No contactar ({noContactar.length}) {verNoContactar ? '▲' : '▼'}
         </button>
+        {excluidos.length > 0 && (
+          <button onClick={() => setVerExcluidos(v => !v)} style={{ flex: 1, background: 'none', border: '1px solid rgba(196,0,90,0.2)', borderRadius: 10, color: 'var(--muted)', cursor: 'pointer', fontSize: 12, padding: '9px 0' }}>
+            ✕ Excluidos ({excluidos.length}) {verExcluidos ? '▲' : '▼'}
+          </button>
+        )}
       </div>
+
+      {verNoContactar && noContactar.length > 0 && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <div className="card-title">No contactar — cuentan en estadísticas, vetados para venta</div>
+          {noContactar.map(c => (
+            <div key={c.cliente_id} className="list-item">
+              <div>
+                <div className="list-item-name" style={{ fontSize: 13 }}>{c.nombre}</div>
+                <div className="list-item-sub">{c.nOrdenes} {c.nOrdenes === 1 ? 'orden' : 'órdenes'} · {formatCLP(c.totalGastado)} · su historia se mantiene</div>
+              </div>
+              <button onClick={() => cambiarEstado(c, 'pendiente')} style={{ background: 'none', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, color: 'var(--muted)', cursor: 'pointer', fontSize: 11, padding: '5px 10px' }}>
+                quitar veto
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {verFrios && frios.length > 0 && (
         <div className="card" style={{ marginBottom: 12 }}>
@@ -316,17 +331,37 @@ export default function Reactivar() {
                 <div className="list-item-name" style={{ fontSize: 13 }}>{c.nombre}</div>
                 <div className="list-item-sub">{c.nOrdenes} órdenes · {formatCLP(c.totalGastado)} fuera del Panel</div>
               </div>
-              <button onClick={() => cambiarEstado(c, 'frio', true)} style={{ background: 'none', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, color: 'var(--muted)', cursor: 'pointer', fontSize: 11, padding: '5px 10px' }}>
-                restaurar
+              <button onClick={() => cambiarEstado(c, 'no_contactar')} style={{ background: 'none', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, color: 'var(--muted)', cursor: 'pointer', fontSize: 11, padding: '5px 10px' }}>
+                restaurar a no-contactar
               </button>
             </div>
           ))}
         </div>
       )}
 
+      <div className="card" style={{ marginBottom: 12 }}>
+        <div className="card-title">Vetar a un cliente (cualquiera, no solo de 1 compra)</div>
+        <input type="text" className="form-input" placeholder="Busca por nombre... ej: Abel"
+          value={busqueda} onChange={e => setBusqueda(e.target.value)} />
+        {busqueda.trim().length >= 2 && todos
+          .filter(c => !['no_contactar', 'excluido'].includes(c.estado || '') && c.nombre.toLowerCase().includes(busqueda.trim().toLowerCase()))
+          .slice(0, 5)
+          .map(c => (
+            <div key={c.cliente_id} className="list-item">
+              <div>
+                <div className="list-item-name" style={{ fontSize: 13 }}>{c.nombre}</div>
+                <div className="list-item-sub">{c.nOrdenes} {c.nOrdenes === 1 ? 'orden' : 'órdenes'} · {formatCLP(c.totalGastado)} · última hace {c.dias} días</div>
+              </div>
+              <button onClick={() => { cambiarEstado(c, 'no_contactar'); setBusqueda('') }} style={{ background: 'rgba(196,0,90,0.1)', border: '1px solid rgba(196,0,90,0.3)', borderRadius: 8, color: 'var(--pink)', cursor: 'pointer', fontSize: 11, fontWeight: 700, padding: '5px 10px' }}>
+                🚫 vetar
+              </button>
+            </div>
+          ))}
+      </div>
+
       <div style={{ fontSize: 10, color: 'var(--muted)', textAlign: 'center', padding: '4px 0 16px', lineHeight: 1.6 }}>
         Mejor día para contactar: jueves o viernes 18-20h (tu venta se concentra el fin de semana).<br />
-        Los excluidos no cuentan en clientes, recompra ni ingreso del Panel.
+        🚫 No contactar: el cliente cuenta en todas las estadísticas, pero la app nunca lo sugiere para venta.
       </div>
     </div>
   )
