@@ -65,8 +65,18 @@ export function calcularMetricasDashboard({
   recetas = [],
   recetaIngredientes = [],
   insumos = [],
+  clientes = [],
   config = {},
 }) {
+  // Clientes excluidos (estado_contacto = 'excluido', ej: fraude) salen de
+  // TODAS las estadísticas: sus órdenes y ventas no se cuentan.
+  const clientesExcluidos = new Set(clientes.filter(c => c.estado_contacto === 'excluido').map(c => c.id))
+  if (clientesExcluidos.size > 0) {
+    const ordenesExcluidas = new Set(ordenes.filter(o => clientesExcluidos.has(o.cliente_id)).map(o => o.id))
+    ordenes = ordenes.filter(o => !clientesExcluidos.has(o.cliente_id))
+    ventas = ventas.filter(v => !v.orden_id || !ordenesExcluidas.has(v.orden_id))
+  }
+
   const merma = parseFloat(config.merma_pct) || 0.08
   const costoEnvaseLegacy = parseFloat(config.costo_envase) || 794.6
 

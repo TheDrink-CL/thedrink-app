@@ -383,7 +383,7 @@ export default function Indicadores() {
   useEffect(() => {
     async function load() {
       try {
-        const [vts, ords, cja, cmp, rec, recIng, ins, cfg] = await Promise.all([
+        const [vts, ords, cja, cmp, rec, recIng, ins, cfg, clts] = await Promise.all([
           supabase.from('ventas').select('fecha, receta_nombre, litros, precio_venta, ingreso_total, origen, orden_id'),
           supabase.from('ordenes').select('id, fecha, cliente_id, origen'),
           supabase.from('caja').select('fecha, tipo, categoria, monto'),
@@ -392,6 +392,7 @@ export default function Indicadores() {
           supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad'),
           supabase.from('insumos').select('nombre, costo_ppp, aplica_merma'),
           supabase.from('config').select('clave, valor'),
+          supabase.from('clientes').select('id, estado_contacto'),
         ])
         const cfgMap = {}
         ;(cfg.data || []).forEach(c => { cfgMap[c.clave] = c.valor })
@@ -403,6 +404,7 @@ export default function Indicadores() {
           recetas: rec.data || [],
           recetaIngredientes: recIng.data || [],
           insumos: ins.data || [],
+          clientes: clts.data || [],
           config: cfgMap,
         }))
       } catch (e) {
