@@ -461,7 +461,9 @@ export default function Indicadores() {
       </div>
 
       <RetencionVsPauta m={m} />
-      <AnalisisIA m={m} />
+      {/* <AnalisisIA m={m} /> — desactivada por decisión del usuario (jun 2026):
+          el análisis se hace conversando con Claude directamente. Para reactivar:
+          descomentar esta línea y cargar ANTHROPIC_API_KEY en Vercel. */}
       <DondePonerElOjo m={m} />
       <GraficoCanales m={m} />
       <IngresoSemanal m={m} />
