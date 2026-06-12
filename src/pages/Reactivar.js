@@ -77,6 +77,7 @@ function FilaCliente({ c, onEstado }) {
           </div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
             hace {c.dias} días · {c.ultimaReceta || 'sin detalle'} · {formatCLP(c.totalGastado)}
+            {c.distancia != null && <span style={{ color: 'var(--cyan)' }}> · 📍 {c.distancia} km</span>}
             {!tel && <span style={{ color: 'var(--pink)' }}> · sin teléfono</span>}
           </div>
         </div>
@@ -116,6 +117,7 @@ export default function Reactivar() {
   const [verExcluidos, setVerExcluidos] = useState(false)
   const [busqueda, setBusqueda] = useState('')
   const [todos, setTodos] = useState([])
+  const [ordenPor, setOrdenPor] = useState('ventana') // 'ventana' | 'distancia'
   const [cargando, setCargando] = useState(true)
   const [toast, setToast] = useState('')
 
@@ -123,9 +125,9 @@ export default function Reactivar() {
 
   async function load() {
     const [{ data: ords }, { data: vts }, { data: clts }] = await Promise.all([
-      supabase.from('ordenes').select('id, fecha, cliente_id, cliente_nombre, cliente_telefono'),
+      supabase.from('ordenes').select('id, fecha, cliente_id, cliente_nombre, cliente_telefono, distancia_km'),
       supabase.from('ventas').select('orden_id, receta_nombre, ingreso_total, litros, precio_venta'),
-      supabase.from('clientes').select('id, nombre, telefono, estado_contacto, fecha_contacto'),
+      supabase.from('clientes').select('id, nombre, telefono, estado_contacto, fecha_contacto, distancia_km'),
     ])
     const clientesMap = {}
     ;(clts || []).forEach(c => { clientesMap[c.id] = c })
@@ -161,6 +163,11 @@ export default function Reactivar() {
       const ultima = ordenadas[0]
       const vo = ventasPorOrden[ultima.id] || { recetas: [], total: 0 }
       const totalGastado = pc.ordenes.reduce((s, o) => s + ((ventasPorOrden[o.id] || {}).total || 0), 0)
+      // Distancia: ficha del cliente primero; si no, la menor registrada en sus órdenes
+      const distOrdenes = pc.ordenes.map(o => parseFloat(o.distancia_km)).filter(d => !isNaN(d) && d > 0)
+      const distancia = parseFloat(ficha.distancia_km) > 0
+        ? parseFloat(ficha.distancia_km)
+        : (distOrdenes.length > 0 ? Math.min(...distOrdenes) : null)
       const item = {
         cliente_id: id,
         nombre: ficha.nombre || pc.nombre || 'Sin nombre',
@@ -169,6 +176,7 @@ export default function Reactivar() {
         dias: diasDesde(ultima.fecha),
         ultimaReceta: vo.recetas[0] || null,
         totalGastado,
+        distancia,
         estado,
         fecha_contacto: ficha.fecha_contacto,
         tieneFicha: !!clientesMap[id],
@@ -180,12 +188,6 @@ export default function Reactivar() {
       if (pc.ordenes.length === 1) unaCompra.push(item)
     })
 
-    // Orden: ventana de oro primero, luego por recencia (más reciente arriba)
-    unaCompra.sort((a, b) => {
-      const va = a.dias >= VENTANA_ORO_MIN && a.dias <= VENTANA_ORO_MAX ? 0 : 1
-      const vb = b.dias >= VENTANA_ORO_MIN && b.dias <= VENTANA_ORO_MAX ? 0 : 1
-      return va !== vb ? va - vb : a.dias - b.dias
-    })
     setLista(unaCompra)
     setFrios(friosArr)
     setNoContactar(noContactarArr)
@@ -217,9 +219,24 @@ export default function Reactivar() {
     load()
   }
 
-  const pendientes = lista.filter(c => !c.estado)
-  const contactados = lista.filter(c => c.estado === 'contactado')
-  const agotados = lista.filter(c => c.estado === 'contactado_2')
+  // Orden según el modo elegido: ventana de oro (default) o cercanía
+  // (útil para repartir a pie / sin auto: contactar primero a los más cerca)
+  const ordenar = (arr) => {
+    const a2 = arr.slice()
+    if (ordenPor === 'distancia') {
+      a2.sort((a, b) => (a.distancia ?? 9999) - (b.distancia ?? 9999))
+    } else {
+      a2.sort((a, b) => {
+        const va = a.dias >= VENTANA_ORO_MIN && a.dias <= VENTANA_ORO_MAX ? 0 : 1
+        const vb = b.dias >= VENTANA_ORO_MIN && b.dias <= VENTANA_ORO_MAX ? 0 : 1
+        return va !== vb ? va - vb : a.dias - b.dias
+      })
+    }
+    return a2
+  }
+  const pendientes = ordenar(lista.filter(c => !c.estado))
+  const contactados = ordenar(lista.filter(c => c.estado === 'contactado'))
+  const agotados = ordenar(lista.filter(c => c.estado === 'contactado_2'))
 
   if (cargando) return <div className="loading">Cargando...</div>
 
@@ -245,6 +262,17 @@ export default function Reactivar() {
           <div className="kpi-value" style={{ fontSize: 24, color: 'var(--cyan)' }}>{contactados.length + agotados.length}</div>
           <div className="kpi-sub">{agotados.length} con 2 toques hechos</div>
         </div>
+      </div>
+
+      <div className="toggle-row" style={{ marginBottom: 12 }}>
+        <button className={`toggle-btn ${ordenPor === 'ventana' ? 'active-entrada' : ''}`}
+          onClick={() => setOrdenPor('ventana')} style={{ fontSize: 12 }}>
+          🔥 Ventana de oro
+        </button>
+        <button className={`toggle-btn ${ordenPor === 'distancia' ? 'active-entrada' : ''}`}
+          onClick={() => setOrdenPor('distancia')} style={{ fontSize: 12 }}>
+          📍 Más cercanos
+        </button>
       </div>
 
       {pendientes.length > 0 && (
