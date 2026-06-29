@@ -99,6 +99,82 @@ function ProveedorModal({ proveedor, onSave, onCancel }) {
   )
 }
 
+function NuevoInsumoModal({ insumosExistentes, onSave, onCancel }) {
+  const [nombre, setNombre] = useState('')
+  const [unidad, setUnidad] = useState('ml')
+  const [aplicaMerma, setAplicaMerma] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleSave = async () => {
+    const nombreTrim = nombre.trim()
+    if (!nombreTrim) { setError('El nombre es obligatorio'); return }
+    // Evitar duplicados (case-insensitive) — el nombre es la clave natural
+    const yaExiste = (insumosExistentes || []).some(
+      i => i.nombre.toLowerCase() === nombreTrim.toLowerCase()
+    )
+    if (yaExiste) { setError('Ya existe un insumo con ese nombre'); return }
+
+    setSaving(true); setError('')
+    const { error: err } = await supabase.from('insumos').insert({
+      nombre: nombreTrim,
+      unidad,
+      costo_ppp: 0,          // entra en 0; la primera compra calcula el PPP real
+      aplica_merma: aplicaMerma,
+    })
+    setSaving(false)
+    if (err) { setError(err.message); return }
+    onSave(nombreTrim)
+  }
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, padding:24 }}>
+      <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:14, padding:24, maxWidth:400, width:'100%' }}>
+        <div style={{ fontWeight:700, fontSize:16, color:'var(--text)', marginBottom:18 }}>
+          Nuevo insumo
+        </div>
+        <div className="form-group">
+          <label className="form-label">Nombre</label>
+          <input type="text" className="form-input" value={nombre}
+            placeholder="ej: Pulpa de Arándano" autoFocus
+            onChange={e => setNombre(e.target.value)} />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Unidad</label>
+          <select className="form-select" value={unidad}
+            onChange={e => setUnidad(e.target.value)}>
+            <option value="ml">ml</option>
+            <option value="g">g</option>
+            <option value="unidad">unidad</option>
+            <option value="kg">kg</option>
+            <option value="lt">lt</option>
+          </select>
+          <div style={{ fontSize:11, color:'var(--muted)', marginTop:4, lineHeight:1.5 }}>
+            Usa la misma unidad que vas a poner en la receta, sino el costeo queda mal.
+          </div>
+        </div>
+        <div className="form-group">
+          <label style={{ display:'flex', alignItems:'center', gap:10, cursor:'pointer' }}>
+            <input type="checkbox" checked={aplicaMerma}
+              onChange={e => setAplicaMerma(e.target.checked)} />
+            <span style={{ fontSize:13, color:'var(--text)' }}>Aplica merma</span>
+          </label>
+          <div style={{ fontSize:11, color:'var(--muted)', marginTop:4, lineHeight:1.5 }}>
+            Marcado para ingredientes a granel (jugos, pulpas, syrups). Desmarca para productos cerrados (latas, botellas).
+          </div>
+        </div>
+        {error && <div style={{ color:'var(--pink)', fontSize:12, marginBottom:12 }}>{error}</div>}
+        <div style={{ display:'flex', gap:10 }}>
+          <button className="btn btn-secondary btn-sm" style={{ flex:1 }} onClick={onCancel}>Cancelar</button>
+          <button className="btn btn-primary btn-sm" style={{ flex:1 }} disabled={saving} onClick={handleSave}>
+            {saving ? 'Guardando...' : 'Crear'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function EditCompraModal({ compra, insumos, proveedores, onSave, onCancel }) {
   const [fecha, setFecha] = useState(compra.fecha)
   const [insumoNombre, setInsumoNombre] = useState(compra.insumo_nombre)
@@ -412,6 +488,7 @@ export default function Compras() {
   const [confirmarProveedor, setConfirmarProveedor] = useState(null)
   const [fabricandoGoma, setFabricandoGoma] = useState(false)
   const [mlGoma, setMlGoma] = useState('')
+  const [creandoInsumo, setCreandoInsumo] = useState(false)
 
   // ── Frascos: detecta si el insumo seleccionado es un frasco ────────────────
   // y permite mostrar un banner aclaratorio sobre el formato.
@@ -570,6 +647,21 @@ export default function Compras() {
           onCancel={() => setConfirmar(null)}
         />
       )}
+      {creandoInsumo && (
+        <NuevoInsumoModal
+          insumosExistentes={insumos}
+          onSave={async (nombreNuevo) => {
+            setCreandoInsumo(false)
+            showToast('Insumo creado ✓')
+            const { data: ins } = await supabase.from('insumos').select('*').order('nombre')
+            setInsumos(ins || [])
+            const creado = (ins || []).find(i => i.nombre === nombreNuevo)
+            // Dejarlo seleccionado en el form para registrar su primera compra
+            setForm(f => ({ ...f, insumo_nombre: nombreNuevo, unidad: creado?.unidad || 'ml', cantidad: '', precio_total: '' }))
+          }}
+          onCancel={() => setCreandoInsumo(false)}
+        />
+      )}
       {editandoStock && (
         <EditStockModal
           insumo={editandoStock}
@@ -634,11 +726,16 @@ export default function Compras() {
                 </div>
                 <div className="form-group">
                   <label className="form-label">Insumo</label>
-                  <select className="form-select" value={form.insumo_nombre}
-                    onChange={e => handleSelectInsumo(e.target.value)}>
-                    <option value="">Seleccionar insumo...</option>
-                    {insumos.map(i => <option key={i.nombre} value={i.nombre}>{i.nombre}</option>)}
-                  </select>
+                  <div style={{ display:'flex', gap:8 }}>
+                    <select className="form-select" style={{ flex:1 }} value={form.insumo_nombre}
+                      onChange={e => handleSelectInsumo(e.target.value)}>
+                      <option value="">Seleccionar insumo...</option>
+                      {insumos.map(i => <option key={i.nombre} value={i.nombre}>{i.nombre}</option>)}
+                    </select>
+                    <button type="button" className="btn btn-secondary btn-sm"
+                      style={{ flexShrink:0, width:44, padding:0, fontSize:20, lineHeight:1 }}
+                      onClick={() => setCreandoInsumo(true)} title="Nuevo insumo">+</button>
+                  </div>
                 </div>
                 {/* Banner Frascos: aclara formato y permite cambio rápido */}
                 {esFrasco && (
