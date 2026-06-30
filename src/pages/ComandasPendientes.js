@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import { descontarStock } from '../lib/inventario'
 
 const fechaHoy = () => {
   const d = new Date()
@@ -99,6 +100,9 @@ function ModalVenta({ comanda, recetas, onGuardar, onCerrar }) {
         nota: it.devuelve_envase ? 'envase devuelto' : (it.nota || null),
         orden_id: orden.id,
       })))
+
+      // Descontar inventario por los ingredientes consumidos en esta venta.
+      await descontarStock(validos)
 
       // Vincular la comanda con la venta creada. NO archivamos automáticamente:
       // si la comanda estaba "pendiente" sigue ahí (la TV la sigue mostrando con

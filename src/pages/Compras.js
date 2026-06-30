@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { ajustarStockPorCompra } from '../lib/inventario'
 import { formatCLP } from '../lib/calculos'
 
 function ConfirmModal({ mensaje, onConfirm, onCancel }) {
@@ -204,6 +205,12 @@ function EditCompraModal({ compra, insumos, proveedores, onSave, onCancel }) {
       proveedor_id: proveedorId || null,
       nota: nota || null
     }).eq('id', compra.id)
+    // Ajustar inventario por el cambio: revertir la cantidad/insumo viejos y
+    // aplicar los nuevos. Solo afecta compras de insumo (no activos fijos).
+    if (compra.tipo !== 'activo_fijo') {
+      await ajustarStockPorCompra(compra.insumo_nombre, compra.cantidad, -1)
+      await ajustarStockPorCompra(insumoNombre, parseFloat(cantidad), +1)
+    }
     setSaving(false)
     onSave()
   }
@@ -547,6 +554,8 @@ export default function Compras() {
       tipo: 'insumo',
     })
     if (!error) {
+      // Compra de insumo SUMA al inventario.
+      await ajustarStockPorCompra(form.insumo_nombre, cantidadFinal, +1)
       const toastMsg = esCitrico && limonEnKg
         ? `Compra registrada · ${limonMlCalculado}ml ${esNaranja ? 'naranja' : 'limón'} · PPP actualizado`
         : 'Compra registrada · PPP actualizado'
@@ -587,9 +596,13 @@ export default function Compras() {
     setLoading(false)
   }
 
-  const handleEliminar = async (id) => {
-    await supabase.from('compras').delete().eq('id', id)
-    showToast('Compra eliminada · PPP recalculado')
+  const handleEliminar = async (compra) => {
+    await supabase.from('compras').delete().eq('id', compra.id)
+    // Revertir el stock que esta compra de insumo había sumado.
+    if (compra && compra.tipo !== 'activo_fijo') {
+      await ajustarStockPorCompra(compra.insumo_nombre, compra.cantidad, -1)
+    }
+    showToast('Compra eliminada · PPP recalculado · stock ajustado')
     setConfirmar(null)
     loadData()
   }
@@ -643,7 +656,7 @@ export default function Compras() {
       {confirmar && (
         <ConfirmModal
           mensaje={`¿Eliminar compra de ${confirmar.insumo_nombre} (${formatCLP(confirmar.precio_total)})?`}
-          onConfirm={() => handleEliminar(confirmar.id)}
+          onConfirm={() => handleEliminar(confirmar)}
           onCancel={() => setConfirmar(null)}
         />
       )}

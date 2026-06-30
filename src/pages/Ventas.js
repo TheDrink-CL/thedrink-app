@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { descontarStock, reintegrarStock } from '../lib/inventario'
 import { formatCLP } from '../lib/calculos'
 import { descargarCSV, BotonExportar } from '../lib/exportar'
 
@@ -154,6 +155,50 @@ const TIPOS_DELIVERY = [
   { id: 'otro',    label: '· Otro' },
 ]
 
+// ─── Concurso NEON (descuento 15% por código de único uso) ──────────────────
+const NEON_DESCUENTO = 0.15        // 15%
+const NEON_VALIDEZ_DIAS = 7        // código válido 7 días desde su fecha
+
+// Misma fórmula que validador.html: checksum determinístico sobre NEON+DDMM.
+function neonChecksumEsperado(dd, mm) {
+  const seed = 'NEON' + dd + mm
+  let sum = 0
+  for (let i = 0; i < seed.length; i++) sum += seed.charCodeAt(i) * (i + 1)
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  return chars[sum % 32] + chars[(sum * 7) % 32] + chars[(sum * 13 + 5) % 32]
+}
+
+// Valida formato + checksum + caducidad. Devuelve { ok, codigo, motivo }.
+// NO consulta Supabase (eso lo hace handleSubmit para ver reúso por teléfono).
+function validarFormulaNeon(raw) {
+  const code = (raw || '').trim().toUpperCase()
+  if (!code) return { ok: false, motivo: 'vacio' }
+  const m = code.match(/^NEON-?(\d{2})(\d{2})-?([A-Z2-9]{3})$/)
+  if (!m) return { ok: false, motivo: 'formato', detalle: 'Formato esperado: NEON-DDMM-XXX' }
+  const [, dd, mm, checksum] = m
+  if (checksum !== neonChecksumEsperado(dd, mm)) {
+    return { ok: false, motivo: 'invalido', detalle: 'Checksum no coincide · posible adivinanza o typo' }
+  }
+  // Caducidad
+  const now = new Date()
+  const codeDate = new Date(now.getFullYear(), parseInt(mm) - 1, parseInt(dd))
+  if (codeDate > now) codeDate.setFullYear(now.getFullYear() - 1) // del año pasado
+  const diffDays = Math.floor((now - codeDate) / (1000 * 60 * 60 * 24))
+  if (diffDays < 0) return { ok: false, motivo: 'futuro', detalle: 'Código del futuro · revisar' }
+  if (diffDays > NEON_VALIDEZ_DIAS) {
+    return { ok: false, motivo: 'expirado', detalle: `Generado hace ${diffDays} días · válido solo ${NEON_VALIDEZ_DIAS}` }
+  }
+  // Normaliza a la forma canónica con guiones para guardar consistente
+  const canonico = `NEON-${dd}${mm}-${checksum}`
+  return { ok: true, codigo: canonico, diffDays }
+}
+
+// Normaliza teléfono: deja solo dígitos para que +56 9 1234 / 56912341234 / etc.
+// cuenten como el mismo número y la regla 1-teléfono-1-código no se burle con formato.
+function normalizarTelefono(tel) {
+  return (tel || '').replace(/\D/g, '')
+}
+
 function ConfirmModal({ mensaje, onConfirm, onCancel }) {
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, padding:24 }}>
@@ -201,7 +246,7 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
     setSaving(true)
 
     // Actualizar orden
-    await supabase.from('ordenes').update({
+    const { error: errOrden } = await supabase.from('ordenes').update({
       fecha,
       hora: hora || null,
       cliente_nombre: cliente || null,
@@ -212,6 +257,12 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
       delivery_tipo: (parseFloat(delivery) > 0 || deliveryTipo === 'retiro' || deliveryTipo === 'propio') ? (deliveryTipo || null) : null,
       distancia_km: (deliveryTipo && deliveryTipo !== 'retiro' && distanciaKm !== '') ? parseFloat(distanciaKm) : null,
     }).eq('id', orden.id)
+    if (errOrden) {
+      console.error('Error al actualizar orden:', errOrden)
+      showToast('Error al actualizar pedido: ' + errOrden.message)
+      setSaving(false)
+      return
+    }
 
     // Reintegrar el stock que consumieron las ventas anteriores
     const itemsAnteriores = (orden.ventas || []).map(v => ({
@@ -224,8 +275,14 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
     }
 
     // Borrar ventas antiguas e insertar nuevas
-    await supabase.from('ventas').delete().eq('orden_id', orden.id)
-    await supabase.from('ventas').insert(itemsValidos.map(it => ({
+    const { error: errDelete } = await supabase.from('ventas').delete().eq('orden_id', orden.id)
+    if (errDelete) {
+      console.error('Error al borrar ventas antiguas:', errDelete)
+      showToast('Error al actualizar productos: ' + errDelete.message)
+      setSaving(false)
+      return
+    }
+    const { error: errInsert } = await supabase.from('ventas').insert(itemsValidos.map(it => ({
       fecha,
       receta_nombre: it.receta_nombre,
       litros: parseFloat(it.litros) || 1,
@@ -235,6 +292,12 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
       nota: it.devuelve_envase ? 'envase devuelto' : null,
       orden_id: orden.id,
     })))
+    if (errInsert) {
+      console.error('Error al insertar ventas nuevas:', errInsert)
+      showToast('Error al guardar productos: ' + errInsert.message)
+      setSaving(false)
+      return
+    }
 
     // Descontar stock por los nuevos ítems
     await descontarStock(itemsValidos)
@@ -374,124 +437,6 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
   )
 }
 
-// ─── Movimientos de stock por ventas ────────────────────────────────────────
-// Calcula cuánto descontar/reintegrar de cada insumo para un set de ítems.
-// `signo`: -1 para descontar (venta nueva), +1 para reintegrar (venta borrada/editada).
-// Aplica merma del 8% al INSUMO al descontar; al reintegrar se devuelve el mismo
-// monto que se descontó originalmente (con merma incluida) para que el reverso
-// sea exacto. ENVASE se cuenta como un insumo más, EXCEPTO si la venta tiene
-// "envase devuelto" (en cuyo caso el frasco vuelve al stock al instante).
-// Acepta opcionalmente `insumosMap` = { nombre.toLowerCase: { aplica_merma } }.
-// Si un insumo tiene aplica_merma=false, su descuento no se infla con merma.
-function calcularMovimientosStock(itemsValidos, ingredientesPorReceta, signo, insumosMap = {}) {
-  const MERMA = 0.08
-  const movs = {} // { insumo_nombre: cantidad (con signo) }
-  itemsValidos.forEach(it => {
-    const litros = parseFloat(it.litros) || 1
-    const devuelve = !!it.devuelve_envase || it.nota === 'envase devuelto'
-    const ingsReceta = ingredientesPorReceta[it.receta_nombre] || []
-    ingsReceta.forEach(ing => {
-      // "Envase" abarca el legacy 'ENVASE' y cualquier insumo 'Frascos *'.
-      const nombre = ing.insumo_nombre || ''
-      const esEnvase = nombre === 'ENVASE' || nombre.startsWith('Frascos ')
-      // Si el cliente devuelve el envase, no se descuenta ni se reintegra.
-      if (esEnvase && devuelve) return
-      // Merma aplica a insumos consumibles fraccionables. Se excluye:
-      // - Cualquier envase/frasco (reutilizable).
-      // - Insumos marcados aplica_merma=false en BD (latas cerradas, etc.).
-      const meta = insumosMap[nombre.toLowerCase()]
-      const aplicaMermaInsumo = meta ? meta.aplica_merma !== false : true
-      const factorMerma = (esEnvase || !aplicaMermaInsumo) ? 1 : (1 + MERMA)
-      const cantidad = ing.cantidad * litros * factorMerma
-      movs[nombre] = (movs[nombre] || 0) + cantidad * signo
-    })
-  })
-  return movs
-}
-
-// Aplica un set de movimientos al stock (puede ser mezcla de + y -).
-async function aplicarMovimientosStock(movs) {
-  const nombresInsumos = Object.keys(movs).filter(n => movs[n] !== 0)
-  if (nombresInsumos.length === 0) return
-  const { data: stocks } = await supabase
-    .from('insumos')
-    .select('nombre, stock_actual')
-    .in('nombre', nombresInsumos)
-  if (!stocks) return
-  await Promise.all(stocks.map(ins => {
-    const delta = movs[ins.nombre] || 0
-    const nuevo = Math.max(0, (ins.stock_actual || 0) + delta)
-    return supabase.from('insumos').update({ stock_actual: nuevo }).eq('nombre', ins.nombre)
-  }))
-}
-
-// Carga los ingredientes de las recetas que aparecen en estos ítems.
-// Además, inyecta automáticamente el insumo del frasco según el
-// `envase_formato` de la receta. Así no hay que crear filas "ENVASE" para
-// cada receta nueva en `receta_ingredientes` — el formato de la receta es
-// la fuente de verdad.
-async function cargarIngredientes(itemsValidos) {
-  const nombresRecetas = [...new Set(itemsValidos.map(it => it.receta_nombre))]
-  if (nombresRecetas.length === 0) return {}
-  const [{ data: ings }, { data: recetasMeta }] = await Promise.all([
-    supabase
-      .from('receta_ingredientes')
-      .select('receta_nombre, insumo_nombre, cantidad')
-      .in('receta_nombre', nombresRecetas),
-    supabase
-      .from('recetas')
-      .select('nombre, envase_formato')
-      .in('nombre', nombresRecetas),
-  ])
-  const porReceta = {}
-  ;(ings || []).forEach(i => {
-    if (!porReceta[i.receta_nombre]) porReceta[i.receta_nombre] = []
-    porReceta[i.receta_nombre].push(i)
-  })
-  // Inyectar frasco según envase_formato (si no está ya como ingrediente).
-  ;(recetasMeta || []).forEach(r => {
-    const lista = porReceta[r.nombre] || []
-    const yaTieneFrasco = lista.some(x => (x.insumo_nombre || '').startsWith('Frascos '))
-    if (yaTieneFrasco) return
-    const formato = r.envase_formato || '1lt'
-    const insumoEnvase = formato === '475ml' ? 'Frascos 475ml' : 'Frascos 1lt'
-    lista.push({ receta_nombre: r.nombre, insumo_nombre: insumoEnvase, cantidad: 1 })
-    porReceta[r.nombre] = lista
-  })
-  return porReceta
-}
-
-// Carga la flag aplica_merma de todos los insumos relevantes.
-// Devuelve un map { nombre.toLowerCase: { aplica_merma } }.
-async function cargarInsumosMeta() {
-  const { data } = await supabase.from('insumos').select('nombre, aplica_merma')
-  const map = {}
-  ;(data || []).forEach(i => {
-    map[(i.nombre || '').toLowerCase()] = { aplica_merma: i.aplica_merma !== false }
-  })
-  return map
-}
-
-// Descuenta ingredientes del stock al registrar una venta (api pública).
-async function descontarStock(itemsValidos) {
-  const [ingredientes, insumosMap] = await Promise.all([
-    cargarIngredientes(itemsValidos),
-    cargarInsumosMeta(),
-  ])
-  const movs = calcularMovimientosStock(itemsValidos, ingredientes, -1, insumosMap)
-  await aplicarMovimientosStock(movs)
-}
-
-// Reintegra stock cuando se borra o edita una venta (lo opuesto a descontar).
-async function reintegrarStock(itemsAnteriores) {
-  const [ingredientes, insumosMap] = await Promise.all([
-    cargarIngredientes(itemsAnteriores),
-    cargarInsumosMeta(),
-  ])
-  const movs = calcularMovimientosStock(itemsAnteriores, ingredientes, +1, insumosMap)
-  await aplicarMovimientosStock(movs)
-}
-
 export default function Ventas() {
   const [recetas, setRecetas] = useState([])
   const [ordenes, setOrdenes] = useState([])
@@ -522,6 +467,22 @@ export default function Ventas() {
   const [enviarADelivery, setEnviarADelivery] = useState(false)
   const [nota, setNota] = useState('')
   const [items, setItems] = useState([itemVacio()])
+
+  // Concurso NEON
+  const [codigoNeon, setCodigoNeon] = useState('')
+  const [neonEstado, setNeonEstado] = useState(null) // { ok, msg } feedback en vivo
+
+  // Feedback en vivo del código NEON mientras se escribe (solo fórmula/caducidad,
+  // el chequeo de reúso por teléfono ocurre al guardar).
+  useEffect(() => {
+    if (!codigoNeon.trim()) { setNeonEstado(null); return }
+    const r = validarFormulaNeon(codigoNeon)
+    if (r.ok) setNeonEstado({ ok: true, msg: `Código válido · -15% (hace ${r.diffDays} día${r.diffDays === 1 ? '' : 's'})` })
+    else if (r.motivo === 'formato') setNeonEstado({ ok: false, msg: 'Formato: NEON-DDMM-XXX' })
+    else if (r.motivo === 'expirado') setNeonEstado({ ok: false, msg: r.detalle })
+    else if (r.motivo === 'futuro') setNeonEstado({ ok: false, msg: r.detalle })
+    else setNeonEstado({ ok: false, msg: 'Código inválido (checksum)' })
+  }, [codigoNeon])
 
   useEffect(() => { load() }, [])
 
@@ -649,6 +610,34 @@ export default function Ventas() {
       showToast('Agrega al menos un producto con receta y precio')
       return
     }
+
+    // ── Validación del código NEON (antes de tocar la base) ──────────────────
+    let neonAplicado = null // { codigo, telefono } si se va a canjear
+    if (codigoNeon.trim()) {
+      const v = validarFormulaNeon(codigoNeon)
+      if (!v.ok) {
+        showToast('Código NEON ' + (v.motivo === 'expirado' ? 'expirado' : v.motivo === 'futuro' ? 'con fecha futura' : 'inválido') + ': ' + (v.detalle || 'no se aplicó el descuento'))
+        return
+      }
+      const tel = normalizarTelefono(clienteTelefono)
+      if (!tel) {
+        showToast('Para canjear un NEON necesitás el teléfono del cliente (1 teléfono = 1 código)')
+        return
+      }
+      // ¿Este teléfono ya canjeó algún NEON antes?
+      const { data: previo, error: errPrevio } = await supabase
+        .from('canjes_neon').select('codigo, fecha_canje').eq('telefono', tel).maybeSingle()
+      if (errPrevio) {
+        showToast('No pude verificar el código (error de red): ' + errPrevio.message)
+        return
+      }
+      if (previo) {
+        showToast('Ese teléfono ya usó un NEON (' + previo.codigo + '). 1 código por cliente.')
+        return
+      }
+      neonAplicado = { codigo: v.codigo, telefono: tel }
+    }
+
     setLoading(true)
 
     // Buscar o crear cliente en tabla maestro
@@ -704,16 +693,47 @@ export default function Ventas() {
       return
     }
 
-    const ventasInsert = itemsValidos.map(it => ({
-      fecha,
-      receta_nombre: it.receta_nombre,
-      litros: parseFloat(it.litros) || 1,
-      precio_venta: (parseFloat(it.precio_venta) || 0) - (it.devuelve_envase ? DESCUENTO_ENVASE : 0),
-      delivery: 0,
-      origen: origen || null,
-      nota: it.devuelve_envase ? 'envase devuelto' : null,
-      orden_id: orden.id,
-    }))
+    // Registrar el canje NEON ANTES de las ventas. El UNIQUE de la base es el
+    // candado real contra reúso (incluso si dos cajas guardan a la vez). Si salta
+    // la constraint, revertimos la orden recién creada y abortamos sin cobrar mal.
+    if (neonAplicado) {
+      const { error: errCanje } = await supabase.from('canjes_neon').insert({
+        codigo: neonAplicado.codigo,
+        telefono: neonAplicado.telefono,
+        cliente_nombre: cliente || null,
+        orden_id: orden.id,
+      })
+      if (errCanje) {
+        await supabase.from('ordenes').delete().eq('id', orden.id) // rollback
+        const dup = errCanje.code === '23505' || /duplicate|unique/i.test(errCanje.message || '')
+        showToast(dup
+          ? 'Ese código o teléfono ya fue canjeado. No se aplicó el descuento.'
+          : 'No se pudo registrar el código NEON: ' + errCanje.message)
+        setLoading(false)
+        return
+      }
+    }
+
+    const factorNeon = neonAplicado ? (1 - NEON_DESCUENTO) : 1
+    let descuentoNeonTotal = 0
+    const ventasInsert = itemsValidos.map(it => {
+      const precioBase = (parseFloat(it.precio_venta) || 0) - (it.devuelve_envase ? DESCUENTO_ENVASE : 0)
+      const precioFinal = Math.round(precioBase * factorNeon)
+      if (neonAplicado) descuentoNeonTotal += (precioBase - precioFinal) * (parseFloat(it.litros) || 1)
+      const notas = []
+      if (it.devuelve_envase) notas.push('envase devuelto')
+      if (neonAplicado) notas.push('NEON -15%')
+      return {
+        fecha,
+        receta_nombre: it.receta_nombre,
+        litros: parseFloat(it.litros) || 1,
+        precio_venta: precioFinal,
+        delivery: 0,
+        origen: origen || null,
+        nota: notas.length ? notas.join(' · ') : null,
+        orden_id: orden.id,
+      }
+    })
     console.log('ventasInsert:', ventasInsert)
     const { error: errVentas } = await supabase.from('ventas').insert(ventasInsert)
     console.log('ventas error:', errVentas)
@@ -730,10 +750,19 @@ export default function Ventas() {
       await supabase.from('insumos').update({ stock_actual: (ins?.stock_actual || 0) + envasesDevueltos }).eq('nombre', 'Frascos 1lt')
     }
 
+    // Guardar el monto descontado en el canje (para reporte del concurso)
+    if (neonAplicado && descuentoNeonTotal > 0) {
+      await supabase.from('canjes_neon')
+        .update({ monto_descuento: Math.round(descuentoNeonTotal) })
+        .eq('orden_id', orden.id)
+    }
+
     // Descuento de stock por ingredientes utilizados
     await descontarStock(itemsValidos)
 
-    showToast('Pedido registrado ✓')
+    showToast(neonAplicado
+      ? `Pedido registrado ✓ · NEON aplicado (-${formatCLP(Math.round(descuentoNeonTotal))})`
+      : 'Pedido registrado ✓')
     setFecha(fechaHoy())
     setHora(horaAhora())
     setCliente('')
@@ -748,6 +777,8 @@ export default function Ventas() {
     setEnviarADelivery(false)
     setNota('')
     setItems([itemVacio()])
+    setCodigoNeon('')
+    setNeonEstado(null)
     load()
     setLoading(false)
   }
@@ -1153,6 +1184,39 @@ export default function Ventas() {
             <label className="form-label">Nota — opcional</label>
             <input type="text" className="form-input" value={nota} placeholder="ej: pago en 2 partes"
               onChange={e => setNota(e.target.value)} />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" style={{ color:'#ff44ff', letterSpacing:'0.12em' }}>
+              ◆ Código NEON — opcional (15% dto)
+            </label>
+            <input
+              type="text"
+              className="form-input"
+              value={codigoNeon}
+              placeholder="NEON-DDMM-XXX"
+              autoComplete="off"
+              spellCheck={false}
+              onChange={e => setCodigoNeon(e.target.value.toUpperCase())}
+              style={{
+                textTransform:'uppercase',
+                letterSpacing:'0.14em',
+                borderColor: neonEstado ? (neonEstado.ok ? 'var(--green, #00ff88)' : 'var(--pink, #ff3366)') : undefined,
+              }}
+            />
+            {neonEstado && (
+              <div style={{
+                marginTop:6, fontSize:12, fontWeight:600, letterSpacing:'0.04em',
+                color: neonEstado.ok ? 'var(--green, #00ff88)' : 'var(--pink, #ff3366)',
+              }}>
+                {neonEstado.ok ? '✓ ' : '✕ '}{neonEstado.msg}
+              </div>
+            )}
+            {codigoNeon.trim() && !normalizarTelefono(clienteTelefono) && (
+              <div style={{ marginTop:4, fontSize:11, color:'var(--muted)' }}>
+                Cargá el teléfono del cliente para poder canjear (1 código por teléfono).
+              </div>
+            )}
           </div>
 
           <button type="submit" className="btn btn-primary" disabled={loading}>
