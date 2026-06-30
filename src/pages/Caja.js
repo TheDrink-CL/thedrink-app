@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { formatCLP } from '../lib/calculos'
+import { formatCLP, enriquecerVentasConDelivery } from '../lib/calculos'
 
 // La pestaña "Publicidad" se eliminó (jun 2026): duplicaba el análisis de pauta
 // que ahora vive en Indicadores (ROAS semanal) y Análisis (origen de clientes),
@@ -50,17 +50,19 @@ export default function Caja() {
   async function loadData() {
     const [{ data: mov }, { data: vts }, { data: compras }, { data: ordenes }] = await Promise.all([
       supabase.from('caja').select('*').order('fecha', { ascending: false }),
-      supabase.from('ventas').select('litros, precio_venta, delivery'),
+      supabase.from('ventas').select('litros, precio_venta, delivery, orden_id'),
       supabase.from('compras').select('precio_total, es_inversion'),
-      supabase.from('ordenes').select('delivery_cobrado'),
+      supabase.from('ordenes').select('id, delivery, delivery_cobrado'),
     ])
 
     setMovimientos(mov || [])
 
-    const totalVentas = (vts || []).reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0)
-    // Cobro de delivery al cliente: ahora viene en la orden. Los cobros viejos
-    // siguen como movimiento manual categoria='Delivery' (corte por fecha).
-    const totalDeliveryCobrado = (ordenes || []).reduce((s, o) => s + (o.delivery_cobrado || 0), 0)
+    // Enriquecer ventas con el delivery (costo) y cobro de su orden, igual que
+    // el Dashboard, para que ambas pantallas muestren el MISMO saldo. El costo
+    // de delivery vive en `ordenes`, no en las filas de `ventas`.
+    const vtsEnr = enriquecerVentasConDelivery(vts || [], ordenes || [])
+    const totalVentas = vtsEnr.reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0)
+    const totalDeliveryCobrado = vtsEnr.reduce((s, v) => s + (v.delivery_cobrado || 0), 0)
     const totalCompras = (compras || []).reduce((s, c) => s + (c.es_inversion ? 0 : c.precio_total), 0)
     // Entradas manuales: se excluye 'Venta' (ya viene de la tabla ventas).
     // 'Delivery' SÍ suma — es el cobro al cliente y no existe en ninguna otra tabla
