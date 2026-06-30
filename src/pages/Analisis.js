@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatCLP, calcularCostoReceta, esOrigenIGAds } from '../lib/calculos'
 import { calcularRentabilidad } from '../lib/rentabilidad'
+import { enriquecerVentasConDelivery } from '../lib/calculos'
 import RankingRecetas from '../components/RankingRecetas'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -1563,7 +1564,7 @@ export default function Analisis() {
         //    usando el módulo central para no diverger del Dashboard ─────────
         const gastosCajaSalida = (cja || [])
         const rent = calcularRentabilidad({
-          ventas: vts || [],
+          ventas: enriquecerVentasConDelivery(vts || [], ords || []),
           recetaIngredientes: recIng || [],
           insumosPPP: ins || [],
           gastosCaja: gastosCajaSalida,

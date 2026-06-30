@@ -11,7 +11,6 @@ const horaAhora = () => {
   return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
 }
 const formatCLP = n => '$' + Math.round(n).toLocaleString('es-CL')
-const DESCUENTO_ENVASE = 1000
 
 const MEDIOS_PAGO = [
   { id: 'transferencia', label: 'Transferencia' },
@@ -33,6 +32,7 @@ function ModalVenta({ comanda, recetas, onGuardar, onCerrar }) {
   const [hora, setHora]   = useState(horaAhora())
   const [medioPago, setMedioPago] = useState('transferencia')
   const [delivery, setDelivery]   = useState('')
+  const [deliveryCobrado, setDeliveryCobrado] = useState('')
   const [deliveryTipo, setDeliveryTipo] = useState(comanda.cliente_direccion ? 'propio' : '')
   const [distanciaKm, setDistanciaKm] = useState('')
   const [nota, setNota] = useState(comanda.nota || '')
@@ -46,7 +46,6 @@ function ModalVenta({ comanda, recetas, onGuardar, onCerrar }) {
       receta_nombre: it.receta_nombre || '',
       litros: it.cantidad || 1,
       precio_venta: receta?.precio_venta || it.precio_venta || '',
-      devuelve_envase: false,
       nota: it.nota || ''
     }
   })
@@ -64,10 +63,9 @@ function ModalVenta({ comanda, recetas, onGuardar, onCerrar }) {
 
   const total = items.reduce((s, it) => {
     const base = parseFloat(it.precio_venta) || 0
-    const desc = it.devuelve_envase ? DESCUENTO_ENVASE : 0
-    return s + (base - desc) * (parseFloat(it.litros) || 1)
+    return s + base * (parseFloat(it.litros) || 1)
   }, 0)
-  const totalNeto = total - (parseFloat(delivery) || 0)
+  const totalNeto = total - (parseFloat(delivery) || 0) + (parseFloat(deliveryCobrado) || 0)
 
   const handleGuardar = async () => {
     const validos = items.filter(it => it.receta_nombre && it.precio_venta)
@@ -83,6 +81,7 @@ function ModalVenta({ comanda, recetas, onGuardar, onCerrar }) {
         origen, medio_pago: medioPago,
         nota: nota || null,
         delivery: parseFloat(delivery) || 0,
+        delivery_cobrado: parseFloat(deliveryCobrado) || 0,
         delivery_tipo: deliveryTipo || null,
         distancia_km: distanciaKm ? parseFloat(distanciaKm) : null,
         estado_delivery: comanda.cliente_direccion ? 'pendiente' : null,
@@ -94,10 +93,10 @@ function ModalVenta({ comanda, recetas, onGuardar, onCerrar }) {
         fecha,
         receta_nombre: it.receta_nombre,
         litros: parseFloat(it.litros) || 1,
-        precio_venta: (parseFloat(it.precio_venta) || 0) - (it.devuelve_envase ? DESCUENTO_ENVASE : 0),
+        precio_venta: parseFloat(it.precio_venta) || 0,
         delivery: 0,
         origen: origen || null,
-        nota: it.devuelve_envase ? 'envase devuelto' : (it.nota || null),
+        nota: it.nota || null,
         orden_id: orden.id,
       })))
 
@@ -180,6 +179,11 @@ function ModalVenta({ comanda, recetas, onGuardar, onCerrar }) {
               {TIPOS_DELIVERY.map(t=><option key={t.id} value={t.id}>{t.label}</option>)}
             </select>
           </div>
+        </div>
+
+        <div style={{ marginBottom:14 }}>
+          <span style={lbl}>Cobrado al cliente por delivery</span>
+          <input type="number" style={inp} value={deliveryCobrado} onChange={e=>setDeliveryCobrado(e.target.value)} placeholder="0" />
         </div>
 
         <div style={{ marginBottom:14 }}>

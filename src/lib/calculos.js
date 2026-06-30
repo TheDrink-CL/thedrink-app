@@ -78,3 +78,31 @@ export function formatPct(n) {
   if (n == null) return '0%'
   return (n * 100).toFixed(1) + '%'
 }
+
+// ─── Enriquecer ventas con datos de delivery de su orden ─────────────────────
+// El COSTO de delivery (`delivery`) y el COBRO al cliente (`delivery_cobrado`)
+// viven en la tabla `ordenes`, no en cada fila de `ventas` (las filas de venta
+// guardan delivery: 0). Esta función copia ambos valores desde la orden a UNA
+// sola fila de venta por orden (la primera), para no contar el delivery N veces
+// cuando una orden tiene varios productos. Devuelve una copia de las ventas.
+//
+// `ordenes` = filas con { id, delivery, delivery_cobrado }.
+export function enriquecerVentasConDelivery(ventas = [], ordenes = []) {
+  const mapa = {}
+  ;(ordenes || []).forEach(o => {
+    mapa[o.id] = {
+      delivery: parseFloat(o.delivery) || 0,
+      delivery_cobrado: parseFloat(o.delivery_cobrado) || 0,
+    }
+  })
+  const vistaPorOrden = {} // para asignar el delivery solo a la primera fila de cada orden
+  return (ventas || []).map(v => {
+    const info = mapa[v.orden_id]
+    if (!info || vistaPorOrden[v.orden_id]) {
+      // Sin orden conocida, o ya asignamos el delivery a otra fila de esta orden.
+      return { ...v, delivery: 0, delivery_cobrado: 0 }
+    }
+    vistaPorOrden[v.orden_id] = true
+    return { ...v, delivery: info.delivery, delivery_cobrado: info.delivery_cobrado }
+  })
+}

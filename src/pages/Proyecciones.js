@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatCLP } from '../lib/calculos'
 import { calcularRentabilidad } from '../lib/rentabilidad'
+import { enriquecerVentasConDelivery } from '../lib/calculos'
 import { calcularRitmo, generarEscenarios } from '../lib/proyecciones'
 
 // Parsea "YYYY-MM-DD" sin desfase de zona horaria
@@ -82,10 +83,11 @@ export default function Proyecciones() {
   async function load() {
     try {
       const [
-        { data: vts }, { data: cmp }, { data: ins },
+        { data: vts }, { data: ords }, { data: cmp }, { data: ins },
         { data: recIng }, { data: cajaArr }, { data: cfgReal },
       ] = await Promise.all([
-        supabase.from('ventas').select('id, fecha, litros, precio_venta, receta_nombre, delivery'),
+        supabase.from('ventas').select('id, fecha, litros, precio_venta, receta_nombre, orden_id, delivery'),
+        supabase.from('ordenes').select('id, delivery, delivery_cobrado'),
         supabase.from('compras').select('precio_total, es_inversion, tipo'),
         supabase.from('insumos').select('nombre, stock_actual, costo_ppp'),
         supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad, unidad'),
@@ -103,17 +105,20 @@ export default function Proyecciones() {
         s + (parseFloat(i.stock_actual) || 0) * (parseFloat(i.costo_ppp) || 0), 0)
       const activosFijos = (cmp || []).reduce((s, c) =>
         c.tipo === 'activo_fijo' ? s + c.precio_total : s, 0)
-      const totalVentas = (vts || []).reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0)
+      const totalVentas = (vts || []).reduce((s, v) => s + (v.litros * v.precio_venta), 0)
+      const totalDeliveryCobrado = (ords || []).reduce((s, x) => s + (parseFloat(x.delivery_cobrado) || 0), 0)
+      const totalCostoDelivery = (ords || []).reduce((s, x) => s + (parseFloat(x.delivery) || 0), 0)
       const totalCompras = (cmp || []).reduce((s, c) => s + (c.es_inversion ? 0 : c.precio_total), 0)
       // 'Delivery' suma al saldo: es cobro al cliente, sin contraparte en otra tabla
       const movExtraEntradas = caja.filter(m => m.tipo === 'entrada' && m.categoria !== 'Venta').reduce((s, m) => s + m.monto, 0)
       const movExtraSalidas = caja.filter(m => m.tipo === 'salida' && m.categoria !== 'Insumos').reduce((s, m) => s + m.monto, 0)
-      const cajaActual = totalVentas - totalCompras + movExtraEntradas - movExtraSalidas
+      const cajaActual = totalVentas + totalDeliveryCobrado - totalCostoDelivery - totalCompras + movExtraEntradas - movExtraSalidas
       const patrimonioActual = cajaActual + inventarioRotable + activosFijos
 
       // ── Ritmo histórico real ─────────────────────────────────────────────
+      const vtsEnr = enriquecerVentasConDelivery(vts || [], ords || [])
       const rent = calcularRentabilidad({
-        ventas: vts || [],
+        ventas: vtsEnr,
         recetaIngredientes: recIng || [],
         insumosPPP: ins || [],
         gastosCaja: caja.filter(m => m.tipo === 'salida'),

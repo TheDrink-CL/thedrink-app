@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { calcularCostoReceta, formatCLP, formatPct } from '../lib/calculos'
 import { calcularRentabilidad } from '../lib/rentabilidad'
+import { enriquecerVentasConDelivery } from '../lib/calculos'
 import CaminoAlBar from './CaminoAlBar'
 import SaludNegocio from './SaludNegocio'
 
@@ -339,10 +340,14 @@ export default function Dashboard() {
         supabase.from('caja').select('*'),
         supabase.from('compras').select('precio_total, es_inversion, tipo'),
         supabase.from('insumos').select('nombre, stock_actual, stock_minimo, unidad, costo_ppp'),
-        supabase.from('ordenes').select('id, fecha, medio_pago, cliente_nombre'),
+        supabase.from('ordenes').select('id, fecha, medio_pago, cliente_nombre, delivery, delivery_cobrado'),
         supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad, unidad'),
         supabase.from('insumos').select('nombre, costo_ppp'),
       ])
+
+      // Enriquecer cada venta con el delivery (costo) y delivery_cobrado de su
+      // orden. El delivery vive en `ordenes`, no en las filas de `ventas`.
+      const vtsEnr = enriquecerVentasConDelivery(vts || [], ordenes || [])
 
       const config = {}
       cfg?.forEach(c => { config[c.clave] = c.valor })
@@ -376,7 +381,7 @@ export default function Dashboard() {
       const horasTrabajadas = parseFloat(config.horas_trabajadas_total) || 0
       const costoHora = parseFloat(config.costo_hora_operador) || 0
       const rentabilidad = calcularRentabilidad({
-        ventas: vts || [],
+        ventas: vtsEnr,
         recetaIngredientes: recIng || [],
         insumosPPP: insumosConPPP || [],
         gastosCaja: gastosCajaSalida,
@@ -389,8 +394,8 @@ export default function Dashboard() {
       const _hoy = new Date()
       const _h30 = new Date(_hoy); _h30.setDate(_hoy.getDate() - 30)
       const _h60 = new Date(_hoy); _h60.setDate(_hoy.getDate() - 60)
-      const vts30 = (vts || []).filter(v => new Date(v.fecha) >= _h30)
-      const vtsPrev = (vts || []).filter(v => new Date(v.fecha) >= _h60 && new Date(v.fecha) < _h30)
+      const vts30 = vtsEnr.filter(v => new Date(v.fecha) >= _h30)
+      const vtsPrev = vtsEnr.filter(v => new Date(v.fecha) >= _h60 && new Date(v.fecha) < _h30)
       const gastos30 = gastosCajaSalida.filter(m => m.fecha && new Date(m.fecha) >= _h30)
       const gastosPrev = gastosCajaSalida.filter(m => m.fecha && new Date(m.fecha) >= _h60 && new Date(m.fecha) < _h30)
       const rent30 = calcularRentabilidad({
@@ -417,12 +422,14 @@ export default function Dashboard() {
       // capital de trabajo (envases / capital operativo) = misma `inversion`
       const capitalTrabajoStock = inversion
 
-      const totalVentas = vts?.reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0) || 0
+      // Con ventas enriquecidas, cada fila trae el costo y el cobro de delivery
+      // de su orden (asignado a una sola fila por orden, sin duplicar).
+      const totalVentas = vtsEnr.reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0)
+      const totalDeliveryCobrado = vtsEnr.reduce((s, v) => s + (v.delivery_cobrado || 0), 0)
       const totalCompras = cmp?.reduce((s, c) => s + (c.es_inversion ? 0 : c.precio_total), 0) || 0
-      // 'Delivery' suma al saldo: es cobro al cliente, sin contraparte en otra tabla
       const movExtraEntradas = cja?.filter(m => m.tipo === 'entrada' && m.categoria !== 'Venta').reduce((s, m) => s + m.monto, 0) || 0
       const movExtraSalidas = cja?.filter(m => m.tipo === 'salida' && m.categoria !== 'Insumos').reduce((s, m) => s + m.monto, 0) || 0
-      const saldoCaja = totalVentas - totalCompras + movExtraEntradas - movExtraSalidas
+      const saldoCaja = totalVentas + totalDeliveryCobrado - totalCompras + movExtraEntradas - movExtraSalidas
 
       const hace30 = new Date(); hace30.setDate(hace30.getDate() - 30)
       const vtsMes = vts?.filter(v => new Date(v.fecha) >= hace30) || []

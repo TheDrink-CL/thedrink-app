@@ -7,7 +7,7 @@ import { descargarCSV, BotonExportar } from '../lib/exportar'
 // ─── Modal ticket de pedido ──────────────────────────────────────────────────
 function TicketModal({ orden, onCerrar }) {
   const total = (orden.ventas || []).reduce((s, v) => s + (v.litros||1) * (v.precio_venta||0), 0)
-  const neto = total - (orden.delivery || 0)
+  const neto = total - (orden.delivery || 0) + (orden.delivery_cobrado || 0)
 
   const medioPagoLabel = {
     transferencia: '🏦 Transferencia', debito: '💳 Débito',
@@ -60,7 +60,7 @@ function TicketModal({ orden, onCerrar }) {
         <div style={{ borderTop: '1px dashed rgba(255,255,255,0.12)', marginTop: 12, marginBottom: 12 }} />
 
         {/* Totales */}
-        {orden.delivery > 0 && (
+        {(orden.delivery > 0 || orden.delivery_cobrado > 0) && (
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: 13, color: 'var(--muted)' }}>
             <span>Subtotal</span>
             <span>{formatCLP(total)}</span>
@@ -76,10 +76,16 @@ function TicketModal({ orden, onCerrar }) {
             <span style={{ color: 'var(--pink)' }}>-{formatCLP(orden.delivery)}</span>
           </div>
         )}
+        {orden.delivery_cobrado > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: 13, color: 'var(--muted)' }}>
+            <span>Delivery cobrado</span>
+            <span style={{ color: 'var(--green)' }}>+{formatCLP(orden.delivery_cobrado)}</span>
+          </div>
+        )}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>TOTAL</span>
           <span style={{ fontWeight: 900, fontSize: 22, color: 'var(--green)' }}>
-            {formatCLP(orden.delivery > 0 ? neto : total)}
+            {formatCLP((orden.delivery > 0 || orden.delivery_cobrado > 0) ? neto : total)}
           </span>
         </div>
 
@@ -126,7 +132,6 @@ function TicketModal({ orden, onCerrar }) {
   )
 }
 
-const DESCUENTO_ENVASE = 1000
 
 const fechaHoy = () => {
   const d = new Date()
@@ -138,7 +143,7 @@ const horaAhora = () => {
   return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
 }
 
-const itemVacio = () => ({ receta_nombre: '', litros: 1, precio_venta: '', devuelve_envase: false })
+const itemVacio = () => ({ receta_nombre: '', litros: 1, precio_venta: '' })
 
 const ORIGENES = ['IG Orgánico', 'IG Pauta', 'Referido', 'Cliente habitual', 'Evento', 'Otro']
 const MEDIOS_PAGO = [
@@ -220,6 +225,7 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
   const [origenVal, setOrigenVal] = useState(orden.origen || '')
   const [medioPago, setMedioPago] = useState(orden.medio_pago || 'transferencia')
   const [delivery, setDelivery] = useState(orden.delivery || '')
+  const [deliveryCobrado, setDeliveryCobrado] = useState(orden.delivery_cobrado || '')
   const [deliveryTipo, setDeliveryTipo] = useState(orden.delivery_tipo || '')
   const [distanciaKm, setDistanciaKm] = useState(orden.distancia_km ?? '')
   const [nota, setNota] = useState(orden.nota || '')
@@ -254,6 +260,7 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
       medio_pago: medioPago,
       nota: nota || null,
       delivery: parseFloat(delivery) || 0,
+      delivery_cobrado: parseFloat(deliveryCobrado) || 0,
       delivery_tipo: (parseFloat(delivery) > 0 || deliveryTipo === 'retiro' || deliveryTipo === 'propio') ? (deliveryTipo || null) : null,
       distancia_km: (deliveryTipo && deliveryTipo !== 'retiro' && distanciaKm !== '') ? parseFloat(distanciaKm) : null,
     }).eq('id', orden.id)
@@ -369,12 +376,6 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
               <input type="number" className="form-input" value={it.litros} placeholder="Litros" style={{ width:70 }}
                 onChange={e => updateItem(i, 'litros', e.target.value)} />
             </div>
-            <label style={{ display:'flex', alignItems:'center', gap:6, cursor:'pointer', marginTop:6 }}>
-              <input type="checkbox" checked={it.devuelve_envase}
-                onChange={e => updateItem(i, 'devuelve_envase', e.target.checked)}
-                style={{ width:15, height:15, accentColor:'var(--cyan)' }} />
-              <span style={{ fontSize:12, color:'var(--muted)' }}>Devuelve envase</span>
-            </label>
           </div>
         ))}
         <button type="button" onClick={agregarItem}
@@ -412,6 +413,14 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
               <input type="number" step="0.1" className="form-input" value={distanciaKm} placeholder="ej: 6.5"
                 onChange={e => setDistanciaKm(e.target.value)} />
             </div>
+          </div>
+        )}
+
+        {deliveryTipo && deliveryTipo !== 'retiro' && (
+          <div className="form-group" style={{ marginBottom:12 }}>
+            <label className="form-label">Cobrado al cliente por delivery</label>
+            <input type="number" className="form-input" value={deliveryCobrado} placeholder="ej: 3000"
+              onChange={e => setDeliveryCobrado(e.target.value)} />
           </div>
         )}
 
@@ -462,6 +471,7 @@ export default function Ventas() {
   const [origen, setOrigen] = useState('')
   const [medioPago, setMedioPago] = useState('transferencia')
   const [delivery, setDelivery] = useState('')
+  const [deliveryCobrado, setDeliveryCobrado] = useState('')
   const [deliveryTipo, setDeliveryTipo] = useState('')
   const [distanciaKm, setDistanciaKm] = useState('')
   const [enviarADelivery, setEnviarADelivery] = useState(false)
@@ -594,12 +604,10 @@ export default function Ventas() {
 
   const totalBruto = items.reduce((s, it) => {
     const base = parseFloat(it.precio_venta) || 0
-    const desc = it.devuelve_envase ? DESCUENTO_ENVASE : 0
-    return s + (base - desc) * (parseFloat(it.litros) || 1)
+    return s + base * (parseFloat(it.litros) || 1)
   }, 0)
 
   const totalNeto = totalBruto - (parseFloat(delivery) || 0)
-  const envasesDevueltos = items.filter(it => it.devuelve_envase).length
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -680,6 +688,7 @@ export default function Ventas() {
       medio_pago: medioPago,
       nota: nota || null,
       delivery: parseFloat(delivery) || 0,
+      delivery_cobrado: parseFloat(deliveryCobrado) || 0,
       delivery_tipo: (parseFloat(delivery) > 0 || deliveryTipo === 'retiro' || deliveryTipo === 'propio') ? (deliveryTipo || null) : null,
       distancia_km: (deliveryTipo && deliveryTipo !== 'retiro' && distanciaKm !== '') ? parseFloat(distanciaKm) : null,
       estado_delivery: enviarADelivery ? 'pendiente' : null,
@@ -717,11 +726,10 @@ export default function Ventas() {
     const factorNeon = neonAplicado ? (1 - NEON_DESCUENTO) : 1
     let descuentoNeonTotal = 0
     const ventasInsert = itemsValidos.map(it => {
-      const precioBase = (parseFloat(it.precio_venta) || 0) - (it.devuelve_envase ? DESCUENTO_ENVASE : 0)
+      const precioBase = parseFloat(it.precio_venta) || 0
       const precioFinal = Math.round(precioBase * factorNeon)
       if (neonAplicado) descuentoNeonTotal += (precioBase - precioFinal) * (parseFloat(it.litros) || 1)
       const notas = []
-      if (it.devuelve_envase) notas.push('envase devuelto')
       if (neonAplicado) notas.push('NEON -15%')
       return {
         fecha,
@@ -743,13 +751,6 @@ export default function Ventas() {
       return
     }
 
-    if (envasesDevueltos > 0) {
-      // Devolución asume frasco 1lt (es el único formato que se vendía cuando
-      // se ofrecía esta promoción). El feature será removido a futuro.
-      const { data: ins } = await supabase.from('insumos').select('stock_actual').eq('nombre', 'Frascos 1lt').single()
-      await supabase.from('insumos').update({ stock_actual: (ins?.stock_actual || 0) + envasesDevueltos }).eq('nombre', 'Frascos 1lt')
-    }
-
     // Guardar el monto descontado en el canje (para reporte del concurso)
     if (neonAplicado && descuentoNeonTotal > 0) {
       await supabase.from('canjes_neon')
@@ -757,8 +758,12 @@ export default function Ventas() {
         .eq('orden_id', orden.id)
     }
 
-    // Descuento de stock por ingredientes utilizados
-    await descontarStock(itemsValidos)
+    // Descuento de stock por ingredientes utilizados. La venta ya quedo
+    // registrada; si el stock no se ajusta, avisamos pero no bloqueamos.
+    const resStock = await descontarStock(itemsValidos)
+    if (resStock && !resStock.ok) {
+      showToast('Pedido guardado, pero no se ajusto el stock de: ' + resStock.fallidos.join(', '))
+    }
 
     showToast(neonAplicado
       ? `Pedido registrado ✓ · NEON aplicado (-${formatCLP(Math.round(descuentoNeonTotal))})`
@@ -772,6 +777,7 @@ export default function Ventas() {
     setOrigen('')
     setMedioPago('transferencia')
     setDelivery('')
+    setDeliveryCobrado('')
     setDeliveryTipo('')
     setDistanciaKm('')
     setEnviarADelivery(false)
@@ -1039,19 +1045,9 @@ export default function Ventas() {
                     step="0.5" min="0.5"
                     onChange={e => updateItem(i, 'litros', e.target.value)} />
                 </div>
-                <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                  <label style={{ display:'flex', alignItems:'center', gap:6, cursor:'pointer' }}>
-                    <input type="checkbox" checked={it.devuelve_envase}
-                      onChange={e => updateItem(i, 'devuelve_envase', e.target.checked)}
-                      style={{ width:16, height:16, accentColor:'var(--cyan)' }} />
-                    <span style={{ fontSize:12, color: it.devuelve_envase ? 'var(--cyan)' : 'var(--muted)' }}>
-                      Devuelve envase {it.devuelve_envase && <span style={{ color:'var(--green)' }}>-{formatCLP(DESCUENTO_ENVASE)}</span>}
-                    </span>
-                  </label>
-                </div>
                 {it.receta_nombre && it.precio_venta && (
                   <div style={{ marginTop:6, fontSize:13, color:'var(--green)', fontWeight:700, textAlign:'right' }}>
-                    {formatCLP((parseFloat(it.precio_venta) - (it.devuelve_envase ? DESCUENTO_ENVASE : 0)) * (parseFloat(it.litros)||1))}
+                    {formatCLP((parseFloat(it.precio_venta) || 0) * (parseFloat(it.litros)||1))}
                   </div>
                 )}
               </div>
@@ -1068,11 +1064,6 @@ export default function Ventas() {
                 <span style={{ fontSize:13, color:'var(--muted)' }}>Total pedido</span>
                 <span style={{ fontSize:18, fontWeight:700, color:'var(--green)' }}>{formatCLP(totalBruto)}</span>
               </div>
-              {envasesDevueltos > 0 && (
-                <div style={{ fontSize:12, color:'var(--cyan)', textAlign:'right', marginBottom:4 }}>
-                  +{envasesDevueltos} frasco{envasesDevueltos > 1 ? 's' : ''} vuelve al stock
-                </div>
-              )}
               {parseFloat(delivery) > 0 && (
                 <div style={{ display:'flex', justifyContent:'space-between', fontSize:13 }}>
                   <span style={{ color:'var(--muted)' }}>Neto (sin Uber)</span>
@@ -1177,6 +1168,14 @@ export default function Ventas() {
                 <input type="number" step="0.1" className="form-input" value={distanciaKm} placeholder="ej: 6.5"
                   onChange={e => setDistanciaKm(e.target.value)} />
               </div>
+            </div>
+          )}
+
+          {deliveryTipo && deliveryTipo !== 'retiro' && (
+            <div className="form-group" style={{ marginTop:12 }}>
+              <label className="form-label">Cobrado al cliente por delivery</label>
+              <input type="number" className="form-input" value={deliveryCobrado} placeholder="ej: 3000"
+                onChange={e => setDeliveryCobrado(e.target.value)} />
             </div>
           )}
 
@@ -1359,6 +1358,11 @@ export default function Ventas() {
                         {o.delivery > 0 && (
                           <div style={{ fontSize:11, color:'var(--pink)' }}>
                             -{formatCLP(o.delivery)} {o.delivery_tipo === 'motoboy' ? 'Moto' : o.delivery_tipo === 'otro' ? 'Entrega' : 'Uber'}
+                          </div>
+                        )}
+                        {o.delivery_cobrado > 0 && (
+                          <div style={{ fontSize:11, color:'var(--green)' }}>
+                            +{formatCLP(o.delivery_cobrado)} cobrado
                           </div>
                         )}
                       </div>

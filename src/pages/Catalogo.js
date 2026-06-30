@@ -209,7 +209,11 @@ function EditRecetaModal({ receta, ingredientes, insumos, recetasExistentes, con
       const { error: errR3 } = await supabase
         .from('ventas').update({ receta_nombre: nombreTrim }).eq('receta_nombre', oldNombre)
       if (errR3) {
-        setError('Receta e ingredientes renombrados pero falló actualizar ventas: ' + errR3.message)
+        // Las ventas historicas no se pudieron renombrar: revertimos recetas e
+        // ingredientes para no dejar el nombre descuadrado entre tablas.
+        await supabase.from('recetas').update({ nombre: oldNombre }).eq('nombre', nombreTrim)
+        await supabase.from('receta_ingredientes').update({ receta_nombre: oldNombre }).eq('receta_nombre', nombreTrim)
+        setError('No se pudo renombrar en ventas; se revirtio el cambio. Detalle: ' + errR3.message)
         setSaving(false); return
       }
     }

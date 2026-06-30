@@ -56,12 +56,15 @@ export async function aplicarMovimientosStock(movs) {
     .from('insumos')
     .select('nombre, stock_actual')
     .in('nombre', nombresInsumos)
-  if (!stocks) return
-  await Promise.all(stocks.map(ins => {
+  if (!stocks) return { ok: false, fallidos: nombresInsumos }
+  const resultados = await Promise.all(stocks.map(ins => {
     const delta = movs[ins.nombre] || 0
     const nuevo = Math.max(0, (ins.stock_actual || 0) + delta)
     return supabase.from('insumos').update({ stock_actual: nuevo }).eq('nombre', ins.nombre)
+      .then(r => ({ nombre: ins.nombre, error: r.error }))
   }))
+  const fallidos = resultados.filter(r => r.error).map(r => r.nombre)
+  return { ok: fallidos.length === 0, fallidos }
 }
 
 // Carga los ingredientes de las recetas que aparecen en estos ítems.
@@ -118,7 +121,7 @@ export async function descontarStock(itemsValidos) {
     cargarInsumosMeta(),
   ])
   const movs = calcularMovimientosStock(itemsValidos, ingredientes, -1, insumosMap)
-  await aplicarMovimientosStock(movs)
+  return aplicarMovimientosStock(movs)
 }
 
 // Reintegra stock cuando se borra o edita una venta (lo opuesto a descontar).
@@ -128,7 +131,7 @@ export async function reintegrarStock(itemsAnteriores) {
     cargarInsumosMeta(),
   ])
   const movs = calcularMovimientosStock(itemsAnteriores, ingredientes, +1, insumosMap)
-  await aplicarMovimientosStock(movs)
+  return aplicarMovimientosStock(movs)
 }
 
 // ─── Movimientos por COMPRAS ─────────────────────────────────────────────────
@@ -137,6 +140,6 @@ export async function reintegrarStock(itemsAnteriores) {
 // al registrar y -1 al revertir (editar/borrar una compra).
 export async function ajustarStockPorCompra(insumoNombre, cantidad, signo = 1) {
   const qty = parseFloat(cantidad)
-  if (!insumoNombre || !qty || isNaN(qty)) return
-  await aplicarMovimientosStock({ [insumoNombre]: qty * signo })
+  if (!insumoNombre || !qty || isNaN(qty)) return { ok: true, fallidos: [] }
+  return aplicarMovimientosStock({ [insumoNombre]: qty * signo })
 }

@@ -305,7 +305,8 @@ export default function ImportarPedido() {
         if (editCliente.direccion)
           await supabase.from('clientes').update({ direccion: editCliente.direccion, telefono: editCliente.telefono||undefined }).eq('id', clienteId)
       } else if (clienteOp === 'nuevo' && editCliente.nombre) {
-        const { data: nc } = await supabase.from('clientes').insert({ nombre: editCliente.nombre, telefono: editCliente.telefono||null, direccion: editCliente.direccion||null, origen: 'WhatsApp' }).select().single()
+        const { data: nc, error: errNc } = await supabase.from('clientes').insert({ nombre: editCliente.nombre, telefono: editCliente.telefono||null, direccion: editCliente.direccion||null, origen: 'WhatsApp' }).select().single()
+        if (errNc) { alert('No se pudo crear el cliente: ' + errNc.message); setGuardando(false); return }
         if (nc) clienteId = nc.id
       }
       const itemsLimpios = editItems.filter(it => it.receta_nombre?.trim() || it.textoOriginal?.trim()).map(it => ({
@@ -325,7 +326,7 @@ export default function ImportarPedido() {
         if (obj < ahora) obj.setDate(obj.getDate() + 1) // si la hora ya pasó, es mañana
         horaObjISO = obj.toISOString()
       }
-      await supabase.from('comandas').insert({
+      const { error: errComanda } = await supabase.from('comandas').insert({
         cliente_id: clienteId,
         cliente_nombre: editCliente.nombre||null,
         cliente_telefono: editCliente.telefono||null,
@@ -337,6 +338,7 @@ export default function ImportarPedido() {
         hora_objetivo: horaObjISO,
         tiempo_delivery_min: tiempoDelivery !== '' ? (parseInt(tiempoDelivery) || 0) : null,
       })
+      if (errComanda) { alert('No se pudo guardar la comanda: ' + errComanda.message); setGuardando(false); return }
       setPaso('listo')
     } catch (e) {
       alert('Error guardando: ' + e.message)

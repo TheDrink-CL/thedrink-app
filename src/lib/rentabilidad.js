@@ -38,7 +38,13 @@ export function calcularRentabilidad({
   const costoEnvase = parseFloat(config.costo_envase) || 794.6
 
   // ── Ingresos ───────────────────────────────────────────────────────────────
-  const ingresos = ventas.reduce((s, v) => s + v.litros * v.precio_venta, 0)
+  // Ingreso = venta de productos + lo cobrado al cliente por delivery.
+  // (El costo del delivery se descuenta abajo como `transporte`.)
+  // Requiere que las ventas vengan enriquecidas con delivery_cobrado de su orden
+  // (ver enriquecerVentasConDelivery en lib/calculos.js).
+  const ingresos = ventas.reduce(
+    (s, v) => s + v.litros * v.precio_venta + (v.delivery_cobrado || 0), 0
+  )
 
   // ── COGS: costo de insumos consumidos según recetas y PPP ──────────────────
   // (incluye merma y costo de envase, igual que la lógica original del Dashboard)

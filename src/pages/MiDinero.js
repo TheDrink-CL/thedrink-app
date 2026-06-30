@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatCLP } from '../lib/calculos'
+import { enriquecerVentasConDelivery } from '../lib/calculos'
 import { calcularFinanzasMensuales, sueldoPromedio, calcularRunway,
          calcularReservaSugerida, calcularRetirable, proyectarMesActual } from '../lib/finanzasMes'
 import { descargarCSV, BotonExportar } from '../lib/exportar'
@@ -679,9 +680,9 @@ export default function MiDinero() {
       const [
         { data: vts }, { data: cjaSalidas }, { data: cjaTodo },
         { data: cmp }, { data: recIng }, { data: ins },
-        { data: cfg }, { data: hist },
+        { data: cfg }, { data: hist }, { data: ords },
       ] = await Promise.all([
-        supabase.from('ventas').select('fecha, litros, precio_venta, delivery, receta_nombre'),
+        supabase.from('ventas').select('fecha, litros, precio_venta, delivery, receta_nombre, orden_id'),
         supabase.from('caja').select('fecha, monto, categoria, tipo').eq('tipo', 'salida'),
         supabase.from('caja').select('fecha, monto, categoria, tipo'),
         supabase.from('compras').select('precio_total, es_inversion'),
@@ -689,6 +690,7 @@ export default function MiDinero() {
         supabase.from('insumos').select('nombre, costo_ppp'),
         supabase.from('config').select('*'),
         supabase.from('historial_personal').select('*'),
+        supabase.from('ordenes').select('id, delivery, delivery_cobrado'),
       ])
 
       const cfgMap = {}
@@ -697,8 +699,9 @@ export default function MiDinero() {
       const ssueldo = parseFloat(cfgMap.split_sueldo_pct) || 0.45
       setSplitSueldo(ssueldo)
 
+      const vtsEnr = enriquecerVentasConDelivery(vts || [], ords || [])
       const f = calcularFinanzasMensuales({
-        ventas: vts || [],
+        ventas: vtsEnr,
         gastosCaja: cjaSalidas || [],
         recetaIngredientes: recIng || [],
         insumosPPP: ins || [],
@@ -713,13 +716,15 @@ export default function MiDinero() {
       setHistorial(hist || [])
 
       // ── Caja disponible HOY (mismo cálculo que el Dashboard) ─────────────
-      const totalVentas = (vts || []).reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0)
+      const totalVentas = (vts || []).reduce((s, v) => s + (v.litros * v.precio_venta), 0)
+      const totalDeliveryCobrado = (ords || []).reduce((s, x) => s + (parseFloat(x.delivery_cobrado) || 0), 0)
+      const totalCostoDelivery = (ords || []).reduce((s, x) => s + (parseFloat(x.delivery) || 0), 0)
       const totalCompras = (cmp || []).reduce((s, c) => s + (c.es_inversion ? 0 : c.precio_total), 0)
       const todasCja = cjaTodo || []
       // 'Delivery' suma al saldo: es cobro al cliente, sin contraparte en otra tabla
       const movExtraEntradas = todasCja.filter(m => m.tipo === 'entrada' && m.categoria !== 'Venta').reduce((s, m) => s + m.monto, 0)
       const movExtraSalidas = todasCja.filter(m => m.tipo === 'salida' && m.categoria !== 'Insumos').reduce((s, m) => s + m.monto, 0)
-      const saldoCaja = totalVentas - totalCompras + movExtraEntradas - movExtraSalidas
+      const saldoCaja = totalVentas + totalDeliveryCobrado - totalCostoDelivery - totalCompras + movExtraEntradas - movExtraSalidas
       setCajaActual(saldoCaja)
 
       // ── Reserva sugerida + retirable ─────────────────────────────────────

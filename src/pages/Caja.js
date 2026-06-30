@@ -27,7 +27,7 @@ const CATEGORIAS_SALIDA = [
   'Publicidad', 'Personal', 'Equipamiento', 'Suscripciones', 'Otro gasto'
 ]
 const CATEGORIAS_ENTRADA = [
-  'Venta', 'Delivery', 'Aporte socio', 'Otro ingreso'
+  'Venta', 'Aporte socio', 'Otro ingreso'
 ]
 
 export default function Caja() {
@@ -48,15 +48,19 @@ export default function Caja() {
   useEffect(() => { loadData() }, [])
 
   async function loadData() {
-    const [{ data: mov }, { data: vts }, { data: compras }] = await Promise.all([
+    const [{ data: mov }, { data: vts }, { data: compras }, { data: ordenes }] = await Promise.all([
       supabase.from('caja').select('*').order('fecha', { ascending: false }),
       supabase.from('ventas').select('litros, precio_venta, delivery'),
       supabase.from('compras').select('precio_total, es_inversion'),
+      supabase.from('ordenes').select('delivery_cobrado'),
     ])
 
     setMovimientos(mov || [])
 
     const totalVentas = (vts || []).reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0)
+    // Cobro de delivery al cliente: ahora viene en la orden. Los cobros viejos
+    // siguen como movimiento manual categoria='Delivery' (corte por fecha).
+    const totalDeliveryCobrado = (ordenes || []).reduce((s, o) => s + (o.delivery_cobrado || 0), 0)
     const totalCompras = (compras || []).reduce((s, c) => s + (c.es_inversion ? 0 : c.precio_total), 0)
     // Entradas manuales: se excluye 'Venta' (ya viene de la tabla ventas).
     // 'Delivery' SÍ suma — es el cobro al cliente y no existe en ninguna otra tabla
@@ -64,7 +68,7 @@ export default function Caja() {
     const movExtraEntradas = (mov || []).filter(m => m.tipo === 'entrada' && m.categoria !== 'Venta').reduce((s, m) => s + m.monto, 0)
     const movExtraSalidas = (mov || []).filter(m => m.tipo === 'salida' && m.categoria !== 'Insumos').reduce((s, m) => s + m.monto, 0)
 
-    setSaldo(totalVentas - totalCompras + movExtraEntradas - movExtraSalidas)
+    setSaldo(totalVentas + totalDeliveryCobrado - totalCompras + movExtraEntradas - movExtraSalidas)
   }
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2500) }

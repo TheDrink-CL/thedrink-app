@@ -122,12 +122,22 @@ export default function Conteo() {
       .insert(lineas.map(l => ({ ...l, conteo_id: cab.id })))
     if (e2) { setSaving(false); showToast('Error guardando detalle: ' + e2.message); return }
 
-    // 3. Actualizar stock_actual al valor real contado
-    await Promise.all(
+    // 3. Actualizar stock_actual al valor real contado.
+    //    Validamos cada update: si alguno falla, avisamos y no marcamos exito,
+    //    para no dejar el inventario parcialmente actualizado en silencio.
+    const resultadosStock = await Promise.all(
       previewLineas.map(({ ins, p }) =>
         supabase.from('insumos').update({ stock_actual: p.real }).eq('nombre', ins.nombre)
       )
     )
+    const fallidos = resultadosStock
+      .map((r, i) => (r && r.error) ? previewLineas[i].ins.nombre : null)
+      .filter(Boolean)
+    if (fallidos.length > 0) {
+      setSaving(false)
+      showToast('No se pudo actualizar el stock de: ' + fallidos.join(', '))
+      return
+    }
 
     // Informe para mostrar
     const culpables = [...lineas]
