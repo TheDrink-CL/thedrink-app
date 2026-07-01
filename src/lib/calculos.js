@@ -106,3 +106,10 @@ export function enriquecerVentasConDelivery(ventas = [], ordenes = []) {
     return { ...v, delivery: info.delivery, delivery_cobrado: info.delivery_cobrado }
   })
 }
+
+// Fecha de corte del nuevo manejo de delivery. Desde esta fecha, el costo de
+// delivery (lo que se paga a Uber/motoboy) se descuenta del saldo de caja, y el
+// cobro al cliente se suma. Antes de esta fecha el delivery se manejaba distinto
+// (cobro como movimiento manual en caja, costo pagado por fuera), y esos meses
+// ya estan conciliados con el banco: NO se recalculan.
+export const FECHA_CORTE_DELIVERY = '2026-07-01'

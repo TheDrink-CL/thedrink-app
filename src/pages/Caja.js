@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { formatCLP, enriquecerVentasConDelivery } from '../lib/calculos'
+import { formatCLP, enriquecerVentasConDelivery, FECHA_CORTE_DELIVERY } from '../lib/calculos'
 
 // La pestaña "Publicidad" se eliminó (jun 2026): duplicaba el análisis de pauta
 // que ahora vive en Indicadores (ROAS semanal) y Análisis (origen de clientes),
@@ -33,6 +33,7 @@ const CATEGORIAS_ENTRADA = [
 export default function Caja() {
   const [movimientos, setMovimientos] = useState([])
   const [saldo, setSaldo] = useState(0)
+  const [uberPorRetirar, setUberPorRetirar] = useState(0)
   const [form, setForm] = useState({
     fecha: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` })(),
     tipo: 'entrada',
@@ -52,7 +53,7 @@ export default function Caja() {
       supabase.from('caja').select('*').order('fecha', { ascending: false }),
       supabase.from('ventas').select('litros, precio_venta, delivery, orden_id'),
       supabase.from('compras').select('precio_total, es_inversion'),
-      supabase.from('ordenes').select('id, delivery, delivery_cobrado'),
+      supabase.from('ordenes').select('id, fecha, delivery, delivery_cobrado'),
     ])
 
     setMovimientos(mov || [])
@@ -61,8 +62,11 @@ export default function Caja() {
     // el Dashboard, para que ambas pantallas muestren el MISMO saldo. El costo
     // de delivery vive en `ordenes`, no en las filas de `ventas`.
     const vtsEnr = enriquecerVentasConDelivery(vts || [], ordenes || [])
-    const totalVentas = vtsEnr.reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0)
-    const totalDeliveryCobrado = vtsEnr.reduce((s, v) => s + (v.delivery_cobrado || 0), 0)
+    const totalVentas = (vts || []).reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0)
+    // Delivery desde el corte: se suma el cobro al cliente y se resta el costo (Uber/motoboy).
+    const ordCorte = (ordenes || []).filter(o => o.fecha >= FECHA_CORTE_DELIVERY)
+    const totalDeliveryCobrado = ordCorte.reduce((s, o) => s + (parseFloat(o.delivery_cobrado) || 0), 0)
+    const totalCostoDelivery = ordCorte.reduce((s, o) => s + (parseFloat(o.delivery) || 0), 0)
     const totalCompras = (compras || []).reduce((s, c) => s + (c.es_inversion ? 0 : c.precio_total), 0)
     // Entradas manuales: se excluye 'Venta' (ya viene de la tabla ventas).
     // 'Delivery' SÍ suma — es el cobro al cliente y no existe en ninguna otra tabla
@@ -70,7 +74,16 @@ export default function Caja() {
     const movExtraEntradas = (mov || []).filter(m => m.tipo === 'entrada' && m.categoria !== 'Venta').reduce((s, m) => s + m.monto, 0)
     const movExtraSalidas = (mov || []).filter(m => m.tipo === 'salida' && m.categoria !== 'Insumos').reduce((s, m) => s + m.monto, 0)
 
-    setSaldo(totalVentas + totalDeliveryCobrado - totalCompras + movExtraEntradas - movExtraSalidas)
+    setSaldo(totalVentas + totalDeliveryCobrado - totalCostoDelivery - totalCompras + movExtraEntradas - movExtraSalidas)
+
+    // Uber por retirar: costo de delivery acumulado del mes en curso (desde el
+    // corte). Es la plata que conviene sacar a tu cuenta personal para pagar la
+    // tarjeta con que pagaste Uber/motoboy. Se reinicia cada mes.
+    const mesActual = new Date().toISOString().slice(0, 7) // 'YYYY-MM'
+    const uberMes = ordCorte
+      .filter(ord => (ord.fecha || '').slice(0, 7) === mesActual)
+      .reduce((s, ord) => s + (parseFloat(ord.delivery) || 0), 0)
+    setUberPorRetirar(uberMes)
   }
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2500) }
@@ -141,6 +154,17 @@ export default function Caja() {
             {formatCLP(movimientos.filter(m => m.tipo === 'salida').reduce((s, m) => s + m.monto, 0))}
           </div>
         </div>
+        {uberPorRetirar > 0 && (
+          <div className="kpi-card">
+            <div className="kpi-label">Uber por retirar (mes)</div>
+            <div className="kpi-value" style={{ fontSize: 22, color: 'var(--cyan)' }}>
+              {formatCLP(uberPorRetirar)}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+              Costo de delivery ya descontado del saldo. Sácalo a tu cuenta para pagar la tarjeta.
+            </div>
+          </div>
+        )}
       </div>
 
       {Object.keys(gastosPorCategoria).length > 0 && (

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { formatCLP } from '../lib/calculos'
+import { formatCLP, FECHA_CORTE_DELIVERY } from '../lib/calculos'
 import { calcularRentabilidad } from '../lib/rentabilidad'
 import { enriquecerVentasConDelivery } from '../lib/calculos'
 import { calcularRitmo, proyectarCapital } from '../lib/proyecciones'
@@ -164,7 +164,7 @@ export default function CaminoAlBar() {
         { data: cajaArr }, { data: cfgReal },
       ] = await Promise.all([
         supabase.from('ventas').select('id, fecha, litros, precio_venta, receta_nombre, orden_id, delivery'),
-        supabase.from('ordenes').select('id, cliente_nombre, delivery, delivery_cobrado'),
+        supabase.from('ordenes').select('id, fecha, cliente_nombre, delivery, delivery_cobrado'),
         supabase.from('clientes').select('id, nombre'),
         supabase.from('compras').select('precio_total, es_inversion, tipo'),
         supabase.from('insumos').select('nombre, stock_actual, costo_ppp'),
@@ -199,13 +199,14 @@ export default function CaminoAlBar() {
         s + (parseFloat(i.stock_actual) || 0) * (parseFloat(i.costo_ppp) || 0), 0)
 
       // caja disponible (mismo cálculo que el Dashboard)
-      const totalVentas = (vts || []).reduce((s, v) => s + (v.litros * v.precio_venta), 0)
+      const totalVentas = (vts || []).reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0)
       const totalCompras = (cmp || []).reduce((s, c) => s + (c.es_inversion ? 0 : c.precio_total), 0)
       // 'Delivery' suma al saldo: es cobro al cliente, sin contraparte en otra tabla
       const movExtraEntradas = caja.filter(m => m.tipo === 'entrada' && m.categoria !== 'Venta').reduce((s, m) => s + m.monto, 0)
       const movExtraSalidas = caja.filter(m => m.tipo === 'salida' && m.categoria !== 'Insumos').reduce((s, m) => s + m.monto, 0)
-      const totalDeliveryCobrado = (ords || []).reduce((s, ord) => s + (parseFloat(ord.delivery_cobrado) || 0), 0)
-      const totalCostoDelivery = (ords || []).reduce((s, ord) => s + (parseFloat(ord.delivery) || 0), 0)
+      const ordCorte = (ords || []).filter(o => o.fecha >= FECHA_CORTE_DELIVERY)
+      const totalDeliveryCobrado = ordCorte.reduce((s, o) => s + (parseFloat(o.delivery_cobrado) || 0), 0)
+      const totalCostoDelivery = ordCorte.reduce((s, o) => s + (parseFloat(o.delivery) || 0), 0)
       const cajaDisponible = totalVentas + totalDeliveryCobrado - totalCostoDelivery - totalCompras + movExtraEntradas - movExtraSalidas
 
       const patrimonioNeto = cajaDisponible + inventarioRotable + activosFijos

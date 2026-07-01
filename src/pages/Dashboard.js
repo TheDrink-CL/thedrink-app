@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { calcularCostoReceta, formatCLP, formatPct } from '../lib/calculos'
 import { calcularRentabilidad } from '../lib/rentabilidad'
-import { enriquecerVentasConDelivery } from '../lib/calculos'
+import { enriquecerVentasConDelivery, FECHA_CORTE_DELIVERY } from '../lib/calculos'
 import CaminoAlBar from './CaminoAlBar'
 import SaludNegocio from './SaludNegocio'
 
@@ -424,12 +424,14 @@ export default function Dashboard() {
 
       // Con ventas enriquecidas, cada fila trae el costo y el cobro de delivery
       // de su orden (asignado a una sola fila por orden, sin duplicar).
-      const totalVentas = vtsEnr.reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0)
-      const totalDeliveryCobrado = vtsEnr.reduce((s, v) => s + (v.delivery_cobrado || 0), 0)
+      const totalVentas = (vts || []).reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0)
+      const ordCorte = (ordenes || []).filter(o => o.fecha >= FECHA_CORTE_DELIVERY)
+      const totalDeliveryCobrado = ordCorte.reduce((s, o) => s + (parseFloat(o.delivery_cobrado) || 0), 0)
+      const totalCostoDelivery = ordCorte.reduce((s, o) => s + (parseFloat(o.delivery) || 0), 0)
       const totalCompras = cmp?.reduce((s, c) => s + (c.es_inversion ? 0 : c.precio_total), 0) || 0
       const movExtraEntradas = cja?.filter(m => m.tipo === 'entrada' && m.categoria !== 'Venta').reduce((s, m) => s + m.monto, 0) || 0
       const movExtraSalidas = cja?.filter(m => m.tipo === 'salida' && m.categoria !== 'Insumos').reduce((s, m) => s + m.monto, 0) || 0
-      const saldoCaja = totalVentas + totalDeliveryCobrado - totalCompras + movExtraEntradas - movExtraSalidas
+      const saldoCaja = totalVentas + totalDeliveryCobrado - totalCostoDelivery - totalCompras + movExtraEntradas - movExtraSalidas
 
       const hace30 = new Date(); hace30.setDate(hace30.getDate() - 30)
       const vtsMes = vts?.filter(v => new Date(v.fecha) >= hace30) || []

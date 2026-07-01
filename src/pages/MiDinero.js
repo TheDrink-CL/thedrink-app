@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { formatCLP } from '../lib/calculos'
+import { formatCLP, FECHA_CORTE_DELIVERY } from '../lib/calculos'
 import { enriquecerVentasConDelivery } from '../lib/calculos'
 import { calcularFinanzasMensuales, sueldoPromedio, calcularRunway,
          calcularReservaSugerida, calcularRetirable, proyectarMesActual } from '../lib/finanzasMes'
@@ -690,7 +690,7 @@ export default function MiDinero() {
         supabase.from('insumos').select('nombre, costo_ppp'),
         supabase.from('config').select('*'),
         supabase.from('historial_personal').select('*'),
-        supabase.from('ordenes').select('id, delivery, delivery_cobrado'),
+        supabase.from('ordenes').select('id, fecha, delivery, delivery_cobrado'),
       ])
 
       const cfgMap = {}
@@ -716,9 +716,10 @@ export default function MiDinero() {
       setHistorial(hist || [])
 
       // ── Caja disponible HOY (mismo cálculo que el Dashboard) ─────────────
-      const totalVentas = (vts || []).reduce((s, v) => s + (v.litros * v.precio_venta), 0)
-      const totalDeliveryCobrado = (ords || []).reduce((s, x) => s + (parseFloat(x.delivery_cobrado) || 0), 0)
-      const totalCostoDelivery = (ords || []).reduce((s, x) => s + (parseFloat(x.delivery) || 0), 0)
+      const totalVentas = (vts || []).reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0)
+      const ordCorte = (ords || []).filter(o => o.fecha >= FECHA_CORTE_DELIVERY)
+      const totalDeliveryCobrado = ordCorte.reduce((s, o) => s + (parseFloat(o.delivery_cobrado) || 0), 0)
+      const totalCostoDelivery = ordCorte.reduce((s, o) => s + (parseFloat(o.delivery) || 0), 0)
       const totalCompras = (cmp || []).reduce((s, c) => s + (c.es_inversion ? 0 : c.precio_total), 0)
       const todasCja = cjaTodo || []
       // 'Delivery' suma al saldo: es cobro al cliente, sin contraparte en otra tabla
