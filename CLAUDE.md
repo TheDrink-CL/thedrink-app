@@ -1,0 +1,97 @@
+# CLAUDE.md — reglas del proyecto (leer antes de trabajar)
+
+App interna de The Drink: React (create-react-app) desplegada en Vercel, datos en
+Supabase. Corre 100% en el navegador; el único backend propio es la función
+serverless `api/insights.js`.
+
+---
+
+## 🔒 SEGURIDAD — regla no negociable: RLS en TODA tabla
+
+**Toda tabla de `public` DEBE tener Row Level Security activo y una política que
+solo permita el rol `authenticated`. El rol `anon` no puede tocar nada.**
+
+Por qué: la app usa la key *publishable* de Supabase, que es pública y viaja en
+el bundle del navegador. Cualquiera la extrae. Lo único que protege los datos es
+RLS. Una tabla sin RLS (o con una política `using(true)` para `anon`/`public`)
+queda **totalmente abierta a internet**: cualquiera lee y escribe ventas, caja,
+finanzas y teléfonos de clientes pegándole directo a la REST API.
+
+### ⚠️ Trampa principal: las tablas NUEVAS nacen desprotegidas
+
+Cada vez que crees una tabla (en una migración o en el dashboard), Supabase la
+deja **sin la política correcta**. Si no la blindas, abriste un hueco. Por eso:
+
+**Después de crear CUALQUIER tabla nueva, agrega esto a la misma migración:**
+
+```sql
+alter table public.NUEVA_TABLA enable row level security;
+
+create policy staff_authenticated_all on public.NUEVA_TABLA
+  for all to authenticated using (true) with check (true);
+```
+
+O, más simple y a prueba de olvidos: **vuelve a correr la migración de blindaje**
+`supabase/migrations/20260717_blindaje_rls.sql`. Es dinámica: recorre todas las
+tablas de `public` y las cierra. Correrla de nuevo es seguro (idempotente).
+
+### Verificar que no quedó nada abierto
+
+Correr en el SQL Editor. **Debe devolver 0 filas** (ninguna tabla accesible por
+anon/public):
+
+```sql
+select schemaname, tablename, policyname, roles
+from pg_policies
+where schemaname = 'public'
+  and (roles @> '{anon}' or roles @> '{public}');
+```
+
+Y esta debe mostrar `rowsecurity = true` en TODAS las tablas:
+
+```sql
+select tablename, rowsecurity from pg_tables where schemaname = 'public';
+```
+
+### Prueba del atacante (simula acceso anónimo)
+
+```bash
+curl "https://wcuxjxaquiypzinxakxu.supabase.co/rest/v1/CUALQUIER_TABLA?select=*&limit=1" \
+  -H "apikey: sb_publishable_UzDdk9WWxGhA8IysMVNz_w_FIz_k1wI"
+```
+
+Debe devolver `[]` o error de permiso. Si devuelve filas, esa tabla está abierta.
+
+---
+
+## Otras reglas de seguridad
+
+- **`service_role` key: NUNCA en el frontend ni en el repo.** Solo vive como env
+  var en Vercel (`SUPABASE_SERVICE_ROLE_KEY`), usada por `api/insights.js`, que
+  corre en el servidor. Bypassa RLS a propósito; por eso jamás debe llegar al
+  navegador.
+- **La key `publishable` sí puede estar en el código.** Es pública por diseño;
+  con RLS cerrado, sola no sirve para nada. No hace falta rotarla.
+- **No introducir accesos anónimos.** No existe ningún consumidor legítimo
+  anónimo de la base: la carta pública (`Páginas web/Carta`) es HTML estático y
+  no toca Supabase. Si algo "necesita" leer sin login, es un error de diseño.
+- **Registro público de usuarios: debe seguir DESACTIVADO** en Supabase Auth. Si
+  se reabre, cualquiera se registra como `authenticated` y saltea todo el
+  blindaje.
+
+## Modelo de auth
+
+- Login real vía Supabase Auth con **cuenta compartida** (`contacto.thedrink@
+  gmail.com`). La clave la escribe el staff; no va en el código.
+- El gate está en `src/App.js` (`AuthLock`): sin sesión válida no se renderiza
+  nada, en todas las rutas.
+- Cuenta compartida = sin trazabilidad por persona. Si algún día se quiere saber
+  quién hizo cada acción, se migra a cuenta-por-persona: mismos policies
+  (`to authenticated`), solo más usuarios. No cambia el blindaje.
+- El PIN viejo (`PinLock`, `DeliveryLogin`) quedó obsoleto: era client-side y no
+  protegía la base. No reactivarlo como si fuera seguridad real.
+
+## Referencias
+
+- `BLINDAJE-pasos.md` — runbook de despliegue del blindaje (orden seguro).
+- `supabase/migrations/20260717_blindaje_rls.sql` — cierre de RLS, reutilizable.
