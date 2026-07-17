@@ -19,6 +19,8 @@ import MiDinero from './pages/MiDinero'
 import DeliveryLogin, { isDeliveryUnlocked } from './pages/DeliveryLogin'
 import DeliveryPanel from './pages/DeliveryPanel'
 import PinLock, { isPinUnlocked } from './pages/PinLock'
+import AuthLock from './pages/AuthLock'
+import { supabase } from './lib/supabase'
 import ImportarPedido from './pages/ImportarPedido'
 import Comandas from './pages/Comandas'
 import ComandasPendientes from './pages/ComandasPendientes'
@@ -183,9 +185,30 @@ export default function App() {
   const [menuMas, setMenuMas] = useState(false)
   const [desbloqueado, setDesbloqueado] = useState(isPinUnlocked())
   const [deliveryDesbloqueado, setDeliveryDesbloqueado] = useState(isDeliveryUnlocked())
+  // Sesion de Supabase Auth. null = todavia verificando; false = sin sesion;
+  // true = logueado. Es el candado real: sin sesion, la base (RLS cerrado) no
+  // devuelve ni acepta nada.
+  const [sesion, setSesion] = useState(null)
   const alertasCount = useAlertasCount()
 
+  useEffect(() => {
+    let vivo = true
+    supabase.auth.getSession().then(({ data }) => {
+      if (vivo) setSesion(!!data.session)
+    })
+    const { data: sub } = supabase.auth.onAuthStateChange((_evento, ses) => {
+      if (vivo) setSesion(!!ses)
+    })
+    return () => { vivo = false; sub.subscription.unsubscribe() }
+  }, [])
+
   const isEnMas = TABS_MAS.some(t => t.id === tab)
+
+  // ── Candado global: nada se renderiza sin sesion valida ──────────────────
+  // Cubre TODAS las rutas (main, delivery, TV, importar) porque todas leen o
+  // escriben en la base, que ahora exige rol authenticated.
+  if (sesion === null) return null // breve verificacion inicial
+  if (!sesion) return <AuthLock onUnlock={() => setSesion(true)} />
 
   if (isTVRoute()) return <Comandas />
   if (isImportarRoute()) return <ImportarPedido />

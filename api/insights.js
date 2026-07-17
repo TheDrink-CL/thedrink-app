@@ -12,8 +12,13 @@
 //   ANTHROPIC_API_KEY   (obligatoria, NUNCA en el frontend ni en el repo)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const SUPABASE_URL = 'https://wcuxjxaquiypzinxakxu.supabase.co'
-const SUPABASE_KEY = 'sb_publishable_UzDdk9WWxGhA8IysMVNz_w_FIz_k1wI'
+// Esta funcion corre SOLO en el servidor (Vercel), nunca se envia al navegador,
+// asi que aca si es seguro usar la service_role key. Bypassa RLS, por eso sigue
+// leyendo/escribiendo la tabla insights aunque la base este cerrada a anon.
+// La service_role NUNCA debe ir en el repo ni en el frontend: se setea como
+// env var en Vercel (Settings -> Environment Variables).
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://wcuxjxaquiypzinxakxu.supabase.co'
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 const MODELO = 'claude-haiku-4-5-20251001'
 
 const SYSTEM_PROMPT = `Eres el asesor de negocio de The Drink, marca chilena de cócteles embotellados de 1 litro con delivery en Santiago. Hablas en español chileno, directo y sin relleno. Recibes un JSON con KPIs ya calculados; nunca inventes cifras que no estén en el JSON. Los márgenes, ROAS y metas vienen EN el JSON — no asumas valores de memoria.
@@ -60,6 +65,11 @@ async function supa(path, opts = {}) {
 module.exports = async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Solo POST' })
+    return
+  }
+
+  if (!SUPABASE_KEY) {
+    res.status(500).json({ error: 'SUPABASE_SERVICE_ROLE_KEY no configurada en Vercel' })
     return
   }
 
