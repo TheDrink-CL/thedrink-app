@@ -28,6 +28,13 @@ function limpiarTel(tel = '') {
   return d
 }
 
+// Últimos 8 dígitos: parte estable del móvil. Mismo criterio que en Ventas,
+// para que el aviso de NEON usado matchee sin importar el formato guardado.
+function ultimos8Tel(tel = '') {
+  const d = (tel || '').replace(/\D/g, '')
+  return d.length >= 8 ? d.slice(-8) : null
+}
+
 // ─── Match de receta más cercana ─────────────────────────────────────────────
 function matchReceta(texto, recetas) {
   if (!recetas.length || !texto) return null
@@ -246,7 +253,24 @@ export default function ImportarPedido() {
   // config global cargada de Supabase (prep, delivery por km, buffer)
   const [comandasConfig, setComandasConfig] = useState({})
   const [guardando, setGuardando] = useState(false)
+  const [neonPrevio, setNeonPrevio] = useState(null) // { codigo, fecha_canje } si el teléfono ya canjeó
   const textareaRef = useRef(null)
+
+  // Aviso proactivo: si el teléfono del cliente ya canjeó un NEON, avisar para
+  // no ofrecerle otro descuento. Solo informativo (este flujo no aplica NEON).
+  useEffect(() => {
+    const u8 = ultimos8Tel(editCliente.telefono)
+    if (!u8) { setNeonPrevio(null); return }
+    let cancelado = false
+    const t = setTimeout(async () => {
+      const { data, error } = await supabase
+        .from('canjes_neon').select('codigo, fecha_canje')
+        .ilike('telefono', '%' + u8).order('fecha_canje', { ascending: true }).limit(1)
+      if (cancelado) return
+      setNeonPrevio(error ? null : (data?.[0] || null))
+    }, 400)
+    return () => { cancelado = true; clearTimeout(t) }
+  }, [editCliente.telefono])
 
   useEffect(() => {
     supabase.from('recetas').select('nombre, precio_venta').order('nombre')
@@ -417,7 +441,13 @@ export default function ImportarPedido() {
           <span style={sty.label}>Nombre</span>
           <input style={{ ...sty.input, marginBottom:8 }} value={editCliente.nombre} onChange={e => setEditCliente(c=>({...c,nombre:e.target.value}))} placeholder="Nombre del cliente" />
           <span style={sty.label}>Telefono</span>
-          <input style={{ ...sty.input, marginBottom:8 }} value={editCliente.telefono} onChange={e => setEditCliente(c=>({...c,telefono:e.target.value}))} placeholder="9XXXXXXXX" />
+          <input style={{ ...sty.input, marginBottom: neonPrevio ? 4 : 8, borderColor: neonPrevio ? '#ff5082' : undefined }} value={editCliente.telefono} onChange={e => setEditCliente(c=>({...c,telefono:e.target.value}))} placeholder="9XXXXXXXX" />
+          {neonPrevio && (
+            <div style={{ marginBottom:8, fontSize:12, fontWeight:700, color:'#ff5082', lineHeight:1.4 }}>
+              ⚠ Este telefono ya uso un NEON ({neonPrevio.codigo})
+              {neonPrevio.fecha_canje ? ' el ' + new Date(neonPrevio.fecha_canje).toLocaleDateString('es-CL') : ''}. No corresponde otro descuento.
+            </div>
+          )}
           <span style={sty.label}>Direccion</span>
           <input style={sty.input} value={editCliente.direccion} onChange={e => setEditCliente(c=>({...c,direccion:e.target.value}))} placeholder="Calle y numero" />
         </>)}

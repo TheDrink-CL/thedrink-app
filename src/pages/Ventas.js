@@ -204,6 +204,13 @@ function normalizarTelefono(tel) {
   return (tel || '').replace(/\D/g, '')
 }
 
+// Últimos 8 dígitos: parte estable de un móvil chileno. Sirve para comparar
+// números sin depender de si se escribió con +56, con 9 al inicio, etc.
+function ultimos8Tel(tel) {
+  const d = (tel || '').replace(/\D/g, '')
+  return d.length >= 8 ? d.slice(-8) : null
+}
+
 function ConfirmModal({ mensaje, onConfirm, onCancel }) {
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, padding:24 }}>
@@ -498,14 +505,15 @@ export default function Ventas() {
   // Aviso proactivo: apenas se carga el teléfono, chequea si ese número ya
   // canjeó un NEON antes. Debounce para no pegarle a la base en cada tecla.
   useEffect(() => {
-    const tel = normalizarTelefono(clienteTelefono)
-    if (!tel) { setNeonPrevio(null); return }
+    const u8 = ultimos8Tel(clienteTelefono)
+    if (!u8) { setNeonPrevio(null); return }
     let cancelado = false
     const t = setTimeout(async () => {
       const { data, error } = await supabase
-        .from('canjes_neon').select('codigo, fecha_canje').eq('telefono', tel).maybeSingle()
+        .from('canjes_neon').select('codigo, fecha_canje')
+        .ilike('telefono', '%' + u8).order('fecha_canje', { ascending: true }).limit(1)
       if (cancelado) return
-      setNeonPrevio(error ? null : (data || null))
+      setNeonPrevio(error ? null : (data?.[0] || null))
     }, 400)
     return () => { cancelado = true; clearTimeout(t) }
   }, [clienteTelefono])
@@ -644,19 +652,21 @@ export default function Ventas() {
         return
       }
       const tel = normalizarTelefono(clienteTelefono)
-      if (!tel) {
+      const u8 = ultimos8Tel(clienteTelefono)
+      if (!u8) {
         showToast('Para canjear un NEON necesitás el teléfono del cliente (1 teléfono = 1 código)')
         return
       }
-      // ¿Este teléfono ya canjeó algún NEON antes?
-      const { data: previo, error: errPrevio } = await supabase
-        .from('canjes_neon').select('codigo, fecha_canje').eq('telefono', tel).maybeSingle()
+      // ¿Este teléfono ya canjeó algún NEON antes? Match por últimos 8 dígitos
+      // para no depender del formato con que se guardó el número.
+      const { data: previos, error: errPrevio } = await supabase
+        .from('canjes_neon').select('codigo, fecha_canje').ilike('telefono', '%' + u8).limit(1)
       if (errPrevio) {
         showToast('No pude verificar el código (error de red): ' + errPrevio.message)
         return
       }
-      if (previo) {
-        showToast('Ese teléfono ya usó un NEON (' + previo.codigo + '). 1 código por cliente.')
+      if (previos?.length) {
+        showToast('Ese teléfono ya usó un NEON (' + previos[0].codigo + '). 1 código por cliente.')
         return
       }
       neonAplicado = { codigo: v.codigo, telefono: tel }
