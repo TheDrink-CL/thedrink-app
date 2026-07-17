@@ -481,6 +481,7 @@ export default function Ventas() {
   // Concurso NEON
   const [codigoNeon, setCodigoNeon] = useState('')
   const [neonEstado, setNeonEstado] = useState(null) // { ok, msg } feedback en vivo
+  const [neonPrevio, setNeonPrevio] = useState(null) // { codigo, fecha_canje } si el teléfono ya canjeó
 
   // Feedback en vivo del código NEON mientras se escribe (solo fórmula/caducidad,
   // el chequeo de reúso por teléfono ocurre al guardar).
@@ -493,6 +494,21 @@ export default function Ventas() {
     else if (r.motivo === 'futuro') setNeonEstado({ ok: false, msg: r.detalle })
     else setNeonEstado({ ok: false, msg: 'Código inválido (checksum)' })
   }, [codigoNeon])
+
+  // Aviso proactivo: apenas se carga el teléfono, chequea si ese número ya
+  // canjeó un NEON antes. Debounce para no pegarle a la base en cada tecla.
+  useEffect(() => {
+    const tel = normalizarTelefono(clienteTelefono)
+    if (!tel) { setNeonPrevio(null); return }
+    let cancelado = false
+    const t = setTimeout(async () => {
+      const { data, error } = await supabase
+        .from('canjes_neon').select('codigo, fecha_canje').eq('telefono', tel).maybeSingle()
+      if (cancelado) return
+      setNeonPrevio(error ? null : (data || null))
+    }, 400)
+    return () => { cancelado = true; clearTimeout(t) }
+  }, [clienteTelefono])
 
   useEffect(() => { load() }, [])
 
@@ -993,7 +1009,17 @@ export default function Ventas() {
             <div className="form-group">
               <label className="form-label">Teléfono — opcional</label>
               <input type="tel" className="form-input" value={clienteTelefono} placeholder="+56 9 ..."
+                style={{ borderColor: neonPrevio ? 'var(--pink, #ff3366)' : undefined }}
                 onChange={e => setClienteTelefono(e.target.value)} />
+              {neonPrevio && (
+                <div style={{
+                  marginTop:6, fontSize:12, fontWeight:600, letterSpacing:'0.02em',
+                  color:'var(--pink, #ff3366)',
+                }}>
+                  ⚠ Este teléfono ya usó un NEON ({neonPrevio.codigo})
+                  {neonPrevio.fecha_canje ? ' el ' + new Date(neonPrevio.fecha_canje).toLocaleDateString('es-CL') : ''}. No corresponde otro descuento.
+                </div>
+              )}
             </div>
             <div className="form-group">
               <label className="form-label">Dirección — opcional</label>
