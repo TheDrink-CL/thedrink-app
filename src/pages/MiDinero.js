@@ -112,9 +112,10 @@ function ReservaModal({ config, reservaSugerida, onSave, onCancel }) {
   const [mesesCogs, setMesesCogs] = useState(String(config.caja_reserva_meses_cogs ?? 1))
   const [colchonPct, setColchonPct] = useState(String(Math.round((parseFloat(config.caja_reserva_colchon_pct) || 0.10) * 100)))
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
   const handleSave = async () => {
-    setSaving(true)
+    setSaving(true); setError('')
     const updates = [
       { clave: 'caja_reserva_modo',        valor: modo },
       { clave: 'caja_reserva_manual',      valor: parseFloat(manual) || 0 },
@@ -122,9 +123,12 @@ function ReservaModal({ config, reservaSugerida, onSave, onCancel }) {
       { clave: 'caja_reserva_colchon_pct', valor: (parseFloat(colchonPct) || 0) / 100 },
     ]
     for (const u of updates) {
-      const { data: existe } = await supabase.from('config').select('clave').eq('clave', u.clave).maybeSingle()
-      if (existe) await supabase.from('config').update({ valor: u.valor }).eq('clave', u.clave)
-      else await supabase.from('config').insert(u)
+      const { data: existe, error: errSelect } = await supabase.from('config').select('clave').eq('clave', u.clave).maybeSingle()
+      if (errSelect) { setSaving(false); setError(errSelect.message); return }
+      const { error: errWrite } = existe
+        ? await supabase.from('config').update({ valor: u.valor }).eq('clave', u.clave)
+        : await supabase.from('config').insert(u)
+      if (errWrite) { setSaving(false); setError(errWrite.message); return }
     }
     setSaving(false)
     onSave()
@@ -188,6 +192,7 @@ function ReservaModal({ config, reservaSugerida, onSave, onCancel }) {
           </div>
         )}
 
+        {error && <div style={{ color:'var(--pink)', fontSize:13, marginBottom:10 }}>{error}</div>}
         <div style={{ display:'flex', gap:10, marginTop:8 }}>
           <button className="btn btn-secondary" style={{ flex:1 }} onClick={onCancel}>Cancelar</button>
           <button className="btn btn-primary" style={{ flex:1 }} onClick={handleSave} disabled={saving}>
@@ -203,9 +208,10 @@ function ReservaModal({ config, reservaSugerida, onSave, onCancel }) {
 function SplitModal({ splitSueldo, onSave, onCancel }) {
   const [valor, setValor] = useState(String(Math.round(splitSueldo * 100)))
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
   const handleSave = async () => {
-    setSaving(true)
+    setSaving(true); setError('')
     const pct = Math.max(0, Math.min(100, parseFloat(valor) || 0)) / 100
     const reposicion = 1 - pct
     const upd = [
@@ -213,9 +219,12 @@ function SplitModal({ splitSueldo, onSave, onCancel }) {
       { clave: 'split_reposicion_pct', valor: reposicion },
     ]
     for (const u of upd) {
-      const { data: existe } = await supabase.from('config').select('clave').eq('clave', u.clave).maybeSingle()
-      if (existe) await supabase.from('config').update({ valor: u.valor }).eq('clave', u.clave)
-      else await supabase.from('config').insert(u)
+      const { data: existe, error: errSelect } = await supabase.from('config').select('clave').eq('clave', u.clave).maybeSingle()
+      if (errSelect) { setSaving(false); setError(errSelect.message); return }
+      const { error: errWrite } = existe
+        ? await supabase.from('config').update({ valor: u.valor }).eq('clave', u.clave)
+        : await supabase.from('config').insert(u)
+      if (errWrite) { setSaving(false); setError(errWrite.message); return }
     }
     setSaving(false)
     onSave()
@@ -246,6 +255,7 @@ function SplitModal({ splitSueldo, onSave, onCancel }) {
           Reposición: <strong style={{ color:'var(--cyan)' }}>{100 - sueldoPct}%</strong>
         </div>
 
+        {error && <div style={{ color:'var(--pink)', fontSize:13, marginBottom:10 }}>{error}</div>}
         <div style={{ display:'flex', gap:10 }}>
           <button className="btn btn-secondary" style={{ flex:1 }} onClick={onCancel}>Cancelar</button>
           <button className="btn btn-primary" style={{ flex:1 }} onClick={handleSave} disabled={saving}>

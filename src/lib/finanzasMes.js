@@ -118,8 +118,11 @@ export function calcularFinanzasMensuales({
  */
 export function sueldoPromedio(filas, n = 3) {
   if (!filas || filas.length === 0) return 0
-  // Excluir el mes corriente porque está incompleto; tomar de los demás
-  const mesActual = new Date().toISOString().slice(0, 7)
+  // Excluir el mes corriente porque está incompleto; tomar de los demás.
+  // Mes local (no UTC), igual que parseFecha: toISOString() en husos detrás
+  // de UTC (ej. Chile) puede seguir marcando el mes anterior como "actual".
+  const hoyLocal = new Date()
+  const mesActual = `${hoyLocal.getFullYear()}-${String(hoyLocal.getMonth() + 1).padStart(2, '0')}`
   const completos = filas.filter(f => f.mes !== mesActual).slice(0, n)
   if (completos.length === 0) return 0
   const suma = completos.reduce((s, f) => s + f.sueldo, 0)
@@ -152,7 +155,9 @@ export function calcularRunway(sueldoMensual, gasto, colchon) {
  */
 export function calcularReservaSugerida(filas, mesesCogs = 1, colchonPct = 0.10) {
   if (!filas || filas.length === 0) return 0
-  const mesActual = new Date().toISOString().slice(0, 7)
+  // Mes local (no UTC), ver comentario en sueldoPromedio.
+  const hoyLocal = new Date()
+  const mesActual = `${hoyLocal.getFullYear()}-${String(hoyLocal.getMonth() + 1).padStart(2, '0')}`
   const completos = filas.filter(f => f.mes !== mesActual).slice(0, 3)
   if (completos.length === 0) return 0
   const cogsPromedio = completos.reduce((s, f) => s + f.cogs, 0) / completos.length

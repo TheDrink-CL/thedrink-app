@@ -1,10 +1,22 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { calcularCostoReceta, formatCLP, formatPct } from '../lib/calculos'
+import { calcularCostoReceta, formatCLP, formatPct, esOrigenIGAds } from '../lib/calculos'
 import { calcularRentabilidad } from '../lib/rentabilidad'
 import { enriquecerVentasConDelivery, FECHA_CORTE_DELIVERY } from '../lib/calculos'
 import CaminoAlBar from './CaminoAlBar'
 import SaludNegocio from './SaludNegocio'
+
+// Parsea "YYYY-MM-DD" sin desfase de zona horaria (new Date(str) parsea UTC)
+function parseFecha(f) {
+  if (!f) return null
+  const [y, m, d] = f.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+// Formatea una fecha local a "YYYY-MM-DD" (evita el desfase de toISOString,
+// que usa UTC: en Chile desde ~21:00 ya cae en el día/mes siguiente en UTC)
+function toISOLocal(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 // Camino al Bar colapsado por defecto y al final del Dashboard (pedido del
 // usuario, jun 2026): es una proyección de largo plazo, no info operativa
@@ -331,19 +343,38 @@ export default function Dashboard() {
   })
   const [editandoMeta, setEditandoMeta] = useState(false)
   const [metaInput, setMetaInput] = useState('')
+  const [errorCarga, setErrorCarga] = useState(null)
 
   useEffect(() => {
     async function load() {
-      const [{ data: cfg }, { data: vts }, { data: cja }, { data: cmp }, { data: ins }, { data: ordenes }, { data: recIng }, { data: insumosConPPP }] = await Promise.all([
+      try {
+      const results = await Promise.all([
         supabase.from('config').select('*'),
         supabase.from('ventas').select('*').order('fecha', { ascending: false }),
         supabase.from('caja').select('*'),
         supabase.from('compras').select('precio_total, es_inversion, tipo'),
         supabase.from('insumos').select('nombre, stock_actual, stock_minimo, unidad, costo_ppp'),
-        supabase.from('ordenes').select('id, fecha, medio_pago, cliente_nombre, delivery, delivery_cobrado'),
+        supabase.from('ordenes').select('id, fecha, medio_pago, cliente_nombre, cliente_id, delivery, delivery_cobrado'),
         supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad, unidad'),
         supabase.from('insumos').select('nombre, costo_ppp'),
+        supabase.from('clientes').select('id, estado_contacto'),
       ])
+      const errores = results.map((r, i) => r.error ? { idx: i, msg: r.error.message } : null).filter(Boolean)
+      if (errores.length > 0) {
+        const tablas = ['config', 'ventas', 'caja', 'compras', 'insumos', 'ordenes', 'receta_ingredientes', 'insumosConPPP', 'clientes']
+        throw new Error(errores.map(e => `${tablas[e.idx]}: ${e.msg}`).join(' · '))
+      }
+      let [{ data: cfg }, { data: vts }, { data: cja }, { data: cmp }, { data: ins }, { data: ordenes }, { data: recIng }, { data: insumosConPPP }, { data: clientesRows }] = results
+
+      // Clientes excluidos (fraude, estado_contacto = 'excluido') salen de
+      // TODAS las estadísticas — mismo criterio que dashboardMetrics.js
+      // (Indicadores), para que las pantallas no diverjan.
+      const clientesExcluidos = new Set((clientesRows || []).filter(c => c.estado_contacto === 'excluido').map(c => c.id))
+      if (clientesExcluidos.size > 0) {
+        const ordenesExcluidas = new Set((ordenes || []).filter(o => clientesExcluidos.has(o.cliente_id)).map(o => o.id))
+        ordenes = (ordenes || []).filter(o => !clientesExcluidos.has(o.cliente_id))
+        vts = (vts || []).filter(v => !v.orden_id || !ordenesExcluidas.has(v.orden_id))
+      }
 
       // Enriquecer cada venta con el delivery (costo) y delivery_cobrado de su
       // orden. El delivery vive en `ordenes`, no en las filas de `ventas`.
@@ -394,10 +425,10 @@ export default function Dashboard() {
       const _hoy = new Date()
       const _h30 = new Date(_hoy); _h30.setDate(_hoy.getDate() - 30)
       const _h60 = new Date(_hoy); _h60.setDate(_hoy.getDate() - 60)
-      const vts30 = vtsEnr.filter(v => new Date(v.fecha) >= _h30)
-      const vtsPrev = vtsEnr.filter(v => new Date(v.fecha) >= _h60 && new Date(v.fecha) < _h30)
-      const gastos30 = gastosCajaSalida.filter(m => m.fecha && new Date(m.fecha) >= _h30)
-      const gastosPrev = gastosCajaSalida.filter(m => m.fecha && new Date(m.fecha) >= _h60 && new Date(m.fecha) < _h30)
+      const vts30 = vtsEnr.filter(v => parseFecha(v.fecha) >= _h30)
+      const vtsPrev = vtsEnr.filter(v => parseFecha(v.fecha) >= _h60 && parseFecha(v.fecha) < _h30)
+      const gastos30 = gastosCajaSalida.filter(m => m.fecha && parseFecha(m.fecha) >= _h30)
+      const gastosPrev = gastosCajaSalida.filter(m => m.fecha && parseFecha(m.fecha) >= _h60 && parseFecha(m.fecha) < _h30)
       const rent30 = calcularRentabilidad({
         ventas: vts30, recetaIngredientes: recIng || [], insumosPPP: insumosConPPP || [],
         gastosCaja: gastos30, config: { merma_pct: merma, costo_envase: costoEnvase },
@@ -434,7 +465,7 @@ export default function Dashboard() {
       const saldoCaja = totalVentas + totalDeliveryCobrado - totalCostoDelivery - totalCompras + movExtraEntradas - movExtraSalidas
 
       const hace30 = new Date(); hace30.setDate(hace30.getDate() - 30)
-      const vtsMes = vts?.filter(v => new Date(v.fecha) >= hace30) || []
+      const vtsMes = vts?.filter(v => parseFecha(v.fecha) >= hace30) || []
       const ingresoMes = vtsMes.reduce((s, v) => s + (v.litros * v.precio_venta), 0)
 
       const totalOrdenes = (ordenes || []).length
@@ -475,8 +506,8 @@ export default function Dashboard() {
       const hoyDate = new Date()
       const hace7 = new Date(hoyDate); hace7.setDate(hoyDate.getDate() - 7)
       const hace14 = new Date(hoyDate); hace14.setDate(hoyDate.getDate() - 14)
-      const ingresoSemAct = (vts || []).filter(v => new Date(v.fecha) >= hace7).reduce((s, v) => s + v.litros * v.precio_venta, 0)
-      const ingresoSemAnt = (vts || []).filter(v => new Date(v.fecha) >= hace14 && new Date(v.fecha) < hace7).reduce((s, v) => s + v.litros * v.precio_venta, 0)
+      const ingresoSemAct = (vts || []).filter(v => parseFecha(v.fecha) >= hace7).reduce((s, v) => s + v.litros * v.precio_venta, 0)
+      const ingresoSemAnt = (vts || []).filter(v => parseFecha(v.fecha) >= hace14 && parseFecha(v.fecha) < hace7).reduce((s, v) => s + v.litros * v.precio_venta, 0)
       const deltaSem = ingresoSemAnt > 0 ? (ingresoSemAct - ingresoSemAnt) / ingresoSemAnt : null
 
       // Canal más activo (desde que se registra origen)
@@ -496,7 +527,7 @@ export default function Dashboard() {
         { fecha: '2026-07-16', label: 'Virgen del Carmen', tipo: 'feriado' },
         { fecha: '2026-09-18', label: 'Fiestas Patrias', tipo: 'feriado' },
       ]
-      const hoyStr = hoyDate.toISOString().slice(0, 10)
+      const hoyStr = toISOLocal(hoyDate)
       const proximoEvento = EVENTOS_PROX.find(e => e.fecha > hoyStr) || null
       let diasHastaEvento = null
       if (proximoEvento) {
@@ -529,12 +560,30 @@ export default function Dashboard() {
 
       setData({ inversion, ingresoTotal, litrosTotales, costoTotalReal, saldoCaja, ingresoMes, ticketPromedio, ticketMediana, totalOrdenes, clientesRecurrentes: clientesRecurrentes.length, totalClientesNombrados, pctRecurrentes, topRecurrentes, totalActivosFijos, ingresoSemAct, ingresoSemAnt, deltaSem, canalTop, proximoEvento, diasHastaEvento, rentabilidad, inventarioRotable, capitalTrabajoStock, comparacionRent })
       setVentas({ topRecetas, topPorGanancia, recientes: vts?.slice(0, 5) || [], todasVentas: vts || [], costoPorReceta })
-      setLoading(false)
+      } catch (err) {
+        console.error('Dashboard - error al cargar datos:', err)
+        setErrorCarga(err.message || String(err))
+      } finally {
+        setLoading(false)
+      }
     }
     load()
   }, [])
 
   if (loading) return <div className="loading">Cargando...</div>
+  if (errorCarga) {
+    return (
+      <div className="page">
+        <div className="page-title">The Drink</div>
+        <div className="card" style={{ borderColor: 'rgba(196,0,90,0.4)' }}>
+          <div className="card-title" style={{ color: 'var(--pink)' }}>Error al cargar</div>
+          <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
+            {errorCarga}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   // Rotación de capital de trabajo: cuántas veces el capital de trabajo
   // "dio la vuelta" en ingresos. NO es ROI (no descuenta costos): es rotación.
@@ -562,9 +611,9 @@ export default function Dashboard() {
     '2026-09-19': 'Glorias del Ejército',
     '2026-12-25': 'Navidad',
   }
-  const keyHoyDash = hoyDash.toISOString().slice(0, 10)
+  const keyHoyDash = toISOLocal(hoyDash)
   const mananaD = new Date(hoyDash); mananaD.setDate(hoyDash.getDate() + 1)
-  const keyManDash = mananaD.toISOString().slice(0, 10)
+  const keyManDash = toISOLocal(mananaD)
   const feriadoHoyDash = FERIADOS_DASH[keyHoyDash]
   const feriadoManDash = FERIADOS_DASH[keyManDash]
 
@@ -758,7 +807,7 @@ export default function Dashboard() {
             <div className="kpi-card">
               <div className="kpi-label">Canal top</div>
               <div className="kpi-value" style={{ fontSize: 18 }}>
-                {data.canalTop[0] === 'Instagram' ? '📱' : data.canalTop[0] === 'Referido' ? '🤝' : data.canalTop[0] === 'Cliente habitual' ? '⭐' : '•'} {data.canalTop[0]}
+                {esOrigenIGAds(data.canalTop[0]) ? '🎯' : data.canalTop[0] === 'IG Orgánico' ? '📱' : data.canalTop[0] === 'Referido' ? '🤝' : data.canalTop[0] === 'Cliente habitual' ? '⭐' : '•'} {data.canalTop[0]}
               </div>
               <div className="kpi-sub">{formatCLP(data.canalTop[1])} acumulado</div>
             </div>

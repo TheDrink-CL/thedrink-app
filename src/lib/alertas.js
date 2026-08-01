@@ -30,7 +30,7 @@ const FERIADOS_CL = {
  * @param {Object} p
  * @param {Array}  p.ventas        filas de `ventas`
  * @param {Array}  p.ordenes       filas de `ordenes`
- * @param {Array}  p.clientes      filas de `clientes`
+ * @param {Array}  p.clientes      filas de `clientes` (incluir estado_contacto)
  * @param {Array}  p.insumos       filas de `insumos` con stock_actual y stock_minimo
  * @param {Array}  p.gastosPub     gastos de caja categoría Publicidad
  * @param {Array}  p.recetaIng     receta_ingredientes (para calcular días de stock)
@@ -63,11 +63,19 @@ export function generarAlertas({
     }
   })
   const tagPorCliente = {}
+  const estadoPorCliente = {}
   clientes.forEach(c => {
-    tagPorCliente[(c.nombre || '').trim().toLowerCase()] = c.tag || ''
+    const key = (c.nombre || '').trim().toLowerCase()
+    tagPorCliente[key] = c.tag || ''
+    estadoPorCliente[key] = c.estado_contacto || null
   })
 
   Object.entries(pedidosPorCliente).forEach(([key, d]) => {
+    // No sugerir reactivar a clientes vetados por fraude ('excluido') ni a
+    // quienes se marcó explícitamente 'no_contactar' — el punto de esta
+    // alerta es pedir que se le escriba, lo que contradice ambos estados.
+    const estadoCliente = estadoPorCliente[key]
+    if (estadoCliente === 'excluido' || estadoCliente === 'no_contactar') return
     const tag = (tagPorCliente[key] || '').toLowerCase()
     const esVIP = tag.includes('vip') || d.count >= 3
     if (!esVIP) return

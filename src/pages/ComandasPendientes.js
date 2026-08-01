@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { descontarStock } from '../lib/inventario'
+import { construirEsVip } from '../lib/clientesVip'
 
 const fechaHoy = () => {
   const d = new Date()
@@ -101,7 +102,10 @@ function ModalVenta({ comanda, recetas, onGuardar, onCerrar }) {
       })))
 
       // Descontar inventario por los ingredientes consumidos en esta venta.
-      await descontarStock(validos)
+      const resStock = await descontarStock(validos)
+      if (resStock && !resStock.ok) {
+        alert('Venta registrada, pero no se pudo descontar stock de: ' + resStock.fallidos.join(', '))
+      }
 
       // Vincular la comanda con la venta creada. NO archivamos automáticamente:
       // si la comanda estaba "pendiente" sigue ahí (la TV la sigue mostrando con
@@ -111,7 +115,8 @@ function ModalVenta({ comanda, recetas, onGuardar, onCerrar }) {
       if (comanda.estado === 'listo' || comanda.venta_orden_id) {
         update.estado = 'archivado'
       }
-      await supabase.from('comandas').update(update).eq('id', comanda.id)
+      const { error: errUpdate } = await supabase.from('comandas').update(update).eq('id', comanda.id)
+      if (errUpdate) throw new Error(errUpdate.message || 'Error al vincular la venta con la comanda')
       onGuardar()
     } catch(e) {
       alert('Error: ' + e.message)
@@ -226,7 +231,7 @@ function useTiempo(createdAt) {
 }
 
 // ─── Tarjeta de comanda ───────────────────────────────────────────────────────
-function TarjetaComanda({ comanda, onConvertir, onArchivar }) {
+function TarjetaComanda({ comanda, onConvertir, onArchivar, esVIP }) {
   const { texto, minutos } = useTiempo(comanda.created_at)
   const esListo = comanda.estado === 'listo'
   const color = esListo ? '#00b4b4' : minutos < 5 ? '#48c78e' : minutos < 10 ? '#ffc832' : '#ff5082'
@@ -241,8 +246,13 @@ function TarjetaComanda({ comanda, onConvertir, onArchivar }) {
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:10 }}>
         <div>
           {esListo && <span style={{ fontSize:10, fontWeight:800, color:'#00b4b4', letterSpacing:1, display:'block', marginBottom:3 }}>ELABORADO</span>}
-          <div style={{ fontSize:15, fontWeight:800, color:'var(--text-strong)' }}>
-            {comanda.cliente_nombre || 'Sin nombre'}
+          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+            <div style={{ fontSize:15, fontWeight:800, color:'var(--text-strong)' }}>
+              {comanda.cliente_nombre || 'Sin nombre'}
+            </div>
+            {esVIP && (
+              <span style={{ fontSize: 10, background: 'rgba(245,158,11,0.15)', color: '#f59e0b', borderRadius: 8, padding: '1px 6px', fontWeight: 700 }}>⭐ VIP</span>
+            )}
           </div>
           {comanda.cliente_direccion && (
             <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>
@@ -271,12 +281,21 @@ function TarjetaComanda({ comanda, onConvertir, onArchivar }) {
       </div>
 
       <div style={{ display:'flex', gap:8 }}>
-        <button onClick={() => onConvertir(comanda)} style={{
-          flex:1, background:'var(--cyan)', color:'#000', fontWeight:800, fontSize:13,
-          border:'none', borderRadius:10, padding:'10px', cursor:'pointer'
-        }}>
-          Registrar venta
-        </button>
+        {comanda.venta_orden_id ? (
+          <div style={{
+            flex:1, textAlign:'center', background:'rgba(0,180,180,0.12)', color:'#00b4b4', fontWeight:800, fontSize:13,
+            border:'1px solid rgba(0,180,180,0.3)', borderRadius:10, padding:'10px'
+          }}>
+            ✓ Venta registrada
+          </div>
+        ) : (
+          <button onClick={() => onConvertir(comanda)} style={{
+            flex:1, background:'var(--cyan)', color:'#000', fontWeight:800, fontSize:13,
+            border:'none', borderRadius:10, padding:'10px', cursor:'pointer'
+          }}>
+            Registrar venta
+          </button>
+        )}
         <button onClick={() => onArchivar(comanda.id)} style={{
           background:'rgba(255,255,255,0.05)', color:'var(--muted)', fontWeight:600, fontSize:12,
           border:'1px solid var(--border)', borderRadius:10, padding:'10px 12px', cursor:'pointer'
@@ -292,6 +311,7 @@ function TarjetaComanda({ comanda, onConvertir, onArchivar }) {
 export default function ComandasPendientes() {
   const [comandas, setComandas] = useState([])
   const [recetas, setRecetas] = useState([])
+  const [esVip, setEsVip] = useState(() => () => false)
   const [cargando, setCargando] = useState(true)
   const [activa, setActiva] = useState(null)
   const [toast, setToast] = useState('')
@@ -299,14 +319,17 @@ export default function ComandasPendientes() {
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2800) }
 
   const cargar = async () => {
-    const [{ data: cmd }, { data: rec }] = await Promise.all([
+    const [{ data: cmd }, { data: rec }, { data: cls }, { data: ords }] = await Promise.all([
       supabase.from('comandas').select('*')
         .in('estado', ['pendiente', 'listo'])
         .order('created_at', { ascending: true }),
-      supabase.from('recetas').select('nombre, precio_venta').order('nombre')
+      supabase.from('recetas').select('nombre, precio_venta').order('nombre'),
+      supabase.from('clientes').select('id, nombre, tag'),
+      supabase.from('ordenes').select('cliente_id, cliente_nombre'),
     ])
     setComandas(cmd || [])
     setRecetas((rec || []).filter(r => r.nombre !== 'ENVASE'))
+    setEsVip(() => construirEsVip(cls || [], ords || []))
     setCargando(false)
   }
 
@@ -380,7 +403,7 @@ export default function ComandasPendientes() {
 
       {/* Pendientes primero */}
       {pendientes.map(c => (
-        <TarjetaComanda key={c.id} comanda={c} onConvertir={setActiva} onArchivar={handleArchivar} />
+        <TarjetaComanda key={c.id} comanda={c} onConvertir={setActiva} onArchivar={handleArchivar} esVIP={esVip(c)} />
       ))}
 
       {/* Separador si hay ambos estados */}
@@ -392,7 +415,7 @@ export default function ComandasPendientes() {
 
       {/* Elaborados */}
       {listos.map(c => (
-        <TarjetaComanda key={c.id} comanda={c} onConvertir={setActiva} onArchivar={handleArchivar} />
+        <TarjetaComanda key={c.id} comanda={c} onConvertir={setActiva} onArchivar={handleArchivar} esVIP={esVip(c)} />
       ))}
     </div>
   )

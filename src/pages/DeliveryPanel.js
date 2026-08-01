@@ -91,7 +91,7 @@ function llamarCliente(telefono) {
   window.open(`tel:${telefono}`, '_self')
 }
 
-function DeliveryCard({ orden, onEstadoChange }) {
+function DeliveryCard({ orden, onEstadoChange, onError }) {
   const [cambiando, setCambiando] = useState(false)
   const cfg = estadoConfig[orden.estado_delivery || 'pendiente']
 
@@ -108,12 +108,16 @@ function DeliveryCard({ orden, onEstadoChange }) {
   const handleAvanzar = async () => {
     if (!siguienteEstado) return
     setCambiando(true)
-    await supabase
+    const { error } = await supabase
       .from('ordenes')
       .update({ estado_delivery: siguienteEstado })
       .eq('id', orden.id)
-    onEstadoChange()
     setCambiando(false)
+    if (error) {
+      if (onError) onError('No se pudo actualizar el estado (revisa tu conexión). ' + error.message)
+      return
+    }
+    onEstadoChange()
   }
 
   const tieneDelivery = ['motoboy', 'propio', 'otro', 'uber'].includes(orden.delivery_tipo)
@@ -433,10 +437,15 @@ export default function DeliveryPanel({ onLogout }) {
     const entregados = ordenes.filter(o => o.estado_delivery === 'entregado')
     if (entregados.length === 0) { showToast('No hay entregados para archivar'); return }
     setArchivando(true)
-    await supabase
+    const { error } = await supabase
       .from('ordenes')
       .update({ delivery_archivado: true })
       .in('id', entregados.map(o => o.id))
+    if (error) {
+      setArchivando(false)
+      showToast('No se pudo archivar (revisa tu conexión). ' + error.message)
+      return
+    }
     await load()
     showToast(`${entregados.length} pedido${entregados.length > 1 ? 's' : ''} archivado${entregados.length > 1 ? 's' : ''} ✓`)
     setArchivando(false)
@@ -634,6 +643,7 @@ export default function DeliveryPanel({ onLogout }) {
               key={o.id}
               orden={o}
               onEstadoChange={() => { load(); showToast('Estado actualizado ✓') }}
+              onError={showToast}
             />
           ))
         )}

@@ -305,9 +305,14 @@ function AnalisisIA({ m }) {
     async function fetchInsight() {
       setEstado('cargando')
       try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) throw new Error('No autorizado')
         const res = await fetch('/api/insights', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session.access_token}`,
+          },
           body: JSON.stringify({ metricas: resumenParaIA(m) }),
         })
         if (!res.ok) {

@@ -43,7 +43,8 @@ export function descargarCSV(nombre, headers, rows) {
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
-  const fecha = new Date().toISOString().slice(0, 10)
+  const hoy = new Date()
+  const fecha = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${String(hoy.getDate()).padStart(2, '0')}`
   link.href = url
   link.download = `${nombre}_${fecha}.csv`
   document.body.appendChild(link)

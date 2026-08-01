@@ -62,6 +62,25 @@ async function supa(path, opts = {}) {
   return res.status === 204 ? null : res.json()
 }
 
+// Valida el JWT de Supabase Auth que manda el cliente. No hay ningún consumidor
+// anónimo legítimo de este endpoint (gasta créditos de Anthropic y escribe en
+// `insights`), así que sin un usuario autenticado válido no se sigue.
+async function usuarioAutenticado(token) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${token}`,
+      },
+    })
+    if (!res.ok) return null
+    const user = await res.json()
+    return user && user.id ? user : null
+  } catch (e) {
+    return null
+  }
+}
+
 module.exports = async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Solo POST' })
@@ -70,6 +89,16 @@ module.exports = async (req, res) => {
 
   if (!SUPABASE_KEY) {
     res.status(500).json({ error: 'SUPABASE_SERVICE_ROLE_KEY no configurada en Vercel' })
+    return
+  }
+
+  // Autenticación: exige un JWT de sesión de Supabase Auth válido ANTES de
+  // tocar el caché o llamar a Anthropic. Sin esto, cualquiera en internet
+  // puede pegarle al endpoint, gastar créditos y escribir en `insights`.
+  const authHeader = req.headers.authorization || ''
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : ''
+  if (!token || !(await usuarioAutenticado(token))) {
+    res.status(401).json({ error: 'No autorizado' })
     return
   }
 
