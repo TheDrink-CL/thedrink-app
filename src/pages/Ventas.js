@@ -225,7 +225,7 @@ function ConfirmModal({ mensaje, onConfirm, onCancel }) {
   )
 }
 
-function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
+function EditOrdenModal({ orden, recetas, onSave, onCancel, showToast }) {
   const [fecha, setFecha] = useState(orden.fecha)
   const [hora, setHora] = useState(orden.hora || '')
   const [cliente, setCliente] = useState(orden.cliente_nombre || '')
@@ -314,7 +314,10 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel }) {
     }
 
     // Descontar stock por los nuevos ítems
-    await descontarStock(itemsValidos)
+    const resStock = await descontarStock(itemsValidos)
+    if (resStock && !resStock.ok) {
+      showToast('Pedido actualizado, pero no se ajustó el stock de: ' + resStock.fallidos.join(', '))
+    }
 
     setSaving(false)
     onSave()
@@ -692,14 +695,19 @@ export default function Ventas() {
         }
       } else {
         // Cliente nuevo — crear en maestro
-        const { data: nuevoCliente } = await supabase.from('clientes').insert({
+        const { data: nuevoCliente, error: errCliente } = await supabase.from('clientes').insert({
           nombre: cliente.trim(),
           telefono: clienteTelefono || null,
           direccion: clienteDireccion || null,
           distancia_km: distanciaKm ? parseFloat(distanciaKm) : null,
           origen: origen || null,
         }).select().single()
-        if (nuevoCliente) clienteId = nuevoCliente.id
+        if (errCliente) {
+          showToast('No se pudo guardar el cliente nuevo en el maestro: ' + errCliente.message)
+        } else if (nuevoCliente) {
+          clienteId = nuevoCliente.id
+          setClientesMaestro(prev => [...prev, nuevoCliente])
+        }
       }
     }
 
@@ -772,6 +780,12 @@ export default function Ventas() {
     const { error: errVentas } = await supabase.from('ventas').insert(ventasInsert)
     console.log('ventas error:', errVentas)
     if (errVentas) {
+      // Rollback: la orden (y el canje NEON, si hubo) quedarían huérfanos/quemados
+      // sin esto — mismo patrón que el rollback de canje duplicado más arriba.
+      if (neonAplicado) {
+        await supabase.from('canjes_neon').delete().eq('orden_id', orden.id)
+      }
+      await supabase.from('ordenes').delete().eq('id', orden.id)
       showToast('Error en ventas: ' + errVentas.message)
       setLoading(false)
       return
@@ -823,12 +837,28 @@ export default function Ventas() {
       litros: v.litros,
       devuelve_envase: v.nota === 'envase devuelto',
     }))
+    let stockFallido = null
     if (itemsAnteriores.length > 0) {
-      await reintegrarStock(itemsAnteriores)
+      const resStock = await reintegrarStock(itemsAnteriores)
+      if (resStock && !resStock.ok) stockFallido = resStock.fallidos
     }
-    await supabase.from('ventas').delete().eq('orden_id', orden.id)
-    await supabase.from('ordenes').delete().eq('id', orden.id)
-    showToast('Pedido eliminado · stock reintegrado')
+    const { error: errVentas } = await supabase.from('ventas').delete().eq('orden_id', orden.id)
+    if (errVentas) {
+      showToast('Error al borrar los productos del pedido: ' + errVentas.message)
+      setConfirmar(null)
+      load()
+      return
+    }
+    const { error: errOrden } = await supabase.from('ordenes').delete().eq('id', orden.id)
+    if (errOrden) {
+      showToast('Error al borrar el pedido: ' + errOrden.message)
+      setConfirmar(null)
+      load()
+      return
+    }
+    showToast(stockFallido
+      ? 'Pedido eliminado, pero no se reintegró el stock de: ' + stockFallido.join(', ')
+      : 'Pedido eliminado · stock reintegrado')
     setConfirmar(null)
     load()
   }
@@ -945,6 +975,7 @@ export default function Ventas() {
           recetas={recetas}
           onSave={() => { setEditando(null); showToast('Pedido actualizado ✓'); load() }}
           onCancel={() => setEditando(null)}
+          showToast={showToast}
         />
       )}
 

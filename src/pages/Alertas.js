@@ -21,41 +21,54 @@ export default function Alertas() {
   const [loading, setLoading] = useState(true)
   const [mostrarLeidas, setMostrarLeidas] = useState(false)
   const [filtroTipo, setFiltroTipo] = useState('todos')
+  const [errorCarga, setErrorCarga] = useState(null)
 
   useEffect(() => { load() }, [])
 
   async function load() {
-    const [
-      { data: vts }, { data: ords }, { data: cls },
-      { data: ins }, { data: cja }, { data: recIng }, { data: cfg },
-      { data: leidasArr },
-    ] = await Promise.all([
-      supabase.from('ventas').select('fecha, litros, precio_venta, receta_nombre'),
-      supabase.from('ordenes').select('fecha, cliente_nombre'),
-      supabase.from('clientes').select('nombre, tag'),
-      supabase.from('insumos').select('nombre, stock_actual, stock_minimo, unidad'),
-      supabase.from('caja').select('fecha, monto, categoria, tipo').eq('tipo', 'salida'),
-      supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad'),
-      supabase.from('config').select('*'),
-      supabase.from('alertas_leidas').select('clave'),
-    ])
+    try {
+      const results = await Promise.all([
+        supabase.from('ventas').select('fecha, litros, precio_venta, receta_nombre'),
+        supabase.from('ordenes').select('fecha, cliente_nombre'),
+        supabase.from('clientes').select('nombre, tag, estado_contacto'),
+        supabase.from('insumos').select('nombre, stock_actual, stock_minimo, unidad'),
+        supabase.from('caja').select('fecha, monto, categoria, tipo').eq('tipo', 'salida'),
+        supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad'),
+        supabase.from('config').select('*'),
+        supabase.from('alertas_leidas').select('clave'),
+      ])
+      const errores = results.map((r, i) => r.error ? { idx: i, msg: r.error.message } : null).filter(Boolean)
+      if (errores.length > 0) {
+        const tablas = ['ventas', 'ordenes', 'clientes', 'insumos', 'caja', 'receta_ingredientes', 'config', 'alertas_leidas']
+        throw new Error(errores.map(e => `${tablas[e.idx]}: ${e.msg}`).join(' · '))
+      }
+      const [
+        { data: vts }, { data: ords }, { data: cls },
+        { data: ins }, { data: cja }, { data: recIng }, { data: cfg },
+        { data: leidasArr },
+      ] = results
 
-    const cfgMap = {}
-    ;(cfg || []).forEach(c => { cfgMap[c.clave] = c.valor })
+      const cfgMap = {}
+      ;(cfg || []).forEach(c => { cfgMap[c.clave] = c.valor })
 
-    const generadas = generarAlertas({
-      ventas: vts || [],
-      ordenes: ords || [],
-      clientes: cls || [],
-      insumos: ins || [],
-      gastosPub: (cja || []).filter(m => m.categoria === 'Publicidad'),
-      recetaIng: recIng || [],
-      config: cfgMap,
-    })
+      const generadas = generarAlertas({
+        ventas: vts || [],
+        ordenes: ords || [],
+        clientes: cls || [],
+        insumos: ins || [],
+        gastosPub: (cja || []).filter(m => m.categoria === 'Publicidad'),
+        recetaIng: recIng || [],
+        config: cfgMap,
+      })
 
-    setAlertas(generadas)
-    setLeidas(new Set((leidasArr || []).map(l => l.clave)))
-    setLoading(false)
+      setAlertas(generadas)
+      setLeidas(new Set((leidasArr || []).map(l => l.clave)))
+    } catch (e) {
+      console.error('Alertas - error al cargar:', e)
+      setErrorCarga(e.message || String(e))
+    } finally {
+      setLoading(false)
+    }
   }
 
   const marcarLeida = async (alerta) => {
@@ -96,6 +109,19 @@ export default function Alertas() {
   noLeidas.forEach(a => { conteoPorTipo[a.tipo] = (conteoPorTipo[a.tipo] || 0) + 1 })
 
   if (loading) return <div className="loading">Cargando alertas...</div>
+  if (errorCarga) {
+    return (
+      <div className="page">
+        <div className="page-title">Alertas</div>
+        <div className="card" style={{ borderColor: 'rgba(196,0,90,0.4)' }}>
+          <div className="card-title" style={{ color: 'var(--pink)' }}>Error al cargar</div>
+          <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
+            {errorCarga}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="page">
@@ -211,20 +237,24 @@ export function useAlertasCount() {
     let cancelado = false
     async function calc() {
       try {
-        const [
-          { data: vts }, { data: ords }, { data: cls },
-          { data: ins }, { data: cja }, { data: recIng }, { data: cfg },
-          { data: leidasArr },
-        ] = await Promise.all([
+        const results = await Promise.all([
           supabase.from('ventas').select('fecha, litros, precio_venta, receta_nombre'),
           supabase.from('ordenes').select('fecha, cliente_nombre'),
-          supabase.from('clientes').select('nombre, tag'),
+          supabase.from('clientes').select('nombre, tag, estado_contacto'),
           supabase.from('insumos').select('nombre, stock_actual, stock_minimo, unidad'),
           supabase.from('caja').select('fecha, monto, categoria, tipo').eq('tipo', 'salida'),
           supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad'),
           supabase.from('config').select('*'),
           supabase.from('alertas_leidas').select('clave'),
         ])
+        // Si alguna query falló, no actualizamos el contador (falso negativo
+        // peor que dejar el valor anterior).
+        if (results.some(r => r.error)) return
+        const [
+          { data: vts }, { data: ords }, { data: cls },
+          { data: ins }, { data: cja }, { data: recIng }, { data: cfg },
+          { data: leidasArr },
+        ] = results
         const cfgMap = {}
         ;(cfg || []).forEach(c => { cfgMap[c.clave] = c.valor })
         const alertas = generarAlertas({

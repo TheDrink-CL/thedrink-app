@@ -17,10 +17,11 @@ function DeudaModal({ deuda, onSave, onCancel }) {
   const [fechaVence, setFechaVence] = useState(deuda?.fecha_vence || '')
   const [nota, setNota] = useState(deuda?.nota || '')
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
   const handleSave = async () => {
     if (!descripcion.trim() || !montoTotal) return
-    setSaving(true)
+    setSaving(true); setError('')
     const payload = {
       descripcion, tipo,
       monto_total: parseFloat(montoTotal),
@@ -28,12 +29,11 @@ function DeudaModal({ deuda, onSave, onCancel }) {
       fecha_vence: fechaVence || null,
       nota: nota || null,
     }
-    if (deuda?.id) {
-      await supabase.from('deudas').update(payload).eq('id', deuda.id)
-    } else {
-      await supabase.from('deudas').insert(payload)
-    }
+    const { error: err } = deuda?.id
+      ? await supabase.from('deudas').update(payload).eq('id', deuda.id)
+      : await supabase.from('deudas').insert(payload)
     setSaving(false)
+    if (err) { setError(err.message); return }
     onSave()
   }
 
@@ -87,6 +87,7 @@ function DeudaModal({ deuda, onSave, onCancel }) {
           </div>
         </div>
 
+        {error && <div style={{ color:'var(--pink)', fontSize:13, marginBottom:10 }}>{error}</div>}
         <div style={{ display:'flex', gap:10, marginTop:4 }}>
           <button className="btn btn-secondary" style={{ flex:1 }} onClick={onCancel}>Cancelar</button>
           <button className="btn btn-primary" style={{ flex:1 }} onClick={handleSave}
@@ -107,20 +108,23 @@ function AbonoModal({ deuda, saldoPendiente, onSave, onCancel }) {
   })
   const [nota, setNota] = useState('')
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
   const handleSave = async () => {
     if (!monto || parseFloat(monto) <= 0) return
-    setSaving(true)
-    await supabase.from('abonos').insert({
+    setSaving(true); setError('')
+    const { error: errInsert } = await supabase.from('abonos').insert({
       deuda_id: deuda.id,
       monto: parseFloat(monto),
       fecha,
       nota: nota || null,
     })
+    if (errInsert) { setSaving(false); setError(errInsert.message); return }
     // Si saldo queda en 0, marcar deuda como pagada
     const nuevoSaldo = saldoPendiente - parseFloat(monto)
     if (nuevoSaldo <= 0) {
-      await supabase.from('deudas').update({ pagada: true }).eq('id', deuda.id)
+      const { error: errUpdate } = await supabase.from('deudas').update({ pagada: true }).eq('id', deuda.id)
+      if (errUpdate) { setSaving(false); setError(errUpdate.message); return }
     }
     setSaving(false)
     onSave()
@@ -154,6 +158,7 @@ function AbonoModal({ deuda, saldoPendiente, onSave, onCancel }) {
             {(saldoPendiente - parseFloat(monto)) <= 0 && <span style={{ color:'var(--green)', marginLeft:6 }}>✓ Liquidado</span>}
           </div>
         )}
+        {error && <div style={{ color:'var(--pink)', fontSize:13, marginBottom:10 }}>{error}</div>}
         <div style={{ display:'flex', gap:10 }}>
           <button className="btn btn-secondary" style={{ flex:1 }} onClick={onCancel}>Cancelar</button>
           <button className="btn btn-primary" style={{ flex:1 }} onClick={handleSave} disabled={saving || !monto}>
@@ -171,7 +176,15 @@ function DeudaCard({ deuda, abonos, onEdit, onAbono, onDelete, onTogglePagada })
   const saldoPendiente = Math.max(0, (deuda.monto_total || 0) - totalAbonado)
   const progreso = deuda.monto_total > 0 ? Math.min(100, (totalAbonado / deuda.monto_total) * 100) : 0
   const tc = TIPO_COLOR[deuda.tipo] || TIPO_COLOR.pagar
-  const vencida = deuda.fecha_vence && !deuda.pagada && new Date(deuda.fecha_vence) < new Date()
+  // Parsear fecha_vence como fecha LOCAL (no UTC) para que no aparezca vencida
+  // la noche anterior en husos horarios detrás de UTC (ej. Chile).
+  const parseLocal = (str) => {
+    const [y, m, d] = str.split('-').map(Number)
+    return new Date(y, m - 1, d)
+  }
+  const hoyLocal = new Date()
+  hoyLocal.setHours(0, 0, 0, 0)
+  const vencida = deuda.fecha_vence && !deuda.pagada && parseLocal(deuda.fecha_vence) < hoyLocal
 
   return (
     <div style={{
@@ -290,15 +303,18 @@ export default function Cuentas() {
   const getAbonos = (deudaId) => abonos.filter(a => a.deuda_id === deudaId)
 
   const handleDelete = async (deuda) => {
-    await supabase.from('abonos').delete().eq('deuda_id', deuda.id)
-    await supabase.from('deudas').delete().eq('id', deuda.id)
+    const { error: errAbonos } = await supabase.from('abonos').delete().eq('deuda_id', deuda.id)
+    if (errAbonos) { showToast(`No se pudo eliminar: ${errAbonos.message}`); return }
+    const { error: errDeuda } = await supabase.from('deudas').delete().eq('id', deuda.id)
+    if (errDeuda) { showToast(`No se pudo eliminar: ${errDeuda.message}`); return }
     setConfirmar(null)
     showToast('Cuenta eliminada')
     load()
   }
 
   const handleTogglePagada = async (deuda) => {
-    await supabase.from('deudas').update({ pagada: !deuda.pagada }).eq('id', deuda.id)
+    const { error } = await supabase.from('deudas').update({ pagada: !deuda.pagada }).eq('id', deuda.id)
+    if (error) { showToast(`No se pudo actualizar: ${error.message}`); return }
     load()
   }
 

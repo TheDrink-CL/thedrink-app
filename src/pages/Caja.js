@@ -42,6 +42,7 @@ export default function Caja() {
     descripcion: ''
   })
   const [toast, setToast] = useState('')
+  const [errorForm, setErrorForm] = useState('')
   const [loading, setLoading] = useState(false)
   const [filtro, setFiltro] = useState('todos')
   const [confirmar, setConfirmar] = useState(null)
@@ -79,7 +80,10 @@ export default function Caja() {
     // Uber por retirar: costo de delivery acumulado del mes en curso (desde el
     // corte). Es la plata que conviene sacar a tu cuenta personal para pagar la
     // tarjeta con que pagaste Uber/motoboy. Se reinicia cada mes.
-    const mesActual = new Date().toISOString().slice(0, 7) // 'YYYY-MM'
+    // Mes local (no UTC): con toISOString() el mes se resetea antes de tiempo
+    // en husos horarios detrás de UTC (ej. Chile), cortando el KPI de golpe.
+    const hoyLocal = new Date()
+    const mesActual = `${hoyLocal.getFullYear()}-${String(hoyLocal.getMonth() + 1).padStart(2, '0')}` // 'YYYY-MM'
     const uberMes = ordCorte
       .filter(ord => (ord.fecha || '').slice(0, 7) === mesActual)
       .reduce((s, ord) => s + (parseFloat(ord.delivery) || 0), 0)
@@ -89,9 +93,10 @@ export default function Caja() {
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2500) }
 
   const handleEliminar = async (id) => {
-    await supabase.from('caja').delete().eq('id', id)
-    showToast('Movimiento eliminado')
+    const { error } = await supabase.from('caja').delete().eq('id', id)
     setConfirmar(null)
+    if (error) { showToast(`No se pudo eliminar: ${error.message}`); return }
+    showToast('Movimiento eliminado')
     loadData()
   }
 
@@ -101,7 +106,15 @@ export default function Caja() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!form.monto || !form.descripcion) return
+    setErrorForm('')
+    if (!form.monto || !form.descripcion) {
+      setErrorForm('Completa el monto y la descripción')
+      return
+    }
+    if (!(parseFloat(form.monto) > 0)) {
+      setErrorForm('El monto debe ser mayor a 0')
+      return
+    }
     setLoading(true)
     const { error } = await supabase.from('caja').insert({
       fecha: form.fecha,
@@ -114,12 +127,20 @@ export default function Caja() {
       showToast('Movimiento registrado')
       setForm(f => ({ ...f, monto: '', descripcion: '' }))
       loadData()
+    } else {
+      const esSesionExpirada = /JWT/i.test(error.message || '') || error.code === '401' || error.code === 'PGRST301' || error.code === '42501'
+      setErrorForm(esSesionExpirada
+        ? 'Tu sesión expiró — recarga la página y vuelve a entrar'
+        : `No se pudo registrar: ${error.message}`)
     }
     setLoading(false)
   }
 
+  // Se excluye la categoría legacy 'Insumos': ya viene de la tabla `compras` y
+  // el cálculo de saldo (arriba) también la excluye a propósito para no
+  // duplicarla. Si se incluyera aquí, este número no cuadraría con el saldo.
   const gastosPorCategoria = movimientos
-    .filter(m => m.tipo === 'salida')
+    .filter(m => m.tipo === 'salida' && m.categoria !== 'Insumos')
     .reduce((acc, m) => {
       const cat = m.categoria || 'Otro gasto'
       acc[cat] = (acc[cat] || 0) + m.monto
@@ -151,7 +172,8 @@ export default function Caja() {
         <div className="kpi-card">
           <div className="kpi-label">Total gastos</div>
           <div className="kpi-value" style={{ fontSize: 22, color: 'var(--text-strong)' }}>
-            {formatCLP(movimientos.filter(m => m.tipo === 'salida').reduce((s, m) => s + m.monto, 0))}
+            {/* Excluye categoría legacy 'Insumos': ya viene de `compras` y el saldo la excluye también */}
+            {formatCLP(movimientos.filter(m => m.tipo === 'salida' && m.categoria !== 'Insumos').reduce((s, m) => s + m.monto, 0))}
           </div>
         </div>
         {uberPorRetirar > 0 && (
@@ -216,7 +238,7 @@ export default function Caja() {
               <label className="form-label">Monto ($)</label>
               <input type="number" className="form-input" value={form.monto}
                 placeholder="ej: 5000"
-                onChange={e => setForm(f => ({ ...f, monto: e.target.value }))} />
+                onChange={e => { setForm(f => ({ ...f, monto: e.target.value })); setErrorForm('') }} />
             </div>
           </div>
 
@@ -224,8 +246,10 @@ export default function Caja() {
             <label className="form-label">Descripción</label>
             <input type="text" className="form-input" value={form.descripcion}
               placeholder={form.tipo === 'salida' ? 'ej: Uber a entrega, pauta Instagram...' : 'ej: Venta Mojito maracuya'}
-              onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} />
+              onChange={e => { setForm(f => ({ ...f, descripcion: e.target.value })); setErrorForm('') }} />
           </div>
+
+          {errorForm && <div style={{ color: 'var(--pink)', fontSize: 13, marginBottom: 10 }}>{errorForm}</div>}
 
           <button type="submit" className="btn btn-primary" disabled={loading}>
             {loading ? 'Guardando...' : 'Registrar'}

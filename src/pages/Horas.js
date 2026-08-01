@@ -101,14 +101,25 @@ function BloqueModal({ bloque, personas, roles, prefill, onSave, onCancel }) {
     // los reportes por día exactos y respeta el CHECK fin > inicio del SQL.
     const payloads = construirPayloads(base, fecha, horaInicio, horaFin)
 
-    // En edit: borrar el original e insertar los nuevos (1 o 2).
+    // En edit: insertar primero los nuevos (1 o 2) y solo si el insert tuvo
+    // éxito, borrar el original. Así nunca se pierde el bloque original si
+    // el insert falla.
     // En insert: solo insertar.
-    if (bloque?.id) {
-      await supabase.from('horas_trabajadas').delete().eq('id', bloque.id)
-    }
     const { error: err } = await supabase.from('horas_trabajadas').insert(payloads)
+    if (err) {
+      setSaving(false)
+      setError(err.message)
+      return
+    }
+    if (bloque?.id) {
+      const { error: delErr } = await supabase.from('horas_trabajadas').delete().eq('id', bloque.id)
+      if (delErr) {
+        setSaving(false)
+        setError('Se guardó el nuevo bloque, pero no se pudo borrar el original: puede haber quedado duplicado. ' + delErr.message)
+        return
+      }
+    }
     setSaving(false)
-    if (err) { setError(err.message); return }
     onSave()
   }
 

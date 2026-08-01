@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { ventanaCountdownMin } from '../lib/comandasTiming'
+import { construirEsVip } from '../lib/clientesVip'
 
 // ─── Cronómetro consciente de hora objetivo ─────────────────────────────────
 // Si NO hay hora_objetivo → cuenta desde created_at (igual que antes).
@@ -57,7 +58,7 @@ function colorUrgencia(minutos) {
 }
 
 // ─── Tarjeta de comanda ───────────────────────────────────────────────────────
-function TarjetaComanda({ comanda, onListo, comandasConfig = {}, clientesPorNombre = {} }) {
+function TarjetaComanda({ comanda, onListo, comandasConfig = {}, clientesPorNombre = {}, esVIP }) {
   // Resolver distancia: del cliente vinculado o del cliente_nombre
   const cli = clientesPorNombre[(comanda.cliente_nombre || '').trim().toLowerCase()]
   const distanciaKm = cli ? cli.distancia_km : null
@@ -90,8 +91,13 @@ function TarjetaComanda({ comanda, onListo, comandasConfig = {}, clientesPorNomb
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           {comanda.cliente_nombre ? (
-            <div style={{ fontSize: 'clamp(16px, 2.5vw, 26px)', fontWeight: 800, color: '#fff', lineHeight: 1.2, marginBottom: 4 }}>
-              {comanda.cliente_nombre}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <div style={{ fontSize: 'clamp(16px, 2.5vw, 26px)', fontWeight: 800, color: '#fff', lineHeight: 1.2 }}>
+                {comanda.cliente_nombre}
+              </div>
+              {esVIP && (
+                <span style={{ fontSize: 'clamp(10px, 1.2vw, 14px)', background: 'rgba(245,158,11,0.15)', color: '#f59e0b', borderRadius: 8, padding: '2px 8px', fontWeight: 700 }}>⭐ VIP</span>
+              )}
             </div>
           ) : (
             <div style={{ fontSize: 'clamp(14px, 2vw, 20px)', color: 'rgba(255,255,255,0.4)', fontStyle: 'italic' }}>
@@ -211,15 +217,17 @@ export default function Comandas() {
   const [comandas, setComandas] = useState([])
   const [comandasConfig, setComandasConfig] = useState({})
   const [clientesPorNombre, setClientesPorNombre] = useState({})
+  const [esVip, setEsVip] = useState(() => () => false)
   const [cargando, setCargando] = useState(true)
   const [ultimaActualizacion, setUltimaActualizacion] = useState(null)
   const audioRef = useRef(null)
 
   const cargarComandas = async () => {
-    const [{ data }, { data: cfg }, { data: cls }] = await Promise.all([
+    const [{ data }, { data: cfg }, { data: cls }, { data: ords }] = await Promise.all([
       supabase.from('comandas').select('*').eq('estado', 'pendiente').order('created_at', { ascending: true }),
       supabase.from('config').select('clave, valor').in('clave', ['comandas_prep_minutos','comandas_delivery_min_por_km','comandas_delivery_buffer_min']),
-      supabase.from('clientes').select('nombre, distancia_km'),
+      supabase.from('clientes').select('id, nombre, tag, distancia_km'),
+      supabase.from('ordenes').select('cliente_id, cliente_nombre'),
     ])
     setComandas(data || [])
     const cfgMap = {}
@@ -234,6 +242,7 @@ export default function Comandas() {
       if (c.nombre) cMap[c.nombre.trim().toLowerCase()] = c
     })
     setClientesPorNombre(cMap)
+    setEsVip(() => construirEsVip(cls || [], ords || []))
     setCargando(false)
     setUltimaActualizacion(new Date())
   }
@@ -383,7 +392,7 @@ export default function Comandas() {
             futuras.sort((a, b) => new Date(a.hora_objetivo) - new Date(b.hora_objetivo))
             return [...activas, ...futuras].map(c => (
               <TarjetaComanda key={c.id} comanda={c} onListo={marcarListo}
-                comandasConfig={comandasConfig} clientesPorNombre={clientesPorNombre} />
+                comandasConfig={comandasConfig} clientesPorNombre={clientesPorNombre} esVIP={esVip(c)} />
             ))
           })()}
         </div>

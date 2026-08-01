@@ -96,11 +96,15 @@ export default function Stock() {
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2500) }
 
   const handleSave = async (nombre, stockActual, stockMinimo) => {
-    await supabase.from('insumos').update({
+    const { error } = await supabase.from('insumos').update({
       stock_actual: stockActual,
       stock_minimo: stockMinimo
     }).eq('nombre', nombre)
     setEditando(null)
+    if (error) {
+      showToast('Error al actualizar stock: ' + error.message)
+      return
+    }
     showToast('Stock actualizado')
     loadData()
   }

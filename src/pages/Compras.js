@@ -185,6 +185,7 @@ function EditCompraModal({ compra, insumos, proveedores, onSave, onCancel }) {
   const [proveedorId, setProveedorId] = useState(compra.proveedor_id || '')
   const [nota, setNota] = useState(compra.nota || '')
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
   const handleSelectInsumo = (nombre) => {
     const ins = insumos.find(i => i.nombre === nombre)
@@ -197,16 +198,19 @@ function EditCompraModal({ compra, insumos, proveedores, onSave, onCancel }) {
 
   const handleSave = async () => {
     if (!insumoNombre || !cantidad || !precioTotal) return
-    setSaving(true)
-    await supabase.from('compras').update({
+    setSaving(true); setError('')
+    const { error: err } = await supabase.from('compras').update({
       fecha, insumo_nombre: insumoNombre, unidad,
       cantidad: parseFloat(cantidad),
       precio_total: parseFloat(precioTotal),
       proveedor_id: proveedorId || null,
       nota: nota || null
     }).eq('id', compra.id)
+    if (err) { setSaving(false); setError(err.message); return }
     // Ajustar inventario por el cambio: revertir la cantidad/insumo viejos y
     // aplicar los nuevos. Solo afecta compras de insumo (no activos fijos).
+    // Solo se hace si el update anterior tuvo éxito, para no desajustar stock
+    // por una edición que en realidad no se guardó.
     if (compra.tipo !== 'activo_fijo') {
       await ajustarStockPorCompra(compra.insumo_nombre, compra.cantidad, -1)
       await ajustarStockPorCompra(insumoNombre, parseFloat(cantidad), +1)
@@ -256,6 +260,7 @@ function EditCompraModal({ compra, insumos, proveedores, onSave, onCancel }) {
           <label className="form-label">Nota</label>
           <input type="text" className="form-input" value={nota} placeholder="opcional" onChange={e => setNota(e.target.value)} />
         </div>
+        {error && <div style={{ color:'var(--pink)', fontSize:13, marginBottom:10 }}>{error}</div>}
         <div style={{ display:'flex', gap:10, marginTop:4 }}>
           <button className="btn btn-secondary btn-sm" style={{ flex:1 }} onClick={onCancel}>Cancelar</button>
           <button className="btn btn-primary btn-sm" style={{ flex:1 }} onClick={handleSave} disabled={saving}>
@@ -486,6 +491,7 @@ export default function Compras() {
   const [esActivo, setEsActivo] = useState(false)
   const [activoForm, setActivoForm] = useState({ fecha: '', descripcion: '', precio: '', nota: '' })
   const [toast, setToast] = useState('')
+  const [errorForm, setErrorForm] = useState('')
   const [loading, setLoading] = useState(false)
   const [tab, setTab] = useState('registrar')
   const [confirmar, setConfirmar] = useState(null)
@@ -531,7 +537,7 @@ export default function Compras() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!form.insumo_nombre || !form.cantidad || !form.precio_total) return
-    setLoading(true)
+    setLoading(true); setErrorForm('')
 
     // Para limón/naranja ingresado en kg: guardamos la cantidad convertida a ml
     const cantidadFinal = esCitrico && limonEnKg && limonMlCalculado
@@ -563,13 +569,16 @@ export default function Compras() {
       setForm(f => ({ ...f, insumo_nombre: '', cantidad: '', precio_total: '', proveedor_id: '', nota: '' }))
       setLimonEnKg(false)
       loadData()
+    } else {
+      setErrorForm(`No se pudo registrar la compra: ${error.message}`)
     }
     setLoading(false)
   }
 
   const handleDeleteProveedor = async (prov) => {
-    await supabase.from('proveedores').delete().eq('id', prov.id)
+    const { error } = await supabase.from('proveedores').delete().eq('id', prov.id)
     setConfirmarProveedor(null)
+    if (error) { showToast(`No se pudo eliminar el proveedor: ${error.message}`); return }
     showToast('Proveedor eliminado')
     loadData()
   }
@@ -577,7 +586,7 @@ export default function Compras() {
   const handleSubmitActivo = async (e) => {
     e.preventDefault()
     if (!activoForm.descripcion || !activoForm.precio) return
-    setLoading(true)
+    setLoading(true); setErrorForm('')
     const { error } = await supabase.from('compras').insert({
       fecha: activoForm.fecha,
       insumo_nombre: activoForm.descripcion,
@@ -592,13 +601,18 @@ export default function Compras() {
       showToast('Activo fijo registrado ✓')
       setActivoForm(f => ({ ...f, descripcion: '', precio: '', nota: '' }))
       loadData()
+    } else {
+      setErrorForm(`No se pudo registrar el activo fijo: ${error.message}`)
     }
     setLoading(false)
   }
 
   const handleEliminar = async (compra) => {
-    await supabase.from('compras').delete().eq('id', compra.id)
-    // Revertir el stock que esta compra de insumo había sumado.
+    const { error } = await supabase.from('compras').delete().eq('id', compra.id)
+    if (error) { showToast(`No se pudo eliminar la compra: ${error.message}`); setConfirmar(null); return }
+    // Revertir el stock que esta compra de insumo había sumado. Solo si el
+    // delete arriba tuvo éxito, para no desajustar stock de una compra que
+    // en realidad sigue existiendo.
     if (compra && compra.tipo !== 'activo_fijo') {
       await ajustarStockPorCompra(compra.insumo_nombre, compra.cantidad, -1)
     }
@@ -608,8 +622,9 @@ export default function Compras() {
   }
 
   const handleSaveStock = async (nombre, stockActual, stockMinimo) => {
-    await supabase.from('insumos').update({ stock_actual: stockActual, stock_minimo: stockMinimo }).eq('nombre', nombre)
+    const { error } = await supabase.from('insumos').update({ stock_actual: stockActual, stock_minimo: stockMinimo }).eq('nombre', nombre)
     setEditandoStock(null)
+    if (error) { showToast(`No se pudo actualizar el stock: ${error.message}`); return }
     showToast('Stock actualizado')
     loadData()
   }
@@ -624,10 +639,15 @@ export default function Compras() {
     const goma = insumos.find(i => i.nombre === 'Goma')
     if (!azucar || !goma) { showToast('No se encontró Azúcar o Goma en insumos'); return }
     setLoading(true)
-    await Promise.all([
+    const [resAzucar, resGoma] = await Promise.all([
       supabase.from('insumos').update({ stock_actual: Math.max(0, (azucar.stock_actual || 0) - azucarParaGoma) }).eq('nombre', 'Azúcar'),
       supabase.from('insumos').update({ stock_actual: (goma.stock_actual || 0) + parseFloat(mlGoma) }).eq('nombre', 'Goma'),
     ])
+    if (resAzucar.error || resGoma.error) {
+      showToast(`No se pudo fabricar goma: ${(resAzucar.error || resGoma.error).message}`)
+      setLoading(false)
+      return
+    }
     showToast(`Goma fabricada ✓ · -${azucarParaGoma}g azúcar · +${mlGoma}ml goma`)
     setFabricandoGoma(false)
     setMlGoma('')
@@ -857,6 +877,7 @@ export default function Compras() {
                     placeholder="ej: oferta, comentario..."
                     onChange={e => setForm(f => ({ ...f, nota: e.target.value }))} />
                 </div>
+                {errorForm && <div style={{ color: 'var(--pink)', fontSize: 13, marginBottom: 10 }}>{errorForm}</div>}
                 <button type="submit" className="btn btn-primary" disabled={loading}>
                   {loading ? 'Guardando...' : 'Registrar compra'}
                 </button>
@@ -894,6 +915,7 @@ export default function Compras() {
                     placeholder="ej: Ripley, garantía 1 año..."
                     onChange={e => setActivoForm(f => ({ ...f, nota: e.target.value }))} />
                 </div>
+                {errorForm && <div style={{ color: 'var(--pink)', fontSize: 13, marginBottom: 10 }}>{errorForm}</div>}
                 <button type="submit" className="btn btn-primary" disabled={loading}>
                   {loading ? 'Guardando...' : 'Registrar activo fijo'}
                 </button>

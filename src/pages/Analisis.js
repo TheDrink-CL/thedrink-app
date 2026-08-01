@@ -15,6 +15,12 @@ function parseFecha(fechaStr) {
   return new Date(y, m - 1, d)
 }
 
+// Formatea una fecha local (evita el desfase de toISOString, que usa UTC:
+// en Chile desde ~21:00 ya cae en el día/mes siguiente en UTC)
+function toISOLocal(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 function semanaDelMes(fecha) {
   return Math.ceil(fecha.getDate() / 7)
 }
@@ -267,7 +273,7 @@ function ContextoNacional() {
   for (let i = 0; i <= 45; i++) {
     const d = new Date(hoy)
     d.setDate(hoy.getDate() + i)
-    const key = d.toISOString().slice(0, 10)
+    const key = toISOLocal(d)
     const diaStr = key
 
     // Feriado o puente
@@ -374,7 +380,7 @@ function SemaforoPub({ ventas, gastosPub, margenBruto, roiIG }) {
     : null
 
   // 2. Gasto en publicidad este mes
-  const mesActual = hoy.toISOString().slice(0, 7)
+  const mesActual = toISOLocal(hoy).slice(0, 7)
   const gastoPubMes = gastosPub
     .filter(m => m.fecha.slice(0, 7) === mesActual)
     .reduce((s, m) => s + m.monto, 0)
@@ -493,8 +499,8 @@ function SemaforoPub({ ventas, gastosPub, margenBruto, roiIG }) {
 
   // Verificar feriado hoy o mañana
   const manana = new Date(hoy); manana.setDate(hoy.getDate() + 1)
-  const keyHoy = hoy.toISOString().slice(0, 10)
-  const keyManana = manana.toISOString().slice(0, 10)
+  const keyHoy = toISOLocal(hoy)
+  const keyManana = toISOLocal(manana)
   const feriadoHoy = FERIADOS_CL[keyHoy]
   const feriadoManana = FERIADOS_CL[keyManana]
 
@@ -1532,11 +1538,11 @@ export default function Analisis() {
           supabase.from('ventas').select('id, fecha, litros, precio_venta, origen, receta_nombre, orden_id, delivery').order('fecha', { ascending: false }),
           supabase.from('caja').select('fecha, monto, categoria, tipo').eq('tipo', 'salida'),
           supabase.from('compras').select('fecha, insumo_nombre, cantidad, precio_total, es_inversion, tipo').order('fecha'),
-          supabase.from('ordenes').select('id, fecha, hora, medio_pago, delivery, delivery_tipo, distancia_km, cliente_nombre').order('fecha', { ascending: false }),
+          supabase.from('ordenes').select('id, fecha, hora, medio_pago, delivery, delivery_tipo, distancia_km, cliente_nombre, cliente_id').order('fecha', { ascending: false }),
           supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad, unidad'),
           supabase.from('insumos').select('nombre, stock_actual, costo_ppp, unidad'),
           supabase.from('config').select('*'),
-          supabase.from('clientes').select('id, nombre, tag'),
+          supabase.from('clientes').select('id, nombre, tag, estado_contacto'),
         ])
         // Detectar si alguna query devolvió error
         const errores = results.map((r, i) => r.error ? { idx: i, msg: r.error.message } : null).filter(Boolean)
@@ -1545,7 +1551,18 @@ export default function Analisis() {
           const detalle = errores.map(e => `${tablas[e.idx]}: ${e.msg}`).join(' · ')
           throw new Error(detalle)
         }
-        const [{ data: vts }, { data: cja }, { data: cmp }, { data: ords }, { data: recIng }, { data: ins }, { data: cfg }, { data: cls }] = results
+        let [{ data: vts }, { data: cja }, { data: cmp }, { data: ords }, { data: recIng }, { data: ins }, { data: cfg }, { data: cls }] = results
+
+        // Clientes excluidos (fraude, estado_contacto = 'excluido') salen de
+        // TODAS las estadísticas — mismo criterio que dashboardMetrics.js
+        // (Indicadores), para que las pantallas no diverjan.
+        const clientesExcluidos = new Set((cls || []).filter(c => c.estado_contacto === 'excluido').map(c => c.id))
+        if (clientesExcluidos.size > 0) {
+          const ordenesExcluidas = new Set((ords || []).filter(o => clientesExcluidos.has(o.cliente_id)).map(o => o.id))
+          ords = (ords || []).filter(o => !clientesExcluidos.has(o.cliente_id))
+          vts = (vts || []).filter(v => !v.orden_id || !ordenesExcluidas.has(v.orden_id))
+        }
+
         setVentas(vts || [])
         setOrdenes(ords || [])
         setComprasDetalle(cmp || [])
@@ -1619,6 +1636,16 @@ export default function Analisis() {
     const corte = new Date(hoy); corte.setDate(hoy.getDate() - dias)
     return parseFecha(v.fecha) >= corte
   })
+  // Mismo corte de fecha que ventasFiltradas, para que el ROI/CAC de
+  // Instagram (OrigenVentas) no divida ingreso del período por gasto de
+  // pauta de TODO el histórico.
+  const gastosPubFiltrados = gastosPub.filter(m => {
+    if (!m.fecha) return false
+    if (periodo === 'todo') return true
+    const dias = periodo === '90d' ? 90 : 30
+    const corte = new Date(hoy); corte.setDate(hoy.getDate() - dias)
+    return parseFecha(m.fecha) >= corte
+  })
 
   return (
     <div className="page">
@@ -1667,7 +1694,7 @@ export default function Analisis() {
             </div>
           ) : (
             <>
-              <OrigenVentas ventas={ventasFiltradas} gastosPub={gastosPub} />
+              <OrigenVentas ventas={ventasFiltradas} gastosPub={gastosPubFiltrados} />
               <HorasActivas ordenes={ordenes} />
               <VentasPorDia ventas={ventasFiltradas} />
               <TendenciaSemanal ventas={ventasFiltradas} />

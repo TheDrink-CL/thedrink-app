@@ -1,43 +1,56 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { formatCLP } from '../lib/calculos'
+import { formatCLP, enriquecerVentasConDelivery } from '../lib/calculos'
 import { evaluarSaludNegocio } from '../lib/saludNegocio'
 
 export default function SaludNegocio() {
   const [estado, setEstado] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [errorCarga, setErrorCarga] = useState(null)
 
   useEffect(() => { load() }, [])
 
   async function load() {
     try {
-      const [
-        { data: bloques },
-        { data: ventas },
-        { data: personas },
-        { data: roles },
-        { data: cfg },
-      ] = await Promise.all([
+      const results = await Promise.all([
         supabase.from('horas_trabajadas').select('fecha, hora_inicio, hora_fin, persona_id, rol_id'),
-        supabase.from('ventas').select('fecha, litros, precio_venta, delivery'),
+        supabase.from('ventas').select('fecha, litros, precio_venta, delivery, orden_id'),
+        supabase.from('ordenes').select('id, fecha, delivery, delivery_cobrado'),
         supabase.from('personas').select('id, tarifa_hora'),
         supabase.from('roles').select('id, tarifa_hora'),
         supabase.from('config').select('clave, valor').eq('clave', 'crecimiento_min_pct_mes').maybeSingle(),
       ])
+      const errores = results.map((r, i) => r.error ? { idx: i, msg: r.error.message } : null).filter(Boolean)
+      if (errores.length > 0) {
+        const tablas = ['horas_trabajadas', 'ventas', 'ordenes', 'personas', 'roles', 'config']
+        throw new Error(errores.map(e => `${tablas[e.idx]}: ${e.msg}`).join(' · '))
+      }
+      const [
+        { data: bloques },
+        { data: ventas },
+        { data: ordenes },
+        { data: personas },
+        { data: roles },
+        { data: cfg },
+      ] = results
       const tarifaDePersona = {}
       ;(personas || []).forEach(p => { tarifaDePersona[p.id] = p.tarifa_hora })
       const tarifaDeRol = {}
       ;(roles || []).forEach(r => { tarifaDeRol[r.id] = r.tarifa_hora })
       const umbral = cfg ? parseFloat(cfg.valor) || 0.05 : 0.05
+      // El costo de delivery vive en `ordenes`, no en las filas de `ventas`
+      // (que traen delivery: 0) — hay que enriquecerlas antes de evaluar.
+      const ventasEnr = enriquecerVentasConDelivery(ventas || [], ordenes || [])
       const resultado = evaluarSaludNegocio({
         bloques: bloques || [],
-        ventas: ventas || [],
+        ventas: ventasEnr,
         tarifaDePersona, tarifaDeRol,
         umbralCrecimientoMes: umbral,
       })
       setEstado(resultado)
     } catch (e) {
       console.error('SaludNegocio - error:', e)
+      setErrorCarga(e.message || String(e))
     } finally {
       setLoading(false)
     }
@@ -47,6 +60,16 @@ export default function SaludNegocio() {
     return (
       <div className="card" style={{ textAlign: 'center', color: 'var(--muted)', fontSize: 12, padding: 14 }}>
         Evaluando salud del negocio...
+      </div>
+    )
+  }
+  if (errorCarga) {
+    return (
+      <div className="card" style={{ borderColor: 'rgba(196,0,90,0.4)' }}>
+        <div className="card-title" style={{ color: 'var(--pink)' }}>💼 Salud del negocio — error al cargar</div>
+        <div style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.6 }}>
+          {errorCarga}
+        </div>
       </div>
     )
   }
