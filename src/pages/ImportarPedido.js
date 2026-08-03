@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { estimarTiempoDelivery, ventanaCountdownMin } from '../lib/comandasTiming'
+import { parsearMensajeLab, construirBuild, buildLegible } from '../lib/labCodigos'
+import { cargarMoldes, asegurarReceta } from '../lib/labPrototipos'
 
 // ─── Normalización y similitud ───────────────────────────────────────────────
 function norm(str = '') {
@@ -254,6 +256,9 @@ export default function ImportarPedido() {
   const [comandasConfig, setComandasConfig] = useState({})
   const [guardando, setGuardando] = useState(false)
   const [neonPrevio, setNeonPrevio] = useState(null) // { codigo, fecha_canje } si el teléfono ya canjeó
+  // Despacho que el LAB ya le mostró al cliente. Se arrastra para no cotizarle
+  // un envío distinto al que aceptó al armar el pedido.
+  const [labDespacho, setLabDespacho] = useState(null)
   const textareaRef = useRef(null)
 
   // Aviso proactivo: si el teléfono del cliente ya canjeó un NEON, avisar para
@@ -298,7 +303,40 @@ export default function ImportarPedido() {
 
   const handleParsear = async () => {
     if (!textoChat.trim()) return
-    const resultado = parsearChat(textoChat, recetas)
+    // Un pedido del LAB trae códigos exactos (RON-MOJ-MAR-1L+CZ). Si los hay,
+    // no se adivina por similitud: se decodifican. El match difuso puede
+    // pegarle a una receta equivocada y descontar los insumos que no son.
+    const lab = parsearMensajeLab(textoChat)
+    let resultado
+    if (lab) {
+      const moldes = await cargarMoldes(lab.items.map(i => i.spec))
+      const contexto = parsearChat(textoChat, [])  // rescata dirección y teléfono
+      resultado = {
+        direccion: contexto.direccion,
+        telefono: contexto.telefono,
+        items: lab.items.map(i => {
+          const b = construirBuild(i.spec, moldes)
+          return {
+            key: Date.now() + Math.random(),
+            cantidad: i.cantidad,
+            textoOriginal: i.etiqueta,
+            receta_nombre: i.spec.recetaGemela || '',
+            precio_venta: i.precio_venta || '',
+            nota: '',
+            lab: {
+              spec: i.spec,
+              codigo: i.codigo,
+              build: b.ok ? b.ingredientes : null,
+              motivo: b.motivo,
+            },
+          }
+        }),
+      }
+      setLabDespacho(lab.despacho || null)
+    } else {
+      resultado = parsearChat(textoChat, recetas)
+      setLabDespacho(null)
+    }
     setParsed(resultado)
     setEditItems(resultado.items)
     const info = await buscarCliente(resultado.telefono, nombreChat)
@@ -333,13 +371,40 @@ export default function ImportarPedido() {
         if (errNc) { alert('No se pudo crear el cliente: ' + errNc.message); setGuardando(false); return }
         if (nc) clienteId = nc.id
       }
-      const itemsLimpios = editItems.filter(it => it.receta_nombre?.trim() || it.textoOriginal?.trim()).map(it => ({
-        cantidad: it.cantidad,
-        nombre: it.receta_nombre?.trim() || it.textoOriginal?.trim(),
-        receta_nombre: it.receta_nombre?.trim() || null,
-        precio_venta: parseFloat(it.precio_venta) || null,
-        nota: it.nota || ''
-      }))
+      // Materializar los prototipos del LAB ANTES de guardar la comanda: al
+      // convertirla en venta, `descontarStock` busca los ingredientes por
+      // `receta_nombre`. Si la receta no existe, la venta se registra y el
+      // stock no se mueve, sin ningún error visible.
+      const conLab = editItems.filter(it => it.lab?.spec)
+      const recetaPorCodigo = {}
+      if (conLab.length) {
+        const moldes = await cargarMoldes(conLab.map(it => it.lab.spec))
+        for (const it of conLab) {
+          if (recetaPorCodigo[it.lab.codigo]) continue
+          const r = await asegurarReceta(it.lab.spec, parseFloat(it.precio_venta) || 0, moldes)
+          if (!r.ok) {
+            alert(`No se pudo preparar el prototipo ${it.lab.codigo}: ${r.motivo}\n\nNo se guardó nada.`)
+            setGuardando(false); return
+          }
+          recetaPorCodigo[it.lab.codigo] = r.receta_nombre
+        }
+      }
+
+      const itemsLimpios = editItems.filter(it => it.receta_nombre?.trim() || it.textoOriginal?.trim() || it.lab?.spec).map(it => {
+        const nombreReceta = it.lab?.codigo
+          ? recetaPorCodigo[it.lab.codigo]
+          : (it.receta_nombre?.trim() || null)
+        return {
+          cantidad: it.cantidad,
+          nombre: it.textoOriginal?.trim() || nombreReceta || '',
+          receta_nombre: nombreReceta,
+          precio_venta: parseFloat(it.precio_venta) || null,
+          nota: it.nota || '',
+          // El bartender nunca preparó esto: la comanda tiene que decirle cómo.
+          build: it.lab?.build ? buildLegible(it.lab.build) : null,
+          lab_codigo: it.lab?.codigo || null,
+        }
+      })
       // Construir timestamp de hora objetivo (hoy a HH:MM en local; si la
       // hora ya pasó hoy, se asume mañana)
       let horaObjISO = null
@@ -488,10 +553,43 @@ export default function ImportarPedido() {
             </div>
             <input value={it.nota} onChange={e => updateItem(it.key,'nota',e.target.value)}
               placeholder="Nota (opcional)" style={{ ...sty.input, marginTop:6, fontSize:12, opacity:0.7 }} />
+            {it.lab && (
+              <div style={{
+                marginTop:8, padding:'8px 10px', borderRadius:8, fontSize:11, lineHeight:1.6,
+                background: it.lab.build ? 'rgba(127,119,221,0.10)' : 'rgba(255,80,130,0.10)',
+                border: `1px solid ${it.lab.build ? 'rgba(127,119,221,0.35)' : 'rgba(255,80,130,0.4)'}`,
+                color: it.lab.build ? '#AFA9EC' : '#ff5082',
+              }}>
+                <div style={{ fontWeight:700, letterSpacing:'0.06em', marginBottom:3 }}>
+                  ⬡ LAB · {it.lab.codigo}
+                  {it.lab.spec?.recetaGemela
+                    ? <span style={{ color:'var(--muted)', fontWeight:400 }}> · ya está en la carta</span>
+                    : <span style={{ color:'var(--muted)', fontWeight:400 }}> · prototipo, se creará como receta</span>}
+                </div>
+                {it.lab.build
+                  ? <div style={{ color:'rgba(255,255,255,0.75)' }}>{buildLegible(it.lab.build)}</div>
+                  : <div>No se pudo armar la receta: {it.lab.motivo}. Revisa antes de guardar.</div>}
+              </div>
+            )}
           </div>
         ))}
         <button onClick={agregarItem} style={{ ...sty.btnS, fontSize:12, marginTop:4 }}>+ Agregar item</button>
       </div>
+
+      {/* Despacho que el LAB ya le cotizó al cliente */}
+      {labDespacho && (
+        <div style={{ ...sty.card, borderColor:'rgba(0,180,180,0.35)', background:'rgba(0,180,180,0.06)' }}>
+          <div style={{ fontSize:13, fontWeight:700, color:'var(--cyan)', marginBottom:6 }}>
+            🛵 Despacho cotizado en el LAB
+          </div>
+          <div style={{ fontSize:14, color:'var(--text-strong)', fontWeight:700 }}>{labDespacho.texto}</div>
+          <div style={{ fontSize:11, color:'var(--muted)', marginTop:6, lineHeight:1.5 }}>
+            {labDespacho.monto !== null
+              ? 'Es el valor que el cliente ya aceptó al armar el pedido. Cobrarle otro sin avisar es la forma más rápida de perderlo.'
+              : 'El LAB no le dio un monto cerrado: hay que confirmarle la tarifa según la dirección.'}
+          </div>
+        </div>
+      )}
 
       {/* HORA DE ENTREGA: para ahora o programado */}
       <div style={sty.card}>

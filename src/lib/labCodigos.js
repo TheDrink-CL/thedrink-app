@@ -1,0 +1,347 @@
+// ─── Decodificador de códigos del LAB (lab.ncity.live) ───────────────────────
+//
+// El LAB manda pedidos por WhatsApp con un código exacto por trago:
+//
+//     RON-MOJ-MAR-1L+CZ   →  Mojito de maracuyá, 1 litro, con curazao
+//
+// Este módulo traduce ese código a una receta ejecutable: nombre, lista de
+// insumos con cantidades y precio. Con eso el bartender sabe cómo armarlo y el
+// stock se descuenta bien.
+//
+// POR QUÉ NO ADIVINAR POR TEXTO
+// `ImportarPedido` matchea recetas por similitud difusa (umbral 0.3). Para un
+// nombre como "PROTOTIPO #104" eso no funciona: o no matchea, o —peor— le pega
+// a una receta parecida y descuenta los insumos equivocados en silencio. Un
+// código es exacto: si parsea, es correcto; si no parsea, se sabe.
+//
+// DE DÓNDE SALEN LAS CANTIDADES
+// De `receta_ingredientes`, no de acá. Este archivo solo sabe QUÉ receta usar
+// de referencia y qué transformación aplicarle (cambiar la pulpa, sumar un
+// añadido). Las cantidades siempre vienen de la base, que es la fuente de
+// verdad del negocio.
+//
+// DEUDA CONOCIDA
+// El LAB hoy tiene su propia copia de las recetas escrita a mano en su JS. Si
+// alguien edita una receta acá, el LAB no se entera: el descriptor le mentiría
+// al cliente y el margen quedaría mal calculado. La solución es generar el LAB
+// desde esta base; hasta que eso exista, cualquier cambio de receta hay que
+// replicarlo a mano en `Páginas web/app pedidos/deploy/v1/index.html`.
+
+// ─── Diccionarios del código ─────────────────────────────────────────────────
+
+// Los nombres de insumo y receta van EXACTOS como están en la base, con sus
+// mayúsculas y sus tildes tal cual (incluido el typo "Púlpa de Arándano"). Un
+// nombre que no calce hace que el stock no se descuente, sin lanzar error.
+export const FRUTA_POR_CODIGO = {
+  MAR: { nombre: 'Maracuyá', insumo: 'Pulpa de Maracuya' },
+  FRA: { nombre: 'Frambuesa', insumo: 'Pulpa de Frambuesa' },
+  FRU: { nombre: 'Frutilla', insumo: 'Pulpa de frutilla' },
+  MAN: { nombre: 'Mango', insumo: 'Pulpa de Mango' },
+  PIN: { nombre: 'Piña', insumo: 'Pulpa de Piña' },
+  ARA: { nombre: 'Arándano', insumo: 'Púlpa de Arándano' },
+}
+
+export const BASE_POR_CODIGO = {
+  RON: 'Ron Bacardí',
+  PN: 'Pisco',
+  PT: 'Pisco Tabernero',
+  GIN: 'Gin',
+  JGR: 'Jägermeister',
+  ZER: 'Sin alcohol',
+}
+
+// `refConFruta` / `refSinFruta`: receta existente que se usa de molde.
+// `slotFruta`: cuánta pulpa lleva el molde (para reemplazarla por la pedida).
+// `gomaPorFruta`: excepciones reales de la carta (la piña es dulce y lleva
+// menos goma; la maracuyá y el arándano son ácidos y llevan más).
+export const ESQUELETOS = {
+  MOJ: {
+    nombre: 'Mojito', refConFruta: 'Mojito maracuya', refSinFruta: 'Mojito',
+    addons: ['CC', 'CZ', 'JG', 'MT'],
+  },
+  COL: {
+    nombre: 'Colada', refConFruta: 'Mango Colada',
+    gomaPorFruta: { PIN: 90 }, addons: ['CZ'],
+  },
+  DAI: {
+    nombre: 'Daikiri', refConFruta: 'Daikiri frambuesa',
+    gomaPorFruta: { MAR: 120, ARA: 120 }, addons: ['JG', 'CZ'],
+  },
+  SOU: {
+    nombre: 'Sour', refConFruta: 'Mango Sour', refSinFruta: 'Pisco sour',
+    refSinFrutaAlt: { PT: 'Sour Peruano' }, addons: ['AG'],
+  },
+  ENE: {
+    nombre: 'Energético', refConFruta: 'Tropical Gin',
+    addons: ['JG', 'CZ', 'MT'],
+  },
+  JAG: {
+    nombre: 'Mojito Jäger', refConFruta: 'Mojito Jager Maracuyá',
+    refSinFruta: 'Mojito Jager', addons: ['MT', 'JG'],
+  },
+  FZM: {
+    nombre: 'Frozen Mojito', refSinFruta: 'Frozen mojito (1lt)',
+    addons: ['CC', 'JG'],
+  },
+  FRS: {
+    nombre: 'Frost', refConFruta: 'Berry Frost (1lt)', addons: ['JG'],
+  },
+  VIO: {
+    nombre: 'Violetto Tonic', refSinFruta: 'Violetto tonic', addons: [],
+  },
+}
+
+// Un añadido suma su insumo y reajusta el resto del build. El reajuste depende
+// del esqueleto: un mojito con coco baja gas e hielo; una colada con curazao
+// baja el ron y la pulpa. Sale de las recetas Mojito Coco Blue, Mojito
+// coco-frambuesa y Blue Colada, que ya existen en la carta.
+// `FRUTA` es un alias que apunta a la pulpa elegida.
+export const ADDONS = {
+  CC: {
+    nombre: 'Crema de coco', insumo: 'Crema de coco', cantidad: 120,
+    ajuste: { MOJ: { 'Agua con gas': -15, Hielo: -100 } },
+  },
+  CZ: {
+    nombre: 'Curazao', insumo: 'Curazao', cantidad: 120,
+    ajuste: {
+      MOJ: { 'Ron Bacardí': -30, 'Agua con gas': -15, Hielo: -100 },
+      COL: { 'Ron Bacardí': -30, FRUTA: -60 },
+      DEFECTO: { 'Ron Bacardí': -30 },
+    },
+  },
+  JG: { nombre: 'Jengibre', insumo: 'Jengibre', cantidad: 5 },
+  MT: { nombre: 'Menta extra', insumo: 'Menta fresca', cantidad: 5 },
+  AG: { nombre: 'Angostura extra', insumo: 'Angostura', cantidad: 2.4 },
+}
+
+// Combinaciones que YA son una receta publicada. Se resuelven directo, sin
+// derivar nada: menos superficie de error y el nombre le queda al cliente.
+export const GEMELOS = {
+  'RON-MOJ-NAT-1L': 'Mojito',
+  'RON-MOJ-MAN-1L': 'Mojito mango',
+  'RON-MOJ-FRU-1L': 'Mojito frutilla',
+  'RON-MOJ-PIN-1L': 'Mojito piña',
+  'RON-MOJ-FRA-1L': 'Mojito frambuesa',
+  'RON-MOJ-MAR-1L': 'Mojito maracuya',
+  'RON-MOJ-ARA-1L': 'Mojito Arándano',
+  'RON-MOJ-FRA-1L+CC': 'Mojito coco-frambuesa',
+  'RON-MOJ-NAT-1L+CC+CZ': 'Mojito Coco Blue',
+  'RON-COL-PIN-1L': 'Piña Colada',
+  'RON-COL-MAN-1L': 'Mango Colada',
+  'RON-COL-FRU-1L': 'Frutilla Colada',
+  'RON-COL-PIN-1L+CZ': 'Blue Colada',
+  'RON-DAI-FRA-1L': 'Daikiri frambuesa',
+  'RON-DAI-FRU-1L': 'Daikiri frutilla',
+  'RON-DAI-MAN-1L': 'Daikiri mango',
+  'RON-DAI-MAR-1L': 'Daikiri maracuya',
+  'PN-SOU-NAT-475': 'Pisco sour',
+  'PT-SOU-NAT-475': 'Sour Peruano',
+  'PN-SOU-MAN-475': 'Mango Sour',
+  'PT-SOU-MAR-475': 'Maracuyá Sour',
+  'GIN-ENE-MAR-1L': 'Tropical Gin',
+  'GIN-ENE-FRA-1L': 'Berry Bomb',
+  'JGR-JAG-NAT-1L': 'Mojito Jager',
+  'JGR-JAG-MAR-1L': 'Mojito Jager Maracuyá',
+  'ZER-FZM-NAT-1L': 'Frozen mojito (1lt)',
+  'ZER-FRS-FRU-1L': 'Berry Frost (1lt)',
+  'ZER-VIO-NAT-1L': 'Violetto tonic',
+}
+
+// Detecta un código dentro de una línea de texto pegada del chat.
+export const REGEX_CODIGO = /\b([A-Z]{2,3})-([A-Z]{3})-([A-Z]{3})-(1L|475)((?:\+[A-Z]{2})*)\b/
+
+// ─── Parseo ──────────────────────────────────────────────────────────────────
+
+// Devuelve null si el código no es válido. No lanza: quien llama decide qué
+// hacer con un pedido que no se pudo decodificar.
+export function parsearCodigo(texto) {
+  if (!texto) return null
+  const m = String(texto).toUpperCase().match(REGEX_CODIGO)
+  if (!m) return null
+  const [, base, esq, fru, fmt, addonsRaw] = m
+  if (!BASE_POR_CODIGO[base]) return null
+  if (!ESQUELETOS[esq]) return null
+  if (fru !== 'NAT' && !FRUTA_POR_CODIGO[fru]) return null
+
+  const addons = addonsRaw ? addonsRaw.split('+').filter(Boolean) : []
+  for (const a of addons) if (!ADDONS[a]) return null
+  // Un añadido que ese esqueleto no admite es señal de código corrupto.
+  for (const a of addons) if (!ESQUELETOS[esq].addons.includes(a)) return null
+
+  const codigo = [base, esq, fru, fmt].join('-') + addons.map(a => '+' + a).join('')
+  return {
+    codigo,
+    base, esq, fmt,
+    fruta: fru === 'NAT' ? null : fru,
+    addons,
+    esGemelo: !!GEMELOS[codigo],
+    recetaGemela: GEMELOS[codigo] || null,
+  }
+}
+
+// ─── Construcción del build ──────────────────────────────────────────────────
+
+// `ingredientesPorReceta`: { nombre_receta: [{ insumo_nombre, cantidad }] }
+// tal como lo devuelve `receta_ingredientes`. Se pasa por parámetro para que
+// esta función sea pura y testeable sin base de datos.
+//
+// Devuelve { ok, ingredientes, motivo } — `motivo` explica por qué no se pudo
+// cuando ok === false, para poder mostrárselo a quien ingresa el pedido.
+export function construirBuild(spec, ingredientesPorReceta) {
+  if (!spec) return { ok: false, ingredientes: [], motivo: 'código inválido' }
+  const esq = ESQUELETOS[spec.esq]
+
+  // Receta molde: la que tiene fruta si el pedido lleva fruta.
+  let ref = spec.fruta ? esq.refConFruta : esq.refSinFruta
+  if (!spec.fruta && esq.refSinFrutaAlt && esq.refSinFrutaAlt[spec.base])
+    ref = esq.refSinFrutaAlt[spec.base]
+  if (!ref) return { ok: false, ingredientes: [], motivo: `${esq.nombre} no admite esa combinación` }
+
+  const molde = ingredientesPorReceta[ref]
+  if (!molde || !molde.length)
+    return { ok: false, ingredientes: [], motivo: `falta la receta de referencia "${ref}" en la base` }
+
+  // Copia editable
+  let build = molde.map(i => ({ insumo_nombre: i.insumo_nombre, cantidad: Number(i.cantidad) }))
+
+  // 1. Cambiar el destilado si el código pide otra variante (pisco nacional
+  //    vs Tabernero). El molde trae uno de los dos.
+  const destilado = BASE_POR_CODIGO[spec.base]
+  if (spec.base === 'PN' || spec.base === 'PT') {
+    build.forEach(i => {
+      if (i.insumo_nombre === 'Pisco' || i.insumo_nombre === 'Pisco Tabernero')
+        i.insumo_nombre = destilado
+    })
+  }
+
+  // 2. Cambiar la pulpa por la pedida. El molde puede traer más de una (el
+  //    Berry Frost mezcla frutilla y frambuesa): se colapsan en una sola,
+  //    sumando las cantidades, que es como lo modela el LAB.
+  if (spec.fruta) {
+    const pulpas = build.filter(i => /^p[uú]lpa de /i.test(i.insumo_nombre))
+    const totalPulpa = pulpas.reduce((s, i) => s + i.cantidad, 0)
+    build = build.filter(i => !/^p[uú]lpa de /i.test(i.insumo_nombre))
+    build.push({ insumo_nombre: FRUTA_POR_CODIGO[spec.fruta].insumo, cantidad: totalPulpa })
+  }
+
+  // 3. Excepciones de goma que ya existen en la carta
+  if (esq.gomaPorFruta && spec.fruta && esq.gomaPorFruta[spec.fruta] != null) {
+    const goma = build.find(i => i.insumo_nombre === 'Goma')
+    if (goma) goma.cantidad = esq.gomaPorFruta[spec.fruta]
+  }
+
+  // 4. Añadidos: suman su insumo y reajustan el resto
+  for (const cod of spec.addons) {
+    const A = ADDONS[cod]
+    const ya = build.find(i => i.insumo_nombre === A.insumo)
+    if (ya) ya.cantidad += A.cantidad
+    else build.push({ insumo_nombre: A.insumo, cantidad: A.cantidad })
+
+    const ajuste = A.ajuste ? (A.ajuste[spec.esq] || A.ajuste.DEFECTO) : null
+    if (!ajuste) continue
+    for (const clave in ajuste) {
+      const nombreReal = clave === 'FRUTA'
+        ? (spec.fruta ? FRUTA_POR_CODIGO[spec.fruta].insumo : null)
+        : clave
+      if (!nombreReal) continue
+      const t = build.find(i => i.insumo_nombre === nombreReal)
+      if (t) t.cantidad = Math.max(0, t.cantidad + ajuste[clave])
+    }
+  }
+
+  return { ok: true, ingredientes: build.filter(i => i.cantidad > 0), motivo: null }
+}
+
+// Nombre legible para mostrarle al bartender y guardar como receta.
+export function nombreLegible(spec) {
+  if (!spec) return ''
+  if (spec.recetaGemela) return spec.recetaGemela
+  const esq = ESQUELETOS[spec.esq]
+  let n = esq.nombre
+  if (spec.base === 'PT') n += ' Peruano'
+  if (spec.fruta) n += ' ' + FRUTA_POR_CODIGO[spec.fruta].nombre
+  const ad = spec.addons.map(a => ADDONS[a].nombre.toLowerCase())
+  if (ad.length) n += ' + ' + ad.join(', ')
+  return n
+}
+
+// ─── Parseo del mensaje completo del LAB ─────────────────────────────────────
+//
+// El LAB manda algo así:
+//
+//     ▸ PEDIDO THE DRINK
+//
+//     2×  MOJITO MARACUYÁ
+//         Mojito Maracuyá · 1lt
+//         RON-MOJ-MAR-1L
+//         $18.000
+//
+//     SUBTOTAL  $18.000
+//     DESPACHO  Providencia: $4.000
+//     TOTAL     $22.000
+//
+//     ▣ ENVIADO DESDE NCITY_LAB // lab.ncity.live
+//
+// El ancla es la línea del código, no el nombre: el nombre puede ser
+// "PROTOTIPO #104" y no significar nada para el parser difuso.
+
+const aNumero = s => parseInt(String(s).replace(/[^\d]/g, ''), 10) || 0
+
+export function parsearMensajeLab(texto) {
+  if (!texto) return null
+  const lineas = String(texto).split('\n').map(l => l.trim())
+  const items = []
+
+  lineas.forEach((linea, i) => {
+    const spec = parsearCodigo(linea)
+    if (!spec) return
+    // La cantidad y el nombre están hasta 3 líneas más arriba ("2×  NOMBRE").
+    let cantidad = 1, etiqueta = ''
+    for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
+      const m = lineas[j].match(/^(\d+)\s*[×xX]\s*(.*)$/)
+      if (m) { cantidad = parseInt(m[1], 10) || 1; etiqueta = (m[2] || '').trim(); break }
+    }
+    // El precio TOTAL de la línea va justo debajo del código.
+    let precioLinea = 0
+    for (let j = i + 1; j <= Math.min(lineas.length - 1, i + 2); j++) {
+      if (/^\$[\d.]+$/.test(lineas[j])) { precioLinea = aNumero(lineas[j]); break }
+    }
+    items.push({
+      cantidad,
+      etiqueta: etiqueta || nombreLegible(spec),
+      codigo: spec.codigo,
+      spec,
+      // precio unitario: el mensaje trae el total de la línea
+      precio_venta: cantidad > 0 && precioLinea ? Math.round(precioLinea / cantidad) : 0,
+    })
+  })
+
+  if (!items.length) return null
+
+  // Despacho: "DESPACHO  Providencia: $4.000" | "...: GRATIS" | "...: fuera de cobertura"
+  let despacho = null
+  for (const l of lineas) {
+    const m = l.match(/^DESPACHO\s+(.+)$/i)
+    if (!m) continue
+    const resto = m[1].trim()
+    const mm = resto.match(/^(.+?):\s*(.+)$/)
+    const comuna = mm ? mm[1].trim() : null
+    const valor = mm ? mm[2].trim() : resto
+    despacho = {
+      comuna,
+      texto: resto,
+      // solo hay monto que cobrar si el LAB mostró una cifra o GRATIS
+      monto: /gratis/i.test(valor) ? 0 : (/\$/.test(valor) ? aNumero(valor) : null),
+    }
+    break
+  }
+
+  return { items, despacho, esLab: /NCITY_LAB/i.test(texto) }
+}
+
+// Texto de una línea por insumo, para la comanda del bartender.
+export function buildLegible(ingredientes) {
+  return (ingredientes || [])
+    .map(i => `${i.insumo_nombre} ${Number(i.cantidad) % 1 === 0 ? i.cantidad : i.cantidad.toFixed(1)}`)
+    .join(' · ')
+}

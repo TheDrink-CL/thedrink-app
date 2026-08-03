@@ -173,6 +173,29 @@ function TarjetaComanda({ comanda, onListo, comandasConfig = {}, clientesPorNomb
                   {item.nota}
                 </div>
               )}
+              {/* Receta armada en el LAB: el bartender no la conoce de memoria,
+                  así que la comanda tiene que traer el build completo. Se lee a
+                  distancia, no como nota al pie. */}
+              {item.build && (
+                <div style={{
+                  marginTop: 6, padding: '6px 10px', borderRadius: 8,
+                  background: 'rgba(127,119,221,0.14)',
+                  border: '1px solid rgba(127,119,221,0.4)',
+                }}>
+                  <div style={{
+                    fontSize: 'clamp(10px, 1.1vw, 14px)', color: '#AFA9EC',
+                    fontWeight: 800, letterSpacing: '0.08em', marginBottom: 2,
+                  }}>
+                    ⬡ RECETA NUEVA{item.lab_codigo ? ' · ' + item.lab_codigo : ''}
+                  </div>
+                  <div style={{
+                    fontSize: 'clamp(13px, 1.7vw, 22px)', color: '#fff',
+                    fontWeight: 600, lineHeight: 1.45,
+                  }}>
+                    {item.build}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         ))}
