@@ -371,9 +371,15 @@ export function parsearMensajeLab(texto) {
     const precio = despues.match(/\$[\d.]+/)
     const precioLinea = precio ? aNumero(precio[0]) : 0
 
+    // Nombre corto para la comanda: el descriptor completo ("Energético
+    // Frambuesa · RedBull Yellow · 1lt") ocupaba varias líneas en la TV y el
+    // bartender lo que necesita leer es el build, no el nombre.
+    const limpia = limpiarEtiqueta(etiqueta)
+    const proto = limpia.match(/PROTOTIPO\s*#\s*(\d+)/i)
     items.push({
       cantidad,
-      etiqueta: limpiarEtiqueta(etiqueta) || nombreLegible(spec),
+      etiqueta: spec.recetaGemela
+        || (proto ? `PROTOTIPO #${proto[1]}` : (limpia || nombreLegible(spec))),
       codigo: spec.codigo,
       spec,
       // precio unitario: el mensaje trae el total de la línea
