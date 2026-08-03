@@ -326,7 +326,8 @@ const aNumero = s => parseInt(String(s).replace(/[^\d]/g, ''), 10) || 0
 
 export function parsearMensajeLab(texto) {
   if (!texto) return null
-  const lineas = String(texto).split('\n').map(l => l.trim())
+  const T = String(texto)
+  const lineas = T.split('\n').map(l => l.trim())
   const items = []
 
   const RE_CANT = /^(\d+)\s*[×xX]\s*(.*)$/
@@ -340,39 +341,39 @@ export function parsearMensajeLab(texto) {
     .replace(/[·\-–]\s*$/, '')
     .trim()
 
-  lineas.forEach((linea, i) => {
-    const spec = parsearCodigo(linea)
+  // Se barre el texto COMPLETO buscando códigos, no línea por línea: al pegar
+  // desde WhatsApp los saltos pueden desaparecer del todo y quedar los tres
+  // tragos en un solo renglón. Con búsqueda por línea solo se veía el primero.
+  const RE_TODOS = new RegExp(REGEX_CODIGO.source, 'g')
+  const hallados = []
+  let m
+  while ((m = RE_TODOS.exec(T)) !== null) {
+    hallados.push({ raw: m[0], desde: m.index, hasta: m.index + m[0].length })
+  }
+
+  hallados.forEach((h, k) => {
+    const spec = parsearCodigo(h.raw)
     if (!spec) return
-    let cantidad = 1, etiqueta = ''
+    // Cada trago ocupa el tramo entre el código anterior y el suyo; el precio
+    // queda en el tramo siguiente. Así los límites no dependen de los saltos.
+    const antes = T.slice(k === 0 ? 0 : hallados[k - 1].hasta, h.desde)
+    const despues = T.slice(h.hasta, hallados[k + 1] ? hallados[k + 1].desde : T.length)
 
-    // 1) La propia línea puede traer cantidad, nombre, código y precio juntos.
-    const propio = linea.match(RE_CANT)
-    if (propio) {
-      cantidad = parseInt(propio[1], 10) || 1
-      etiqueta = limpiarEtiqueta(propio[2])
-    } else {
-      // 2) Formato con saltos: la cantidad está hasta 3 líneas más arriba.
-      for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
-        // Si esa línea ya tiene un código, pertenece a OTRO trago: cortar.
-        // Sin esto, un ítem se roba el nombre del anterior.
-        if (parsearCodigo(lineas[j])) break
-        const m = lineas[j].match(RE_CANT)
-        if (m) { cantidad = parseInt(m[1], 10) || 1; etiqueta = limpiarEtiqueta(m[2]); break }
-      }
+    // La cantidad es el ÚLTIMO "N×" antes del código: si hubiera varios, el
+    // más cercano es el de este trago.
+    let cantidad = 1, etiqueta = antes
+    const cants = [...antes.matchAll(/(\d+)\s*[×xX]\s*/g)]
+    if (cants.length) {
+      const u = cants[cants.length - 1]
+      cantidad = parseInt(u[1], 10) || 1
+      etiqueta = antes.slice(u.index + u[0].length)
     }
+    const precio = despues.match(/\$[\d.]+/)
+    const precioLinea = precio ? aNumero(precio[0]) : 0
 
-    // El precio TOTAL de la línea va en la misma línea o justo debajo.
-    let precioLinea = 0
-    const enLinea = linea.match(/\$[\d.]+/)
-    if (enLinea) precioLinea = aNumero(enLinea[0])
-    if (!precioLinea) {
-      for (let j = i + 1; j <= Math.min(lineas.length - 1, i + 2); j++) {
-        if (/^\$[\d.]+$/.test(lineas[j])) { precioLinea = aNumero(lineas[j]); break }
-      }
-    }
     items.push({
       cantidad,
-      etiqueta: etiqueta || nombreLegible(spec),
+      etiqueta: limpiarEtiqueta(etiqueta) || nombreLegible(spec),
       codigo: spec.codigo,
       spec,
       // precio unitario: el mensaje trae el total de la línea
