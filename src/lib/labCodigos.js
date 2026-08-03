@@ -292,19 +292,46 @@ export function parsearMensajeLab(texto) {
   const lineas = String(texto).split('\n').map(l => l.trim())
   const items = []
 
+  const RE_CANT = /^(\d+)\s*[×xX]\s*(.*)$/
+  // Al pegar desde WhatsApp los saltos de línea a veces se colapsan y el trago
+  // entero queda en una sola línea. Por eso el nombre se limpia de código y
+  // precio: si no, arrastra "PT-SOU-FRU-475+AG $7.300" pegado al nombre.
+  const limpiarEtiqueta = t => String(t || '')
+    .replace(REGEX_CODIGO, '')
+    .replace(/\$[\d.]+/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/[·\-–]\s*$/, '')
+    .trim()
+
   lineas.forEach((linea, i) => {
     const spec = parsearCodigo(linea)
     if (!spec) return
-    // La cantidad y el nombre están hasta 3 líneas más arriba ("2×  NOMBRE").
     let cantidad = 1, etiqueta = ''
-    for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
-      const m = lineas[j].match(/^(\d+)\s*[×xX]\s*(.*)$/)
-      if (m) { cantidad = parseInt(m[1], 10) || 1; etiqueta = (m[2] || '').trim(); break }
+
+    // 1) La propia línea puede traer cantidad, nombre, código y precio juntos.
+    const propio = linea.match(RE_CANT)
+    if (propio) {
+      cantidad = parseInt(propio[1], 10) || 1
+      etiqueta = limpiarEtiqueta(propio[2])
+    } else {
+      // 2) Formato con saltos: la cantidad está hasta 3 líneas más arriba.
+      for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
+        // Si esa línea ya tiene un código, pertenece a OTRO trago: cortar.
+        // Sin esto, un ítem se roba el nombre del anterior.
+        if (parsearCodigo(lineas[j])) break
+        const m = lineas[j].match(RE_CANT)
+        if (m) { cantidad = parseInt(m[1], 10) || 1; etiqueta = limpiarEtiqueta(m[2]); break }
+      }
     }
-    // El precio TOTAL de la línea va justo debajo del código.
+
+    // El precio TOTAL de la línea va en la misma línea o justo debajo.
     let precioLinea = 0
-    for (let j = i + 1; j <= Math.min(lineas.length - 1, i + 2); j++) {
-      if (/^\$[\d.]+$/.test(lineas[j])) { precioLinea = aNumero(lineas[j]); break }
+    const enLinea = linea.match(/\$[\d.]+/)
+    if (enLinea) precioLinea = aNumero(enLinea[0])
+    if (!precioLinea) {
+      for (let j = i + 1; j <= Math.min(lineas.length - 1, i + 2); j++) {
+        if (/^\$[\d.]+$/.test(lineas[j])) { precioLinea = aNumero(lineas[j]); break }
+      }
     }
     items.push({
       cantidad,
