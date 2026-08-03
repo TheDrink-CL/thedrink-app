@@ -74,6 +74,9 @@ export const ESQUELETOS = {
   ENE: {
     nombre: 'Energético', refConFruta: 'Tropical Gin',
     addons: ['JG', 'CZ', 'MT'],
+    // La energética va incluida (1 por trago), no es añadido: por eso viaja
+    // como token propio del código y no dentro de `addons`.
+    energeticas: ['RY', 'RB'],
   },
   JAG: {
     nombre: 'Mojito Jäger', refConFruta: 'Mojito Jager Maracuyá',
@@ -96,6 +99,14 @@ export const ESQUELETOS = {
 // baja el ron y la pulpa. Sale de las recetas Mojito Coco Blue, Mojito
 // coco-frambuesa y Blue Colada, que ya existen en la carta.
 // `FRUTA` es un alias que apunta a la pulpa elegida.
+// Energéticas: van incluidas, 1 por trago. El token del código dice cuál, y de
+// eso depende qué lata se descuenta del stock. Agregar una variedad es sumarla
+// acá y al array `energeticas` del esqueleto.
+export const ENERGETICAS = {
+  RY: { nombre: 'RedBull Yellow', insumo: 'Redbull yellow' },
+  RB: { nombre: 'RedBull Blue', insumo: 'Redbull blue' },
+}
+
 export const ADDONS = {
   CC: {
     nombre: 'Crema de coco', insumo: 'Crema de coco', cantidad: 120,
@@ -138,8 +149,8 @@ export const GEMELOS = {
   'PT-SOU-NAT-475': 'Sour Peruano',
   'PN-SOU-MAN-475': 'Mango Sour',
   'PT-SOU-MAR-475': 'Maracuyá Sour',
-  'GIN-ENE-MAR-1L': 'Tropical Gin',
-  'GIN-ENE-FRA-1L': 'Berry Bomb',
+  'GIN-ENE-MAR-1L+RY': 'Tropical Gin',
+  'GIN-ENE-FRA-1L+RB': 'Berry Bomb',
   'JGR-JAG-NAT-1L': 'Mojito Jager',
   'JGR-JAG-MAR-1L': 'Mojito Jager Maracuyá',
   'ZER-FZM-NAT-1L': 'Frozen mojito (1lt)',
@@ -163,16 +174,33 @@ export function parsearCodigo(texto) {
   if (!ESQUELETOS[esq]) return null
   if (fru !== 'NAT' && !FRUTA_POR_CODIGO[fru]) return null
 
-  const addons = addonsRaw ? addonsRaw.split('+').filter(Boolean) : []
+  const tokens = addonsRaw ? addonsRaw.split('+').filter(Boolean) : []
+  const E = ESQUELETOS[esq]
+
+  // La energética viaja como token igual que un añadido, pero no lo es: va
+  // incluida y define qué lata se descuenta. Se separa antes de validar.
+  const energeticas = tokens.filter(t => ENERGETICAS[t])
+  const addons = tokens.filter(t => !ENERGETICAS[t])
+
+  if (energeticas.length > 1) return null
+  const energetica = energeticas[0] || null
+  if (energetica && !(E.energeticas || []).includes(energetica)) return null
+  // Un esqueleto que lleva energética SIEMPRE debe traerla en el código: si
+  // falta, no se sabe qué lata descontar y adivinarla sería inventar stock.
+  if ((E.energeticas || []).length && !energetica) return null
+
   for (const a of addons) if (!ADDONS[a]) return null
   // Un añadido que ese esqueleto no admite es señal de código corrupto.
-  for (const a of addons) if (!ESQUELETOS[esq].addons.includes(a)) return null
+  for (const a of addons) if (!E.addons.includes(a)) return null
 
-  const codigo = [base, esq, fru, fmt].join('-') + addons.map(a => '+' + a).join('')
+  const codigo = [base, esq, fru, fmt].join('-')
+    + (energetica ? '+' + energetica : '')
+    + addons.map(a => '+' + a).join('')
   return {
     codigo,
     base, esq, fmt,
     fruta: fru === 'NAT' ? null : fru,
+    energetica,
     addons,
     esGemelo: !!GEMELOS[codigo],
     recetaGemela: GEMELOS[codigo] || null,
@@ -224,6 +252,14 @@ export function construirBuild(spec, ingredientesPorReceta) {
     build.push({ insumo_nombre: FRUTA_POR_CODIGO[spec.fruta].insumo, cantidad: totalPulpa })
   }
 
+  // 2b. Cambiar la lata por la pedida. El molde trae una sola; si no se
+  //     reemplaza, se descuenta del stock la energética equivocada.
+  if (spec.energetica) {
+    const objetivo = ENERGETICAS[spec.energetica].insumo
+    const cans = Object.values(ENERGETICAS).map(e => e.insumo)
+    build.forEach(i => { if (cans.includes(i.insumo_nombre)) i.insumo_nombre = objetivo })
+  }
+
   // 3. Excepciones de goma que ya existen en la carta
   if (esq.gomaPorFruta && spec.fruta && esq.gomaPorFruta[spec.fruta] != null) {
     const goma = build.find(i => i.insumo_nombre === 'Goma')
@@ -260,6 +296,7 @@ export function nombreLegible(spec) {
   let n = esq.nombre
   if (spec.base === 'PT') n += ' Peruano'
   if (spec.fruta) n += ' ' + FRUTA_POR_CODIGO[spec.fruta].nombre
+  if (spec.energetica) n += ' · ' + ENERGETICAS[spec.energetica].nombre
   const ad = spec.addons.map(a => ADDONS[a].nombre.toLowerCase())
   if (ad.length) n += ' + ' + ad.join(', ')
   return n
