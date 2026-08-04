@@ -107,6 +107,15 @@ export function enriquecerVentasConDelivery(ventas = [], ordenes = []) {
   })
 }
 
+// ── Delivery adelantado con plata personal ───────────────────────────────────
+// Uber Eats se cobra de la cuenta del negocio (la misma donde entran los pagos):
+// esa plata ya salio sola, no hay nada que retirar. DiDi solo acepta tarjeta
+// bancaria personal, asi que ese costo lo adelanta el dueno y el negocio se lo
+// debe. El KPI "Por pagarte" de Caja usa esta lista; si manana otra app se paga
+// igual, se agrega aca y el KPI la toma sola.
+export const TIPOS_DELIVERY_ADELANTADO = ['didi']
+export const esDeliveryAdelantado = (t) => TIPOS_DELIVERY_ADELANTADO.includes(t)
+
 // Fecha de corte del nuevo manejo de delivery. Desde esta fecha, el costo de
 // delivery (lo que se paga a Uber/motoboy) se descuenta del saldo de caja, y el
 // cobro al cliente se suma. Antes de esta fecha el delivery se manejaba distinto

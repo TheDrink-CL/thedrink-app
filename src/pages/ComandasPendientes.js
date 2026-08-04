@@ -21,6 +21,7 @@ const MEDIOS_PAGO = [
 ]
 const TIPOS_DELIVERY = [
   { id: 'uber',    label: 'Uber Eats' },
+  { id: 'didi',    label: 'DiDi' },
   { id: 'motoboy', label: 'Motoboy' },
   { id: 'propio',  label: 'Propio (EV)' },
   { id: 'retiro',  label: 'Retiro' },

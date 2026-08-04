@@ -120,7 +120,7 @@ function DeliveryCard({ orden, onEstadoChange, onError }) {
     onEstadoChange()
   }
 
-  const tieneDelivery = ['motoboy', 'propio', 'otro', 'uber'].includes(orden.delivery_tipo)
+  const tieneDelivery = ['motoboy', 'propio', 'otro', 'uber', 'didi'].includes(orden.delivery_tipo)
 
   return (
     <div style={{

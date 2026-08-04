@@ -70,6 +70,7 @@ function TicketModal({ orden, onCerrar }) {
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: 13, color: 'var(--muted)' }}>
             <span>
               {orden.delivery_tipo === 'motoboy' ? 'Motoboy' :
+               orden.delivery_tipo === 'didi' ? 'DiDi' :
                orden.delivery_tipo === 'otro' ? 'Entrega' :
                'Uber Eats'}
             </span>
@@ -154,6 +155,7 @@ const MEDIOS_PAGO = [
 ]
 const TIPOS_DELIVERY = [
   { id: 'uber',    label: '🛵 Uber Eats' },
+  { id: 'didi',    label: '🛵 DiDi' },
   { id: 'motoboy', label: '🏍️ Motoboy' },
   { id: 'propio',  label: '⚡ Propio (EV)' },
   { id: 'retiro',  label: '🚶 Retiro' },
@@ -412,6 +414,7 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel, showToast }) {
               <div className="form-group">
                 <label className="form-label">
                   {deliveryTipo === 'uber' ? 'Costo Uber' :
+                   deliveryTipo === 'didi' ? 'Costo DiDi (tu tarjeta)' :
                    deliveryTipo === 'motoboy' ? 'Pago motoboy' :
                    'Costo entrega'}
                 </label>
@@ -1246,7 +1249,7 @@ export default function Ventas() {
                     if (t.id === 'propio') setDelivery('')
                     // Auto-activar toggle si es motoboy o propio
                     if (nuevo === 'motoboy' || nuevo === 'propio') setEnviarADelivery(true)
-                    if (nuevo === '' || nuevo === 'retiro' || nuevo === 'uber' || nuevo === 'otro') setEnviarADelivery(false)
+                    if (nuevo === '' || nuevo === 'retiro' || nuevo === 'uber' || nuevo === 'didi' || nuevo === 'otro') setEnviarADelivery(false)
                   }}>{t.label}</button>
               ))}
             </div>
@@ -1317,6 +1320,7 @@ export default function Ventas() {
                 <div className="form-group">
                   <label className="form-label">
                     {deliveryTipo === 'uber' ? 'Costo Uber Eats' :
+                     deliveryTipo === 'didi' ? 'Costo DiDi (tu tarjeta)' :
                      deliveryTipo === 'motoboy' ? 'Pago al motoboy' :
                      'Costo entrega'}
                   </label>
@@ -1518,7 +1522,7 @@ export default function Ventas() {
                         <div style={{ fontWeight:700, fontSize:15 }}>{formatCLP(totalOrden)}</div>
                         {o.delivery > 0 && (
                           <div style={{ fontSize:11, color:'var(--pink)' }}>
-                            -{formatCLP(o.delivery)} {o.delivery_tipo === 'motoboy' ? 'Moto' : o.delivery_tipo === 'otro' ? 'Entrega' : 'Uber'}
+                            -{formatCLP(o.delivery)} {o.delivery_tipo === 'motoboy' ? 'Moto' : o.delivery_tipo === 'didi' ? 'DiDi' : o.delivery_tipo === 'otro' ? 'Entrega' : 'Uber'}
                           </div>
                         )}
                         {o.delivery_cobrado > 0 && (

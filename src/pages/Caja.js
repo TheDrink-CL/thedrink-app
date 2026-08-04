@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { formatCLP, enriquecerVentasConDelivery, FECHA_CORTE_DELIVERY } from '../lib/calculos'
+import { formatCLP, enriquecerVentasConDelivery, FECHA_CORTE_DELIVERY, esDeliveryAdelantado } from '../lib/calculos'
 
 // La pestaña "Publicidad" se eliminó (jun 2026): duplicaba el análisis de pauta
 // que ahora vive en Indicadores (ROAS semanal) y Análisis (origen de clientes),
@@ -54,7 +54,7 @@ export default function Caja() {
       supabase.from('caja').select('*').order('fecha', { ascending: false }),
       supabase.from('ventas').select('litros, precio_venta, delivery, orden_id'),
       supabase.from('compras').select('precio_total, es_inversion'),
-      supabase.from('ordenes').select('id, fecha, delivery, delivery_cobrado'),
+      supabase.from('ordenes').select('id, fecha, delivery, delivery_cobrado, delivery_tipo'),
     ])
 
     setMovimientos(mov || [])
@@ -77,17 +77,18 @@ export default function Caja() {
 
     setSaldo(totalVentas + totalDeliveryCobrado - totalCostoDelivery - totalCompras + movExtraEntradas - movExtraSalidas)
 
-    // Uber por retirar: costo de delivery acumulado del mes en curso (desde el
-    // corte). Es la plata que conviene sacar a tu cuenta personal para pagar la
-    // tarjeta con que pagaste Uber/motoboy. Se reinicia cada mes.
+    // Por pagarte: costo de delivery del mes en curso que saliÓ de la tarjeta
+    // personal (DiDi), no de la cuenta del negocio. Uber se cobra de la misma
+    // cuenta donde entran los pagos, así que esa plata ya salió sola y NO hay
+    // nada que retirar por esos pedidos: incluirla inflaba el KPI.
     // Mes local (no UTC): con toISOString() el mes se resetea antes de tiempo
     // en husos horarios detrás de UTC (ej. Chile), cortando el KPI de golpe.
     const hoyLocal = new Date()
     const mesActual = `${hoyLocal.getFullYear()}-${String(hoyLocal.getMonth() + 1).padStart(2, '0')}` // 'YYYY-MM'
-    const uberMes = ordCorte
-      .filter(ord => (ord.fecha || '').slice(0, 7) === mesActual)
+    const adelantadoMes = ordCorte
+      .filter(ord => (ord.fecha || '').slice(0, 7) === mesActual && esDeliveryAdelantado(ord.delivery_tipo))
       .reduce((s, ord) => s + (parseFloat(ord.delivery) || 0), 0)
-    setUberPorRetirar(uberMes)
+    setUberPorRetirar(adelantadoMes)
   }
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2500) }
@@ -178,12 +179,12 @@ export default function Caja() {
         </div>
         {uberPorRetirar > 0 && (
           <div className="kpi-card">
-            <div className="kpi-label">Uber por retirar (mes)</div>
+            <div className="kpi-label">Por pagarte — delivery (mes)</div>
             <div className="kpi-value" style={{ fontSize: 22, color: 'var(--cyan)' }}>
               {formatCLP(uberPorRetirar)}
             </div>
             <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-              Costo de delivery ya descontado del saldo. Sácalo a tu cuenta para pagar la tarjeta.
+              Delivery que pagaste con tu tarjeta (DiDi), ya descontado del saldo. Sácalo a tu cuenta para reembolsarte.
             </div>
           </div>
         )}
