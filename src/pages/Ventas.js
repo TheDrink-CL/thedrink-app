@@ -476,6 +476,11 @@ export default function Ventas() {
   const [hora, setHora] = useState(horaAhora())
   const [cliente, setCliente] = useState('')
   const [clienteSugerencias, setClienteSugerencias] = useState([])
+  const [telSugerencias, setTelSugerencias] = useState([])
+  // Ficha del maestro elegida explícitamente desde una sugerencia. Es la única
+  // forma segura de saber "este pedido es de ESTE cliente": el nombre solo no
+  // alcanza, hay homónimos que son personas distintas.
+  const [clienteIdSel, setClienteIdSel] = useState(null)
   const [clienteTelefono, setClienteTelefono] = useState('')
   const [clienteDireccion, setClienteDireccion] = useState('')
   const [origen, setOrigen] = useState('')
@@ -584,20 +589,30 @@ export default function Ventas() {
     supabase.from('clientes').select('*').order('nombre').then(({ data }) => setClientesMaestro(data || []))
   }, [])
 
+  const aSugerencia = (c) => ({
+    id: c.id,
+    nombre: c.nombre,
+    telefono: c.telefono || '',
+    direccion: c.direccion || '',
+    distancia: c.distancia_km || '',
+  })
+
   const buscarSugerencias = (texto) => {
     if (!texto || texto.length < 2) { setClienteSugerencias([]); return }
     const q = texto.toLowerCase().trim()
-    const sugs = clientesMaestro
-      .filter(c => c.nombre.toLowerCase().includes(q))
-      .slice(0, 5)
-      .map(c => ({
-        id: c.id,
-        nombre: c.nombre,
-        telefono: c.telefono || '',
-        direccion: c.direccion || '',
-        distancia: c.distancia_km || '',
-      }))
-    setClienteSugerencias(sugs)
+    setClienteSugerencias(
+      clientesMaestro.filter(c => c.nombre.toLowerCase().includes(q)).slice(0, 5).map(aSugerencia)
+    )
+  }
+
+  // Mismo autocompletado, pero por teléfono: compara solo dígitos, así da igual
+  // si la ficha quedó guardada como "+56 9 1234 5678" o "912345678".
+  const buscarSugerenciasTel = (texto) => {
+    const q = normalizarTelefono(texto)
+    if (q.length < 4) { setTelSugerencias([]); return }
+    setTelSugerencias(
+      clientesMaestro.filter(c => normalizarTelefono(c.telefono).includes(q)).slice(0, 5).map(aSugerencia)
+    )
   }
 
   const aplicarSugerencia = (sug) => {
@@ -605,7 +620,9 @@ export default function Ventas() {
     setClienteTelefono(sug.telefono)
     setClienteDireccion(sug.direccion)
     if (sug.distancia) setDistanciaKm(String(sug.distancia))
+    setClienteIdSel(sug.id)
     setClienteSugerencias([])
+    setTelSugerencias([])
   }
 
   const getPrecioSugerido = (nombre) => {
@@ -681,7 +698,56 @@ export default function Ventas() {
     let clienteId = null
     if (cliente.trim()) {
       const nombreKey = cliente.trim().toLowerCase()
-      const existente = clientesMaestro.find(c => c.nombre.trim().toLowerCase() === nombreKey)
+      const u8Cliente = ultimos8Tel(clienteTelefono)
+
+      // A qué ficha del maestro pertenece este pedido. Ni el nombre ni el
+      // teléfono alcanzan por sí solos, porque en la práctica se dan los dos
+      // casos degenerados:
+      //
+      //   · dos personas con el MISMO nombre y distinto teléfono
+      //     (las dos Catalinas → hay que separarlas)
+      //   · dos personas con distinto nombre y el MISMO teléfono
+      //     (Allison y Alinne, que viven juntas y piden del mismo WhatsApp
+      //      → tampoco hay que fusionarlas)
+      //
+      // Por eso se va de lo más específico a lo más laxo, y se crea ficha nueva
+      // antes que adivinar:
+      const nombreOcupado = clientesMaestro.some(c => c.nombre.trim().toLowerCase() === nombreKey)
+      const mismoNombre = (c) => c.nombre.trim().toLowerCase() === nombreKey
+
+      //  1. La ficha elegida a mano en el autocompletado. Es la única señal
+      //     explícita que da quien registra; manda sobre todo lo demás.
+      const elegida = clienteIdSel
+        ? clientesMaestro.find(c => c.id === clienteIdSel && mismoNombre(c))
+        : null
+
+      //  2. Coinciden nombre Y teléfono: es esa persona, sin ambigüedad.
+      const porAmbos = !elegida && u8Cliente
+        ? clientesMaestro.find(c => mismoNombre(c) && ultimos8Tel(c.telefono) === u8Cliente)
+        : null
+
+      //  3. Coincide el nombre y los teléfonos no se contradicen (a alguno de
+      //     los dos le falta). Caso típico: ficha vieja sin teléfono a la que
+      //     recién se lo estamos poniendo — y también Allison/Alinne, donde el
+      //     nombre desempata el teléfono compartido.
+      const porNombre = !elegida && !porAmbos
+        ? clientesMaestro.find(c => {
+            if (!mismoNombre(c)) return false
+            const u8Ficha = ultimos8Tel(c.telefono)
+            return !u8Ficha || !u8Cliente
+          })
+        : null
+
+      //  4. Solo el teléfono, y únicamente si NINGUNA ficha se llama así: es la
+      //     misma persona escrita distinto ("Valeria" por "Valeria Ruiz").
+      //     Si además existe una ficha con ese nombre, el caso es ambiguo y se
+      //     prefiere crear una ficha nueva: separar de más se arregla mirando;
+      //     fusionar de más pasa inadvertido durante meses.
+      const porTelefono = !elegida && !porAmbos && !porNombre && u8Cliente && !nombreOcupado
+        ? clientesMaestro.find(c => ultimos8Tel(c.telefono) === u8Cliente)
+        : null
+
+      const existente = elegida || porAmbos || porNombre || porTelefono
       if (existente) {
         clienteId = existente.id
         // Actualizar datos si se completaron campos nuevos
@@ -812,6 +878,8 @@ export default function Ventas() {
     setHora(horaAhora())
     setCliente('')
     setClienteSugerencias([])
+    setTelSugerencias([])
+    setClienteIdSel(null)
     setClienteTelefono('')
     setClienteDireccion('')
     setOrigen('')
@@ -1017,7 +1085,7 @@ export default function Ventas() {
           <div className="form-group" style={{ position: 'relative' }}>
             <label className="form-label">Cliente — opcional</label>
             <input type="text" className="form-input" value={cliente} placeholder="ej: Juan Pérez"
-              onChange={e => { setCliente(e.target.value); buscarSugerencias(e.target.value) }}
+              onChange={e => { setCliente(e.target.value); setClienteIdSel(null); buscarSugerencias(e.target.value) }}
               onBlur={() => setTimeout(() => setClienteSugerencias([]), 180)}
               autoComplete="off"
             />
@@ -1047,11 +1115,37 @@ export default function Ventas() {
           </div>
 
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
-            <div className="form-group">
+            <div className="form-group" style={{ position: 'relative' }}>
               <label className="form-label">Teléfono — opcional</label>
               <input type="tel" className="form-input" value={clienteTelefono} placeholder="+56 9 ..."
                 style={{ borderColor: neonPrevio ? 'var(--pink, #ff3366)' : undefined }}
-                onChange={e => setClienteTelefono(e.target.value)} />
+                onChange={e => { setClienteTelefono(e.target.value); setClienteIdSel(null); buscarSugerenciasTel(e.target.value) }}
+                onBlur={() => setTimeout(() => setTelSugerencias([]), 180)}
+                autoComplete="off"
+              />
+              {telSugerencias.length > 0 && (
+                <div style={{
+                  position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100,
+                  background: 'var(--card)', border: '1px solid var(--border)',
+                  borderRadius: 10, marginTop: 4, overflow: 'hidden',
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.5)'
+                }}>
+                  {telSugerencias.map((sug, i) => (
+                    <button key={sug.id} type="button"
+                      onMouseDown={() => aplicarSugerencia(sug)}
+                      style={{
+                        display: 'block', width: '100%', textAlign: 'left',
+                        background: 'none', border: 'none', borderBottom: i < telSugerencias.length - 1 ? '1px solid var(--border)' : 'none',
+                        padding: '10px 14px', cursor: 'pointer', color: 'var(--text)'
+                      }}>
+                      <div style={{ fontWeight: 700, fontSize: 14 }}>{sug.telefono}</div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+                        {[sug.nombre, sug.direccion].filter(Boolean).join(' · ')}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
               {neonPrevio && (
                 <div style={{
                   marginTop:6, fontSize:12, fontWeight:600, letterSpacing:'0.02em',

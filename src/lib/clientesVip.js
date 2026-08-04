@@ -24,8 +24,12 @@ export function construirEsVip(clientes = [], ordenes = []) {
     const tag = (id != null && tagPorId[id]) || tagPorNombre[nombreKey] || ''
     if (tag.includes('vip')) return true
 
-    const pedidos = ordenes.filter(o =>
-      (id != null && o.cliente_id === id) || (nombreKey && normalizar(o.cliente_nombre) === nombreKey)
+    // Si hay `cliente_id`, ese es el vínculo real y el nombre no suma: contar
+    // también por nombre mezclaba homónimos que son personas distintas y los
+    // volvía VIP a los dos. El nombre solo se usa cuando no hay id.
+    const pedidos = ordenes.filter(o => (id != null
+      ? o.cliente_id === id
+      : (nombreKey && !o.cliente_id && normalizar(o.cliente_nombre) === nombreKey))
     ).length
     return pedidos >= 3
   }

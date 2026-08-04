@@ -132,6 +132,20 @@ export default function Reactivar() {
     const clientesMap = {}
     ;(clts || []).forEach(c => { clientesMap[c.id] = c })
 
+    // Se agrupa por `cliente_id`, o sea por PERSONA. Ojo con el caso de dos
+    // personas que viven juntas y piden desde el mismo WhatsApp (hoy: Allison y
+    // Alinne, ...56600265): salen como dos filas distintas para recontactar,
+    // con el mismo número. Si les escribes a las dos, mandas dos mensajes al
+    // mismo chat, y el de la que pidió hace más tiempo dice una antigüedad que
+    // no es la del hogar.
+    //
+    // La unidad correcta para recontactar es el HOGAR = el teléfono (un
+    // WhatsApp, una conversación), no la persona. Es el mismo criterio que ya
+    // usa la regla NEON ("1 teléfono = 1 código", por últimos 8 dígitos).
+    // No se implementó porque hoy es 1 hogar de 131 y no justifica el cambio;
+    // si empiezan a aparecer más, agrupar acá por ultimos8Tel es el arreglo.
+    // Lo que NO hay que hacer es fusionar las fichas: para la comanda y las
+    // preferencias son dos personas distintas.
     const porCliente = {}
     ;(ords || []).forEach(o => {
       if (!o.cliente_id) return

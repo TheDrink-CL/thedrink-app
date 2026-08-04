@@ -121,11 +121,20 @@ function parseFechaCli(f) {
   return new Date(y, m - 1, d)
 }
 
+// ¿Esta orden es de este cliente? El vínculo real es `cliente_id`. El nombre
+// solo se usa para órdenes viejas que quedaron sin id: matchear por nombre a
+// secas hacía que dos personas distintas con el mismo nombre (dos "Paula", tres
+// "Constanza") se mostraran cada una con los pedidos de la otra.
+function esPedidoDe(orden, cliente) {
+  if (orden.cliente_id) return orden.cliente_id === cliente.id
+  return (orden.cliente_nombre || '').trim().toLowerCase() === cliente.nombre.trim().toLowerCase()
+}
+
 // ─── Modal perfil completo de cliente ────────────────────────────────────────
 function PerfilModal({ cliente, ordenes, onEditar, onCerrar, onTagSaved }) {
   // Pedidos del cliente, ordenados del más reciente al más antiguo
   const pedidos = ordenes
-    .filter(o => o.cliente_id === cliente.id || (o.cliente_nombre || '').trim().toLowerCase() === cliente.nombre.trim().toLowerCase())
+    .filter(o => esPedidoDe(o, cliente))
     .slice()
     .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''))
 
@@ -391,10 +400,7 @@ export default function Clientes() {
 
   // Stats por cliente
   const statsCliente = (c) => {
-    const pedidos = ordenes.filter(o =>
-      o.cliente_id === c.id ||
-      (o.cliente_nombre || '').trim().toLowerCase() === c.nombre.trim().toLowerCase()
-    )
+    const pedidos = ordenes.filter(o => esPedidoDe(o, c))
     const gastado = pedidos.reduce((s, o) => s + (o.ventas || []).reduce((ss, v) => ss + (v.litros || 1) * (v.precio_venta || 0), 0), 0)
     const ultimo = pedidos[0]?.fecha || null
     return { pedidos: pedidos.length, gastado, ultimo }
@@ -406,8 +412,12 @@ export default function Clientes() {
     .filter(c => {
       if (!busqueda.trim()) return true
       const q = busqueda.toLowerCase()
+      // El teléfono se compara solo con dígitos: en la base conviven
+      // "+56 9 7955 2465" y "979552465", y buscar el segundo no encontraba al
+      // primero.
+      const qDigitos = busqueda.replace(/\D/g, '')
       return c.nombre.toLowerCase().includes(q) ||
-        (c.telefono || '').includes(q) ||
+        (qDigitos.length >= 3 && (c.telefono || '').replace(/\D/g, '').includes(qDigitos)) ||
         (c.direccion || '').toLowerCase().includes(q) ||
         (c.origen || '').toLowerCase().includes(q)
     })
