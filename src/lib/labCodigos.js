@@ -89,6 +89,10 @@ export const ESQUELETOS = {
   FRS: {
     nombre: 'Frost', refConFruta: 'Berry Frost (1lt)', addons: ['JG'],
   },
+  TON: {
+    nombre: 'Gin Tónica', refSinFruta: 'Gin Tonic',
+    addons: ['LI', 'GM', 'HI', 'PM', 'RR', 'AR', 'AE', 'CO', 'CL', 'CD', 'CN', 'PJ'],
+  },
   VIO: {
     nombre: 'Violetto Tonic', refSinFruta: 'Violetto tonic', addons: [],
   },
@@ -123,7 +127,32 @@ export const ADDONS = {
   JG: { nombre: 'Jengibre', insumo: 'Jengibre', cantidad: 5 },
   MT: { nombre: 'Menta extra', insumo: 'Menta fresca', cantidad: 5 },
   AG: { nombre: 'Angostura extra', insumo: 'Angostura', cantidad: 2.4 },
+
+  // ── Botánicos del gin tónica ───────────────────────────────────────────
+  // Van por dashes y se combinan libremente. ⚠ 1 dash = 1 g es provisorio
+  // por acuerdo: cuando se mida de verdad se cambia acá y el descuento de
+  // stock se ajusta solo.
+  // Los nombres deben calzar EXACTO con `insumos.nombre`. Si uno no calza,
+  // `aplicarMovimientosStock` no lo encuentra y no descuenta, sin lanzar
+  // error. Hay una consulta de verificación en el mensaje del commit.
+  LI: { nombre: 'Limón', insumo: 'Jugo limón', cantidad: 20 },
+  GM: { nombre: 'Flor de guisante mariposa', insumo: 'Flor de guisante mariposa', cantidad: 1 },
+  HI: { nombre: 'Flor de Hibisco', insumo: 'Flor de Hibisco', cantidad: 1 },
+  PM: { nombre: 'Pimienta Mix', insumo: 'Pimienta Mix', cantidad: 1 },
+  RR: { nombre: 'Rosa Rugosa', insumo: 'Rosa Rugosa', cantidad: 1 },
+  AR: { nombre: 'Arándano Rojo', insumo: 'Arándano Rojo', cantidad: 1 },
+  AE: { nombre: 'Anís Estrella', insumo: 'Anís Estrella', cantidad: 1 },
+  CO: { nombre: 'Semilla Coriandro', insumo: 'Semilla Coriandro', cantidad: 1 },
+  CL: { nombre: 'Flor Caléndula', insumo: 'Flor Caléndula', cantidad: 1 },
+  CD: { nombre: 'Cardamomo', insumo: 'Cardamomo', cantidad: 1 },
+  CN: { nombre: 'Canela', insumo: 'Canela', cantidad: 1 },
+  PJ: { nombre: 'Pimienta Jamaica', insumo: 'Pimienta Jamaica', cantidad: 1 },
 }
+
+// Añadidos que se miden en gramos; el resto va en ml. Se usa al crear
+// `receta_ingredientes` de un prototipo nuevo.
+const ADDONS_EN_GRAMOS = new Set(
+  ['JG', 'MT', 'GM', 'HI', 'PM', 'RR', 'AR', 'AE', 'CO', 'CL', 'CD', 'CN', 'PJ'])
 
 // Combinaciones que YA son una receta publicada. Se resuelven directo, sin
 // derivar nada: menos superficie de error y el nombre le queda al cliente.
@@ -149,6 +178,7 @@ export const GEMELOS = {
   'PT-SOU-NAT-475': 'Sour Peruano',
   'PN-SOU-MAN-475': 'Mango Sour',
   'PT-SOU-MAR-475': 'Maracuyá Sour',
+  'GIN-TON-NAT-1L': 'Gin Tonic',
   'GIN-ENE-MAR-1L+RY': 'Tropical Gin',
   'GIN-ENE-FRA-1L+RB': 'Berry Bomb',
   'JGR-JAG-NAT-1L': 'Mojito Jager',
@@ -176,6 +206,12 @@ export function parsearCodigo(texto) {
 
   const tokens = addonsRaw ? addonsRaw.split('+').filter(Boolean) : []
   const E = ESQUELETOS[esq]
+
+  // Coherencia fruta ↔ esqueleto: un gin tónica con fruta o una colada sin
+  // ella no existen. Antes pasaban el parseo y reventaban recién al construir;
+  // mejor rechazarlos acá, donde el motivo es claro.
+  if (fru !== 'NAT' && !E.refConFruta) return null
+  if (fru === 'NAT' && !E.refSinFruta) return null
 
   // La energética viaja como token igual que un añadido, pero no lo es: va
   // incluida y define qué lata se descuenta. Se separa antes de validar.
@@ -230,7 +266,11 @@ export function construirBuild(spec, ingredientesPorReceta) {
     return { ok: false, ingredientes: [], motivo: `falta la receta de referencia "${ref}" en la base` }
 
   // Copia editable
-  let build = molde.map(i => ({ insumo_nombre: i.insumo_nombre, cantidad: Number(i.cantidad) }))
+  let build = molde.map(i => ({
+    insumo_nombre: i.insumo_nombre,
+    cantidad: Number(i.cantidad),
+    unidad: i.unidad || 'ml',
+  }))
 
   // 1. Cambiar el destilado si el código pide otra variante (pisco nacional
   //    vs Tabernero). El molde trae uno de los dos.
@@ -271,7 +311,11 @@ export function construirBuild(spec, ingredientesPorReceta) {
     const A = ADDONS[cod]
     const ya = build.find(i => i.insumo_nombre === A.insumo)
     if (ya) ya.cantidad += A.cantidad
-    else build.push({ insumo_nombre: A.insumo, cantidad: A.cantidad })
+    else build.push({
+      insumo_nombre: A.insumo,
+      cantidad: A.cantidad,
+      unidad: ADDONS_EN_GRAMOS.has(cod) ? 'g' : 'ml',
+    })
 
     const ajuste = A.ajuste ? (A.ajuste[spec.esq] || A.ajuste.DEFECTO) : null
     if (!ajuste) continue

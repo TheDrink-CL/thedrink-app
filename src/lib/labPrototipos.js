@@ -29,7 +29,7 @@ export async function cargarMoldes(specs) {
   if (!nombres.size) return {}
   const { data } = await supabase
     .from('receta_ingredientes')
-    .select('receta_nombre, insumo_nombre, cantidad')
+    .select('receta_nombre, insumo_nombre, cantidad, unidad')
     .in('receta_nombre', [...nombres])
   const porReceta = {}
   ;(data || []).forEach(i => {
@@ -91,7 +91,9 @@ export async function asegurarReceta(spec, precioVenta, moldes) {
       receta_nombre: nombre,
       insumo_nombre: i.insumo_nombre,
       cantidad: i.cantidad,
-      unidad: /menta|jengibre/i.test(i.insumo_nombre) ? 'g' : 'ml',
+      // La unidad viaja desde la receta molde. Antes se adivinaba por regex y
+      // eso fallaba con la lata de tónica (unidad) y con los botánicos (g).
+      unidad: i.unidad || 'ml',
     }))
   )
   if (errIngs) {
