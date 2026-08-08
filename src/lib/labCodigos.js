@@ -189,7 +189,8 @@ export const GEMELOS = {
 }
 
 // Detecta un código dentro de una línea de texto pegada del chat.
-export const REGEX_CODIGO = /\b([A-Z]{2,3})-([A-Z]{3})-([A-Z]{3})-(1L|475)((?:\+[A-Z]{2})*)\b/
+// La fruta admite una segunda separada por punto: RON-MOJ-MAN.MAR-1L
+export const REGEX_CODIGO = /\b([A-Z]{2,3})-([A-Z]{3})-([A-Z]{3}(?:\.[A-Z]{3})?)-(1L|475)((?:\+[A-Z]{2})*)\b/
 
 // ─── Parseo ──────────────────────────────────────────────────────────────────
 
@@ -202,7 +203,11 @@ export function parsearCodigo(texto) {
   const [, base, esq, fru, fmt, addonsRaw] = m
   if (!BASE_POR_CODIGO[base]) return null
   if (!ESQUELETOS[esq]) return null
-  if (fru !== 'NAT' && !FRUTA_POR_CODIGO[fru]) return null
+  // Hasta dos frutas, separadas por punto. Se reparten el mismo total de pulpa.
+  const frutas = fru === 'NAT' ? [] : fru.split('.')
+  if (frutas.length > 2) return null
+  for (const f of frutas) if (!FRUTA_POR_CODIGO[f]) return null
+  if (frutas.length === 2 && frutas[0] === frutas[1]) return null
 
   const tokens = addonsRaw ? addonsRaw.split('+').filter(Boolean) : []
   const E = ESQUELETOS[esq]
@@ -235,7 +240,8 @@ export function parsearCodigo(texto) {
   return {
     codigo,
     base, esq, fmt,
-    fruta: fru === 'NAT' ? null : fru,
+    fruta: frutas[0] || null,
+    frutas,
     energetica,
     addons,
     esGemelo: !!GEMELOS[codigo],
@@ -285,11 +291,19 @@ export function construirBuild(spec, ingredientesPorReceta) {
   // 2. Cambiar la pulpa por la pedida. El molde puede traer más de una (el
   //    Berry Frost mezcla frutilla y frambuesa): se colapsan en una sola,
   //    sumando las cantidades, que es como lo modela el LAB.
-  if (spec.fruta) {
+  const frutas = spec.frutas && spec.frutas.length ? spec.frutas : (spec.fruta ? [spec.fruta] : [])
+  if (frutas.length) {
     const pulpas = build.filter(i => /^p[uú]lpa de /i.test(i.insumo_nombre))
     const totalPulpa = pulpas.reduce((s, i) => s + i.cantidad, 0)
     build = build.filter(i => !/^p[uú]lpa de /i.test(i.insumo_nombre))
-    build.push({ insumo_nombre: FRUTA_POR_CODIGO[spec.fruta].insumo, cantidad: totalPulpa })
+    // Con dos frutas el total se REPARTE, no se suma: así lo hacen Berry Bomb
+    // y Berry Frost. Sumarlo desbalancearía el trago y subiría el costo.
+    const mitad = Math.round(totalPulpa / 2)
+    frutas.forEach((f, i) => build.push({
+      insumo_nombre: FRUTA_POR_CODIGO[f].insumo,
+      cantidad: frutas.length === 1 ? totalPulpa : (i === 0 ? mitad : totalPulpa - mitad),
+      unidad: 'ml',
+    }))
   }
 
   // 2b. Cambiar la lata por la pedida. El molde trae una sola; si no se
@@ -339,7 +353,8 @@ export function nombreLegible(spec) {
   const esq = ESQUELETOS[spec.esq]
   let n = esq.nombre
   if (spec.base === 'PT') n += ' Peruano'
-  if (spec.fruta) n += ' ' + FRUTA_POR_CODIGO[spec.fruta].nombre
+  const frs = spec.frutas && spec.frutas.length ? spec.frutas : (spec.fruta ? [spec.fruta] : [])
+  if (frs.length) n += ' ' + frs.map(f => FRUTA_POR_CODIGO[f].nombre).join('-')
   if (spec.energetica) n += ' · ' + ENERGETICAS[spec.energetica].nombre
   const ad = spec.addons.map(a => ADDONS[a].nombre.toLowerCase())
   if (ad.length) n += ' + ' + ad.join(', ')
