@@ -91,7 +91,7 @@ export const ESQUELETOS = {
   },
   TON: {
     nombre: 'Gin Tónica', refSinFruta: 'Gin Tonic',
-    addons: ['LI', 'GM', 'HI', 'PM', 'RR', 'AR', 'AE', 'CO', 'CL', 'CD', 'CN', 'PJ'],
+    addons: ['LI', 'GM', 'HI', 'PM', 'RR', 'AR', 'AE', 'CO', 'CL', 'CN', 'PJ'],
   },
   VIO: {
     nombre: 'Violetto Tonic', refSinFruta: 'Violetto tonic', addons: [],
@@ -136,23 +136,23 @@ export const ADDONS = {
   // `aplicarMovimientosStock` no lo encuentra y no descuenta, sin lanzar
   // error. Hay una consulta de verificación en el mensaje del commit.
   LI: { nombre: 'Limón', insumo: 'Jugo limón', cantidad: 20 },
-  GM: { nombre: 'Flor de guisante mariposa', insumo: 'Flor de guisante mariposa', cantidad: 1 },
-  HI: { nombre: 'Flor de Hibisco', insumo: 'Flor de Hibisco', cantidad: 1 },
+  GM: { nombre: 'Guisante de mariposa', insumo: 'Guisante de mariposa', cantidad: 1 },
+  HI: { nombre: 'Hibisco', insumo: 'Hibisco', cantidad: 1 },
   PM: { nombre: 'Pimienta Mix', insumo: 'Pimienta Mix', cantidad: 1 },
   RR: { nombre: 'Rosa Rugosa', insumo: 'Rosa Rugosa', cantidad: 1 },
   AR: { nombre: 'Arándano Rojo', insumo: 'Arándano Rojo', cantidad: 1 },
   AE: { nombre: 'Anís Estrella', insumo: 'Anís Estrella', cantidad: 1 },
   CO: { nombre: 'Semilla Coriandro', insumo: 'Semilla Coriandro', cantidad: 1 },
   CL: { nombre: 'Flor Caléndula', insumo: 'Flor Caléndula', cantidad: 1 },
-  CD: { nombre: 'Cardamomo', insumo: 'Cardamomo', cantidad: 1 },
-  CN: { nombre: 'Canela', insumo: 'Canela', cantidad: 1 },
+  // Un solo frasco premezclado en bodega, así que es un solo añadido.
+  CN: { nombre: 'Canela + cardamomo', insumo: 'Canela + cardamomo', cantidad: 1 },
   PJ: { nombre: 'Pimienta Jamaica', insumo: 'Pimienta Jamaica', cantidad: 1 },
 }
 
 // Añadidos que se miden en gramos; el resto va en ml. Se usa al crear
 // `receta_ingredientes` de un prototipo nuevo.
 const ADDONS_EN_GRAMOS = new Set(
-  ['JG', 'MT', 'GM', 'HI', 'PM', 'RR', 'AR', 'AE', 'CO', 'CL', 'CD', 'CN', 'PJ'])
+  ['JG', 'MT', 'GM', 'HI', 'PM', 'RR', 'AR', 'AE', 'CO', 'CL', 'CN', 'PJ'])
 
 // Combinaciones que YA son una receta publicada. Se resuelven directo, sin
 // derivar nada: menos superficie de error y el nombre le queda al cliente.
