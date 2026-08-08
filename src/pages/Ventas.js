@@ -200,6 +200,16 @@ function validarFormulaNeon(raw) {
   return { ok: true, codigo: canonico, diffDays }
 }
 
+// "· el 07/08 por Alinne" — cola humana para explicar por qué se rechaza un canje.
+function textoCanjePrevio(canje) {
+  if (!canje) return ''
+  const fecha = canje.fecha_canje
+    ? ' el ' + new Date(canje.fecha_canje).toLocaleDateString('es-CL')
+    : ''
+  const quien = canje.cliente_nombre ? ' por ' + canje.cliente_nombre : ''
+  return fecha + quien
+}
+
 // Normaliza teléfono: deja solo dígitos para que +56 9 1234 / 56912341234 / etc.
 // cuenten como el mismo número y la regla 1-teléfono-1-código no se burle con formato.
 function normalizarTelefono(tel) {
@@ -501,16 +511,31 @@ export default function Ventas() {
   const [neonEstado, setNeonEstado] = useState(null) // { ok, msg } feedback en vivo
   const [neonPrevio, setNeonPrevio] = useState(null) // { codigo, fecha_canje } si el teléfono ya canjeó
 
-  // Feedback en vivo del código NEON mientras se escribe (solo fórmula/caducidad,
-  // el chequeo de reúso por teléfono ocurre al guardar).
+  // Feedback en vivo del código NEON mientras se escribe: fórmula y caducidad al
+  // instante y, si esas pasan, una consulta a la base para ver si ESE código ya
+  // fue canjeado por alguien. Debounce para no pegarle en cada tecla. El chequeo
+  // de reúso por teléfono va aparte (efecto de abajo); ambos se repiten al guardar.
   useEffect(() => {
     if (!codigoNeon.trim()) { setNeonEstado(null); return }
     const r = validarFormulaNeon(codigoNeon)
-    if (r.ok) setNeonEstado({ ok: true, msg: `Código válido · -15% (hace ${r.diffDays} día${r.diffDays === 1 ? '' : 's'})` })
-    else if (r.motivo === 'formato') setNeonEstado({ ok: false, msg: 'Formato: NEON-DDMM-XXX' })
-    else if (r.motivo === 'expirado') setNeonEstado({ ok: false, msg: r.detalle })
-    else if (r.motivo === 'futuro') setNeonEstado({ ok: false, msg: r.detalle })
-    else setNeonEstado({ ok: false, msg: 'Código inválido (checksum)' })
+    if (!r.ok) {
+      if (r.motivo === 'formato') setNeonEstado({ ok: false, msg: 'Formato: NEON-DDMM-XXX' })
+      else if (r.motivo === 'expirado') setNeonEstado({ ok: false, msg: r.detalle })
+      else if (r.motivo === 'futuro') setNeonEstado({ ok: false, msg: r.detalle })
+      else setNeonEstado({ ok: false, msg: 'Código inválido (checksum)' })
+      return
+    }
+    setNeonEstado({ ok: true, msg: `Código válido · -15% (hace ${r.diffDays} día${r.diffDays === 1 ? '' : 's'})` })
+    let cancelado = false
+    const t = setTimeout(async () => {
+      const { data, error } = await supabase
+        .from('canjes_neon').select('codigo, cliente_nombre, fecha_canje')
+        .eq('codigo', r.codigo).limit(1)
+      if (cancelado || error) return
+      const usado = data?.[0]
+      if (usado) setNeonEstado({ ok: false, msg: 'Código ya canjeado' + textoCanjePrevio(usado) })
+    }, 400)
+    return () => { cancelado = true; clearTimeout(t) }
   }, [codigoNeon])
 
   // Aviso proactivo: apenas se carga el teléfono, chequea si ese número ya
@@ -680,16 +705,25 @@ export default function Ventas() {
         showToast('Para canjear un NEON necesitás el teléfono del cliente (1 teléfono = 1 código)')
         return
       }
-      // ¿Este teléfono ya canjeó algún NEON antes? Match por últimos 8 dígitos
-      // para no depender del formato con que se guardó el número.
-      const { data: previos, error: errPrevio } = await supabase
-        .from('canjes_neon').select('codigo, fecha_canje').ilike('telefono', '%' + u8).limit(1)
-      if (errPrevio) {
-        showToast('No pude verificar el código (error de red): ' + errPrevio.message)
+      // Dos rechazos posibles, y se informan por separado para que en caja se
+      // entienda el motivo:
+      //   1) el cliente (teléfono, por últimos 8 dígitos para no depender del
+      //      formato con que se guardó) ya canjeó cualquier NEON antes;
+      //   2) ese código puntual ya lo canjeó otra persona.
+      const [{ data: previos, error: errPrevio }, { data: usados, error: errUsado }] = await Promise.all([
+        supabase.from('canjes_neon').select('codigo, fecha_canje').ilike('telefono', '%' + u8).limit(1),
+        supabase.from('canjes_neon').select('codigo, cliente_nombre, telefono, fecha_canje').eq('codigo', v.codigo).limit(1),
+      ])
+      if (errPrevio || errUsado) {
+        showToast('No pude verificar el código (error de red): ' + (errPrevio || errUsado).message)
         return
       }
       if (previos?.length) {
-        showToast('Ese teléfono ya usó un NEON (' + previos[0].codigo + '). 1 código por cliente.')
+        showToast('Ese teléfono ya usó un NEON (' + previos[0].codigo + ')' + textoCanjePrevio(previos[0]) + '. 1 código por cliente.')
+        return
+      }
+      if (usados?.length) {
+        showToast('El código ' + v.codigo + ' ya fue canjeado' + textoCanjePrevio(usados[0]) + '. 1 canje por código.')
         return
       }
       neonAplicado = { codigo: v.codigo, telefono: tel }
