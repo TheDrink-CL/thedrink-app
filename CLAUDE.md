@@ -91,7 +91,23 @@ Debe devolver `[]` o error de permiso. Si devuelve filas, esa tabla está abiert
 - El PIN viejo (`PinLock`, `DeliveryLogin`) quedó obsoleto: era client-side y no
   protegía la base. No reactivarlo como si fuera seguridad real.
 
+## Integración con el LAB (lab.ncity.live)
+
+El LAB es un constructor de tragos que el cliente usa desde la web y manda el
+pedido por WhatsApp con un código por trago (`RON-MOJ-MAR-1L+CZ`). Esta app lo
+decodifica en `ImportarPedido` y materializa los prototipos como recetas.
+
+- `src/lib/labCodigos.js` — decodificador puro, sin base de datos.
+- `src/lib/labPrototipos.js` — crea la receta del prototipo bajo demanda.
+
+**La gramática del código vive en dos lugares**: acá y en el HTML del LAB
+(`Páginas web/app pedidos/deploy/v1/index.html`). Si cambias una, cambia la
+otra en el mismo movimiento o los pedidos se rechazan en silencio.
+
 ## Referencias
 
 - `BLINDAJE-pasos.md` — runbook de despliegue del blindaje (orden seguro).
 - `supabase/migrations/20260717_blindaje_rls.sql` — cierre de RLS, reutilizable.
+- `Páginas web/app pedidos/ESTADO.md` — estado completo del LAB: qué está
+  hecho, qué falta, deudas conocidas y trampas aprendidas. **Empezar por ahí**
+  si el trabajo toca el LAB o la integración.
