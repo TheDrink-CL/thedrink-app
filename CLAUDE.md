@@ -37,11 +37,12 @@ tablas de `public` y las cierra. Correrla de nuevo es seguro (idempotente).
 
 ### Verificar que no quedó nada abierto
 
-Correr en el SQL Editor. **Debe devolver 0 filas** (ninguna tabla accesible por
-anon/public):
+Correr en el SQL Editor. **Debe devolver exactamente 1 fila** — la excepción
+documentada abajo (`feedback` / `buzon_anon_insert` / INSERT). Cualquier otra
+fila es un hueco:
 
 ```sql
-select schemaname, tablename, policyname, roles
+select schemaname, tablename, policyname, cmd, roles
 from pg_policies
 where schemaname = 'public'
   and (roles @> '{anon}' or roles @> '{public}');
@@ -72,12 +73,35 @@ Debe devolver `[]` o error de permiso. Si devuelve filas, esa tabla está abiert
   navegador.
 - **La key `publishable` sí puede estar en el código.** Es pública por diseño;
   con RLS cerrado, sola no sirve para nada. No hace falta rotarla.
-- **No introducir accesos anónimos.** No existe ningún consumidor legítimo
-  anónimo de la base: la carta pública (`Páginas web/Carta`) es HTML estático y
-  no toca Supabase. Si algo "necesita" leer sin login, es un error de diseño.
+- **No introducir accesos anónimos.** La carta pública (`Páginas web/Carta`) y
+  el LAB son HTML estático y no tocan Supabase. Si algo "necesita" **leer** sin
+  login, es un error de diseño. Sin excepciones: no hay ni un solo SELECT
+  anónimo en toda la base.
 - **Registro público de usuarios: debe seguir DESACTIVADO** en Supabase Auth. Si
   se reabre, cualquiera se registra como `authenticated` y saltea todo el
   blindaje.
+
+## La única excepción anónima: `public.feedback`
+
+Migración: `supabase/migrations/20260809_feedback_anonimo.sql`.
+Escritor: `Páginas web/app pedidos/deploy/opinar/` → `opinar.ncity.live`.
+
+`anon` no tiene acceso a la base; tiene **una ranura**. La tabla es un buzón,
+no una ventana: solo `INSERT`, jamás `SELECT` (quien escribe no puede leer ni lo
+suyo), `GRANT` acotado **a nivel de columna** (`revisado`, `creado_en`, `id` e
+`ip_bucket` quedan fuera del alcance del cliente), sin FK a `clientes`,
+`ventas` ni `comandas`, largos con `CHECK` y tope de 5 envíos por IP y por día
+en un trigger.
+
+⚠ **Correr el blindaje mata el formulario en silencio.**
+`20260717_blindaje_rls.sql` borra todas las políticas de `public` y deja solo
+`authenticated`; la página empieza a devolver 401 y nadie se entera, porque
+nadie mira una página que ya funcionaba. **Después del blindaje, correr siempre
+la migración de feedback de nuevo.** Las dos son idempotentes y el orden
+blindaje → feedback deja todo correcto.
+
+Si aparece un segundo escritor anónimo, esta excepción hay que rediscutirla
+entera. No es una puerta que quede abierta "para lo que venga".
 
 ## Modelo de auth
 

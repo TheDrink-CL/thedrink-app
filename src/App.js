@@ -15,6 +15,7 @@ import Proyecciones from './pages/Proyecciones'
 import Conciliacion from './pages/Conciliacion'
 import Horas from './pages/Horas'
 import Alertas, { useAlertasCount } from './pages/Alertas'
+import Opiniones, { useOpinionesCount } from './pages/Opiniones'
 import MiDinero from './pages/MiDinero'
 import DeliveryLogin, { isDeliveryUnlocked } from './pages/DeliveryLogin'
 import DeliveryPanel from './pages/DeliveryPanel'
@@ -145,6 +146,14 @@ const TABS_MAS = [
       <path d="M13.7 21a2 2 0 0 1-3.4 0"/>
     </svg>
   )},
+  { id: 'opiniones', label: 'Opiniones', icon: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="9"/>
+      <path d="M8 14.5s1.5 2 4 2 4-2 4-2"/>
+      <line x1="9" y1="9.5" x2="9.01" y2="9.5"/>
+      <line x1="15" y1="9.5" x2="15.01" y2="9.5"/>
+    </svg>
+  )},
   { id: 'comandas-pendientes', label: 'Comandas', icon: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
@@ -190,6 +199,11 @@ export default function App() {
   // devuelve ni acepta nada.
   const [sesion, setSesion] = useState(null)
   const alertasCount = useAlertasCount()
+  const opinionesCount = useOpinionesCount()
+  // El badge del boton "Mas" suma todo lo que hay pendiente ahi adentro.
+  const pendientesMas = alertasCount + opinionesCount
+  const badgeDe = (id) =>
+    id === 'alertas' ? alertasCount : id === 'opiniones' ? opinionesCount : 0
 
   useEffect(() => {
     let vivo = true
@@ -260,6 +274,7 @@ export default function App() {
       {tab === 'conciliacion' && <Conciliacion />}
       {tab === 'horas'        && <Horas />}
       {tab === 'alertas'      && <Alertas />}
+      {tab === 'opiniones'    && <Opiniones />}
       {tab === 'mi-dinero'    && <MiDinero />}
       {tab === 'importar-pedido' && <ImportarPedido />}
       {tab === 'comandas-pendientes' && <ComandasPendientes />}
@@ -285,12 +300,12 @@ export default function App() {
                 }}>
                 <span style={{ width:20, height:20, display:'block' }}>{t.icon}</span>
                 <span style={{ flex:1, textAlign:'left' }}>{t.label}</span>
-                {t.id === 'alertas' && alertasCount > 0 && (
+                {badgeDe(t.id) > 0 && (
                   <span style={{
                     background: 'var(--pink)', color: '#fff',
                     fontSize: 10, fontWeight: 800, padding: '1px 7px',
                     borderRadius: 10, minWidth: 18, textAlign: 'center',
-                  }}>{alertasCount > 99 ? '99+' : alertasCount}</span>
+                  }}>{badgeDe(t.id) > 99 ? '99+' : badgeDe(t.id)}</span>
                 )}
               </button>
             ))}
@@ -337,7 +352,7 @@ export default function App() {
             <circle cx="12" cy="19" r="1" fill="currentColor"/>
           </svg>
           {"Mas"}
-          {alertasCount > 0 && (
+          {pendientesMas > 0 && (
             <span style={{
               position: 'absolute', top: 2, right: 6,
               minWidth: 16, height: 16, padding: '0 4px',
@@ -345,7 +360,7 @@ export default function App() {
               color: '#fff', fontSize: 9, fontWeight: 800,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               lineHeight: 1, border: '1.5px solid var(--bg)',
-            }}>{alertasCount > 99 ? '99+' : alertasCount}</span>
+            }}>{pendientesMas > 99 ? '99+' : pendientesMas}</span>
           )}
         </button>
       </nav>
