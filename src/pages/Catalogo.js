@@ -1,6 +1,9 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { calcularCostoReceta, formatCLP, formatPct } from '../lib/calculos'
+import {
+  norm, clasificarReceta, opcionesConteo, ORDEN_BASES, ORDEN_FAMILIAS,
+} from '../lib/recetasFiltros'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -571,19 +574,31 @@ export default function Catalogo() {
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState('')
 
+  // ── Filtros de la lista ──────────────────────────────────────────────────
+  // `origen` arranca en 'carta' a propósito: los prototipos del LAB se crean
+  // solos al venderse y son los que hacen crecer la lista sin control. El chip
+  // con su cuenta queda a la vista para traerlos de vuelta en un toque.
+  const [busqueda, setBusqueda] = useState('')
+  const [filtroBase, setFiltroBase] = useState('')
+  const [filtroFamilia, setFiltroFamilia] = useState('')
+  const [filtroOrigen, setFiltroOrigen] = useState('carta')
+
   useEffect(() => { load() }, [])
 
   async function load() {
     setLoading(true)
     const [{ data: r }, { data: i }, { data: ing }, { data: cfg }, { data: vts }] = await Promise.all([
       supabase.from('recetas').select('*').order('nombre'),
-      supabase.from('insumos').select('*'),
+      supabase.from('insumos').select('*').order('nombre'),
       supabase.from('receta_ingredientes').select('*'),
       supabase.from('config').select('*'),
       supabase.from('ventas').select('receta_nombre'),
     ])
     setRecetas(r || [])
-    setInsumos(i || [])
+    // Alfabético con reglas del español: el orden de Postgres depende del
+    // collation y deja las mayúsculas y las tildes donde no se esperan. Este
+    // es el orden con el que se ve el desplegable de ingredientes.
+    setInsumos([...(i || [])].sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '', 'es', { sensitivity: 'base' })))
     setIngredientes(ing || [])
     // Contar ventas por receta para bloquear eliminación si hay histórico
     const conteo = {}
@@ -671,9 +686,51 @@ export default function Catalogo() {
 
   const getPrecio = (receta) => receta.precio_venta || 9000
 
+  // ── Clasificación para los filtros ───────────────────────────────────────
+  // Se calcula una sola vez por carga: recorrer los ingredientes de cada
+  // receta en cada tecleo de la búsqueda haría lagear la lista.
+  const clasificacion = useMemo(() => {
+    const porReceta = {}
+    ingredientes.forEach(i => {
+      if (i.insumo_nombre === 'ENVASE') return
+      ;(porReceta[i.receta_nombre] = porReceta[i.receta_nombre] || []).push(i)
+    })
+    const mapa = new Map()
+    recetas.forEach(r => mapa.set(r.nombre, clasificarReceta(r, porReceta[r.nombre] || [])))
+    return mapa
+  }, [recetas, ingredientes])
+
   if (loading) return <div className="loading">Cargando recetas...</div>
 
   const recetasFiltradas = recetas.filter(r => r.nombre !== 'ENVASE')
+
+  // Origen primero: los chips de tipo y familia cuentan sobre lo que el origen
+  // dejó a la vista, así el número del chip nunca miente sobre lo que se ve.
+  const hayPrototipos = recetasFiltradas.some(r => r.es_prototipo)
+  const porOrigen = recetasFiltradas.filter(r =>
+    filtroOrigen === 'todas' ? true
+      : filtroOrigen === 'lab' ? !!r.es_prototipo
+        : !r.es_prototipo)
+
+  const q = norm(busqueda)
+  const visibles = porOrigen.filter(r => {
+    const c = clasificacion.get(r.nombre)
+    if (!c) return true
+    if (filtroBase && c.base !== filtroBase) return false
+    if (filtroFamilia && c.familia !== filtroFamilia) return false
+    if (q && !c.busqueda.includes(q)) return false
+    return true
+  })
+
+  const opcionesBase = opcionesConteo(
+    porOrigen.map(r => clasificacion.get(r.nombre)?.base).filter(Boolean), ORDEN_BASES)
+  const opcionesFamilia = opcionesConteo(
+    porOrigen.map(r => clasificacion.get(r.nombre)?.familia).filter(Boolean), ORDEN_FAMILIAS)
+
+  const hayFiltroActivo = !!(q || filtroBase || filtroFamilia || filtroOrigen !== 'carta')
+  const limpiarFiltros = () => {
+    setBusqueda(''); setFiltroBase(''); setFiltroFamilia(''); setFiltroOrigen('carta')
+  }
 
   // Vista detalle + edición
   if (seleccionada) {
@@ -764,15 +821,96 @@ export default function Catalogo() {
         </button>
       </div>
 
+      {/* ── Buscador y filtros ─────────────────────────────────────────── */}
+      <div className="card" style={{ marginBottom:10 }}>
+        <div style={{ position:'relative', marginBottom: 10 }}>
+          {/* type="text" y no "search": el buscador nativo de Chrome agrega su
+              propia X y quedarían dos botones de limpiar encimados. */}
+          <input type="text" className="form-input" value={busqueda}
+            placeholder="Buscar por nombre o ingrediente..."
+            onChange={e => setBusqueda(e.target.value)}
+            style={{ paddingRight: busqueda ? 34 : undefined }} />
+          {busqueda && (
+            <button type="button" onClick={() => setBusqueda('')}
+              aria-label="Limpiar búsqueda"
+              style={{ position:'absolute', right:8, top:'50%', transform:'translateY(-50%)', background:'none', border:'none', color:'var(--muted)', fontSize:18, lineHeight:1, cursor:'pointer', padding:4 }}>×</button>
+          )}
+        </div>
+
+        {opcionesBase.length > 1 && (
+          <div className="chip-row" style={{ marginBottom:8 }}>
+            {opcionesBase.map(op => (
+              <button key={op.valor} type="button"
+                className={`chip ${filtroBase === op.valor ? 'selected' : ''}`}
+                onClick={() => setFiltroBase(v => v === op.valor ? '' : op.valor)}>
+                {op.valor} <span style={{ opacity:0.6 }}>{op.n}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {opcionesFamilia.length > 1 && (
+          <div className="chip-row" style={{ marginBottom: hayPrototipos ? 8 : 0 }}>
+            {opcionesFamilia.map(op => (
+              <button key={op.valor} type="button"
+                className={`chip ${filtroFamilia === op.valor ? 'selected' : ''}`}
+                onClick={() => setFiltroFamilia(v => v === op.valor ? '' : op.valor)}>
+                {op.valor} <span style={{ opacity:0.6 }}>{op.n}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Carta vs prototipos: solo aparece si el LAB ya creó alguno */}
+        {hayPrototipos && (
+          <div className="chip-row" style={{ marginBottom:0 }}>
+            {[
+              { id:'carta', label:'Carta', n: recetasFiltradas.filter(r => !r.es_prototipo).length },
+              { id:'lab',   label:'Prototipos LAB', n: recetasFiltradas.filter(r => r.es_prototipo).length },
+              { id:'todas', label:'Todas', n: recetasFiltradas.length },
+            ].map(op => (
+              <button key={op.id} type="button"
+                className={`chip ${filtroOrigen === op.id ? 'selected' : ''}`}
+                onClick={() => setFiltroOrigen(op.id)}>
+                {op.label} <span style={{ opacity:0.6 }}>{op.n}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6, padding:'0 2px' }}>
+        <div style={{ fontSize:12, color:'var(--muted)' }}>
+          {visibles.length} de {recetasFiltradas.length} recetas
+        </div>
+        {hayFiltroActivo && (
+          <button type="button" onClick={limpiarFiltros}
+            style={{ background:'none', border:'none', color:'var(--cyan)', fontSize:12, fontWeight:600, cursor:'pointer', padding:0 }}>
+            Limpiar filtros
+          </button>
+        )}
+      </div>
+
       <div className="card">
         {recetasFiltradas.length === 0 && (
           <div style={{ color:'var(--muted)', textAlign:'center', padding:20 }}>Sin recetas registradas</div>
         )}
-        {recetasFiltradas.map(r => {
+        {recetasFiltradas.length > 0 && visibles.length === 0 && (
+          <div style={{ color:'var(--muted)', textAlign:'center', padding:20, lineHeight:1.5 }}>
+            Ningún trago calza con esta búsqueda.
+            <br />
+            <button type="button" onClick={limpiarFiltros}
+              style={{ background:'none', border:'none', color:'var(--cyan)', fontSize:13, fontWeight:600, cursor:'pointer', marginTop:6, padding:0 }}>
+              Limpiar filtros
+            </button>
+          </div>
+        )}
+        {visibles.map(r => {
           const costo = getCosto(r.nombre)
           const precio = getPrecio(r)
           const margen = precio > 0 ? (precio - costo) / precio : 0
           const color = margenColor(margen)
+          const c = clasificacion.get(r.nombre)
           return (
             <div className="list-item" key={r.nombre}
               onClick={() => setSeleccionada(r.nombre)}
@@ -783,9 +921,14 @@ export default function Catalogo() {
                   <span style={{ fontSize:10, fontWeight:700, color:'var(--muted)', background:'rgba(255,255,255,0.05)', padding:'1px 6px', borderRadius:5, letterSpacing:0.3 }}>
                     {r.envase_formato || '1lt'}
                   </span>
+                  {r.es_prototipo && (
+                    <span style={{ fontSize:10, fontWeight:700, color:'var(--purple)', background:'rgba(168,85,247,0.12)', padding:'1px 6px', borderRadius:5, letterSpacing:0.3 }}>
+                      LAB
+                    </span>
+                  )}
                 </div>
                 <div className="list-item-sub">
-                  Costo: {formatCLP(costo)} · Precio: {formatCLP(precio)}
+                  {c && `${c.base} · ${c.familia} · `}Costo: {formatCLP(costo)} · Precio: {formatCLP(precio)}
                 </div>
               </div>
               <div className="list-item-right">
@@ -797,9 +940,10 @@ export default function Catalogo() {
         })}
       </div>
 
-      {/* Resumen márgenes */}
-      {recetasFiltradas.length > 0 && (() => {
-        const datos = recetasFiltradas.map(r => {
+      {/* Resumen márgenes — sobre lo que se está viendo, no sobre todo el
+          catálogo: filtrar por "Ron" y leer el margen de otra cosa confunde. */}
+      {visibles.length > 0 && (() => {
+        const datos = visibles.map(r => {
           const costo = getCosto(r.nombre)
           const precio = getPrecio(r)
           return precio > 0 ? (precio - costo) / precio : 0
