@@ -25,7 +25,10 @@
 // alguien edita una receta acá, el LAB no se entera: el descriptor le mentiría
 // al cliente y el margen quedaría mal calculado. La solución es generar el LAB
 // desde esta base; hasta que eso exista, cualquier cambio de receta hay que
-// replicarlo a mano en `Páginas web/app pedidos/deploy/v1/index.html`.
+// replicarlo a mano en `Páginas web/app pedidos/deploy/v2/lab-motor.js`, que
+// es donde vive el catálogo del LAB (el `index.html` de al lado es solo la
+// interfaz). La carpeta de versión cambia cada vez que se publica: la vigente
+// es la de número más alto.
 
 // ─── Diccionarios del código ─────────────────────────────────────────────────
 
@@ -57,44 +60,45 @@ export const BASE_POR_CODIGO = {
 export const ESQUELETOS = {
   MOJ: {
     nombre: 'Mojito', refConFruta: 'Mojito maracuya', refSinFruta: 'Mojito',
-    addons: ['CC', 'CZ', 'JG', 'MT'],
+    addons: ['CC', 'CZ', 'JG', 'MT', 'LX', 'NJ'],
   },
   COL: {
     nombre: 'Colada', refConFruta: 'Mango Colada',
-    gomaPorFruta: { PIN: 90 }, addons: ['CZ'],
+    gomaPorFruta: { PIN: 90 }, addons: ['CZ', 'LX', 'NJ'],
   },
   DAI: {
     nombre: 'Daikiri', refConFruta: 'Daikiri frambuesa',
-    gomaPorFruta: { MAR: 120, ARA: 120 }, addons: ['JG', 'CZ'],
+    gomaPorFruta: { MAR: 120, ARA: 120 }, addons: ['JG', 'CZ', 'LX', 'NJ'],
   },
   SOU: {
     nombre: 'Sour', refConFruta: 'Mango Sour', refSinFruta: 'Pisco sour',
-    refSinFrutaAlt: { PT: 'Sour Peruano' }, addons: ['AG'],
+    refSinFrutaAlt: { PT: 'Sour Peruano' }, addons: ['AG', 'LX', 'NJ'],
   },
   ENE: {
     nombre: 'Energético', refConFruta: 'Tropical Gin',
-    addons: ['JG', 'CZ', 'MT'],
+    addons: ['JG', 'CZ', 'MT', 'LX', 'NJ'],
     // La energética va incluida (1 por trago), no es añadido: por eso viaja
     // como token propio del código y no dentro de `addons`.
     energeticas: ['RY', 'RB'],
   },
   JAG: {
     nombre: 'Mojito Jäger', refConFruta: 'Mojito Jager Maracuyá',
-    refSinFruta: 'Mojito Jager', addons: ['MT', 'JG'],
+    refSinFruta: 'Mojito Jager', addons: ['MT', 'JG', 'LX', 'NJ'],
   },
   FZM: {
     nombre: 'Frozen Mojito', refSinFruta: 'Frozen mojito (1lt)',
-    addons: ['CC', 'JG'],
+    addons: ['CC', 'JG', 'LX', 'NJ'],
   },
   FRS: {
-    nombre: 'Frost', refConFruta: 'Berry Frost (1lt)', addons: ['JG'],
+    nombre: 'Frost', refConFruta: 'Berry Frost (1lt)', addons: ['JG', 'LX', 'NJ'],
   },
   TON: {
     nombre: 'Gin Tónica', refSinFruta: 'Gin Tonic',
-    addons: ['LI', 'GM', 'HI', 'PM', 'RR', 'AR', 'AE', 'CO', 'CL', 'CN', 'PJ'],
+    addons: ['LI', 'PP', 'GM', 'HI', 'PM', 'RR', 'AR', 'AE', 'CO', 'CL', 'CN', 'PJ'],
   },
   VIO: {
-    nombre: 'Violetto Tonic', refSinFruta: 'Violetto tonic', addons: [],
+    nombre: 'Violetto Tonic', refSinFruta: 'Violetto tonic',
+    addons: ['LX', 'NJ'],
   },
 }
 
@@ -128,6 +132,21 @@ export const ADDONS = {
   MT: { nombre: 'Menta extra', insumo: 'Menta fresca', cantidad: 5 },
   AG: { nombre: 'Angostura extra', insumo: 'Angostura', cantidad: 2.4 },
 
+  // ── Transversales ──────────────────────────────────────────────────────
+  // Los únicos dos añadidos que van en TODOS los esqueletos menos el gin
+  // tónica, que ya trae su propio limón (`LI`) y no lleva jugo.
+  // El ajuste de hielo es el mismo criterio del coco y el curazao: entran
+  // 60 ml, así que algo tiene que salir. El sour son 475 ml y su hielo es
+  // la mitad que el de un litro, por eso ahí se recorta la mitad.
+  LX: {
+    nombre: 'Limón extra', insumo: 'Jugo limón', cantidad: 60,
+    ajuste: { SOU: { Hielo: -25 }, DEFECTO: { Hielo: -50 } },
+  },
+  NJ: {
+    nombre: 'Jugo de naranja', insumo: 'Jugo naranja', cantidad: 60,
+    ajuste: { SOU: { Hielo: -25 }, DEFECTO: { Hielo: -50 } },
+  },
+
   // ── Botánicos del gin tónica ───────────────────────────────────────────
   // Van por dashes y se combinan libremente. ⚠ 1 dash = 1 g es provisorio
   // por acuerdo: cuando se mida de verdad se cambia acá y el descuento de
@@ -136,6 +155,10 @@ export const ADDONS = {
   // `aplicarMovimientosStock` no lo encuentra y no descuenta, sin lanzar
   // error. Hay una consulta de verificación en el mensaje del commit.
   LI: { nombre: 'Limón', insumo: 'Jugo limón', cantidad: 20 },
+  // El pepino se lleva por PEPINOS ENTEROS en `insumos`, no en gramos: hay un
+  // pepino y de ahí salen rodajas. Por eso la cantidad es 0.1 —tres rodajas—
+  // y no entra en ADDONS_EN_GRAMOS. Un pepino rinde 10 tragos.
+  PP: { nombre: 'Pepino', insumo: 'Pepino', cantidad: 0.1 },
   GM: { nombre: 'Guisante de mariposa', insumo: 'Guisante de mariposa', cantidad: 1 },
   HI: { nombre: 'Hibisco', insumo: 'Hibisco', cantidad: 1 },
   PM: { nombre: 'Pimienta Mix', insumo: 'Pimienta Mix', cantidad: 1 },
@@ -153,6 +176,16 @@ export const ADDONS = {
 // `receta_ingredientes` de un prototipo nuevo.
 const ADDONS_EN_GRAMOS = new Set(
   ['JG', 'MT', 'GM', 'HI', 'PM', 'RR', 'AR', 'AE', 'CO', 'CL', 'CN', 'PJ'])
+
+// Añadidos que se cuentan por pieza entera. Hoy solo el pepino: la bodega
+// tiene pepinos, no gramos de pepino, y la unidad tiene que calzar con
+// `insumos.unidad` o el descuento queda mal escalado.
+const ADDONS_EN_UNIDADES = new Set(['PP'])
+
+// Cuántas rodajas delgadas salen de un pepino. No está medido y no hace falta:
+// solo traduce entre lo que cuenta la bodega (pepinos) y lo que lee el
+// bartender (rodajas). El mismo número vive en el `lab-motor.js` del LAB.
+export const RODAJAS_POR_PEPINO = 30
 
 // Combinaciones que YA son una receta publicada. Se resuelven directo, sin
 // derivar nada: menos superficie de error y el nombre le queda al cliente.
@@ -328,7 +361,8 @@ export function construirBuild(spec, ingredientesPorReceta) {
     else build.push({
       insumo_nombre: A.insumo,
       cantidad: A.cantidad,
-      unidad: ADDONS_EN_GRAMOS.has(cod) ? 'g' : 'ml',
+      unidad: ADDONS_EN_UNIDADES.has(cod) ? 'unidad'
+            : ADDONS_EN_GRAMOS.has(cod) ? 'g' : 'ml',
     })
 
     const ajuste = A.ajuste ? (A.ajuste[spec.esq] || A.ajuste.DEFECTO) : null
@@ -469,9 +503,20 @@ export function parsearMensajeLab(texto) {
   return { items, despacho, esLab: /NCITY_LAB/i.test(texto) }
 }
 
+// Insumos cuya cantidad no se entiende leída como número pelado. El pepino se
+// descuenta en pepinos enteros, así que la comanda diría "Pepino 0.1", que no
+// le sirve a nadie parado en la barra: lo que hay que cortar son rodajas.
+const DOSIS_LEGIBLE = {
+  Pepino: q => `${Math.round(q * RODAJAS_POR_PEPINO)} rodajas`,
+}
+
 // Texto de una línea por insumo, para la comanda del bartender.
 export function buildLegible(ingredientes) {
   return (ingredientes || [])
-    .map(i => `${i.insumo_nombre} ${Number(i.cantidad) % 1 === 0 ? i.cantidad : i.cantidad.toFixed(1)}`)
+    .map(i => {
+      const fmt = DOSIS_LEGIBLE[i.insumo_nombre]
+      if (fmt) return `${i.insumo_nombre} ${fmt(Number(i.cantidad))}`
+      return `${i.insumo_nombre} ${Number(i.cantidad) % 1 === 0 ? i.cantidad : i.cantidad.toFixed(1)}`
+    })
     .join(' · ')
 }
