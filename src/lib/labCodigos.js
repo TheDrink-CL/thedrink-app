@@ -50,6 +50,7 @@ export const BASE_POR_CODIGO = {
   PT: 'Pisco Tabernero',
   GIN: 'Gin',
   JGR: 'Jägermeister',
+  TEQ: 'Tequila',
   ZER: 'Sin alcohol',
 }
 
@@ -85,8 +86,25 @@ export const ESQUELETOS = {
     nombre: 'Mojito Jäger', refConFruta: 'Mojito Jager Maracuyá',
     refSinFruta: 'Mojito Jager', addons: ['MT', 'JG', 'LX', 'NJ'],
   },
+  // El LAB publica margaritas desde el 17-ago (lab-motor.js: ESQ.margarita) y
+  // acá no existía el esqueleto: `parsearCodigo` devolvía null y el pedido
+  // llegaba como texto suelto, a digitar a mano. Al revés que en el daikiri, la
+  // excepción de goma son las frutas DULCES: `Margarita Mango` y
+  // `Margarita Frutilla` no llevan goma; la piña va con ellas por criterio.
+  MRG: {
+    nombre: 'Margarita Frozen', refConFruta: 'Margarita Maracuyá', refSinFruta: 'Margarita',
+    gomaPorFruta: { MAN: 0, FRU: 0, PIN: 0 },
+    addons: ['CZ', 'JG', 'LX', 'NJ'],
+  },
   FZM: {
     nombre: 'Frozen Mojito', refSinFruta: 'Frozen mojito (1lt)',
+    // `Frozen mojito maracuya (1lt)` es un molde, no un trago de la carta: va
+    // con `es_prototipo` y vive en la pestaña "Prototipos LAB". Existe porque
+    // el LAB ofrece el frozen mojito con fruta desde siempre y acá no había
+    // molde con pulpa: los seis códigos con fruta se rechazaban en el parseo
+    // y el pedido no se podía importar. La maracuyá es solo el relleno —
+    // `construirBuild` cambia la pulpa por la pedida y respeta el total.
+    refConFruta: 'Frozen mojito maracuya (1lt)',
     addons: ['CC', 'JG', 'LX', 'NJ'],
   },
   FRS: {
@@ -125,6 +143,11 @@ export const ADDONS = {
     ajuste: {
       MOJ: { 'Ron Bacardí': -30, 'Agua con gas': -15, Hielo: -100 },
       COL: { 'Ron Bacardí': -30, FRUTA: -60 },
+      // En la margarita el curazao REEMPLAZA al triple sec, no se suma: así está
+      // la receta `Margarita Blue`, que lleva curazao 120 y cero triple sec. Sin
+      // este ajuste saldría con los dos licores — otro trago — y descontaría de
+      // más. El LAB ya lo resuelve así (lab-motor.js, ajuste de curazao en MRG).
+      MRG: { 'Triple Sec': -120 },
       DEFECTO: { 'Ron Bacardí': -30 },
     },
   },
@@ -214,6 +237,11 @@ export const GEMELOS = {
   'GIN-TON-NAT-1L': 'Gin Tonic',
   'GIN-ENE-MAR-1L+RY': 'Tropical Gin',
   'GIN-ENE-FRA-1L+RB': 'Berry Bomb',
+  'TEQ-MRG-NAT-1L': 'Margarita',
+  'TEQ-MRG-FRU-1L': 'Margarita Frutilla',
+  'TEQ-MRG-MAN-1L': 'Margarita Mango',
+  'TEQ-MRG-MAR-1L': 'Margarita Maracuyá',
+  'TEQ-MRG-NAT-1L+CZ': 'Margarita Blue',
   'JGR-JAG-NAT-1L': 'Mojito Jager',
   'JGR-JAG-MAR-1L': 'Mojito Jager Maracuyá',
   'ZER-FZM-NAT-1L': 'Frozen mojito (1lt)',

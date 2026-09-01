@@ -27,7 +27,7 @@ const CATEGORIAS_SALIDA = [
   'Publicidad', 'Personal', 'Equipamiento', 'Suscripciones', 'Otro gasto'
 ]
 const CATEGORIAS_ENTRADA = [
-  'Venta', 'Aporte socio', 'Otro ingreso'
+  'Otro ingreso', 'Aporte socio', 'Delivery', 'Venta'
 ]
 
 export default function Caja() {
@@ -37,7 +37,11 @@ export default function Caja() {
   const [form, setForm] = useState({
     fecha: (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` })(),
     tipo: 'entrada',
-    categoria: 'Venta',
+    // NO 'Venta' por defecto: el saldo excluye esa categoría (las ventas vienen
+    // de la tabla `ventas`), así que un ingreso registrado con el default puesto
+    // aparecía en verde en el historial y no movía el saldo. Parecía que la app
+    // se comía la plata.
+    categoria: 'Otro ingreso',
     monto: '',
     descripcion: ''
   })
@@ -63,7 +67,12 @@ export default function Caja() {
     // el Dashboard, para que ambas pantallas muestren el MISMO saldo. El costo
     // de delivery vive en `ordenes`, no en las filas de `ventas`.
     const vtsEnr = enriquecerVentasConDelivery(vts || [], ordenes || [])
-    const totalVentas = (vts || []).reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0)
+    // Usar vtsEnr, no vts: era la razón de que Caja y Dashboard mostraran saldos
+    // distintos. Además, las 4 ventas legacy sin orden_id traen `delivery` en la
+    // fila Y ese mismo costo está como salida "Transporte / Uber" en caja, así
+    // que el saldo lo restaba dos veces. enriquecerVentasConDelivery deja esas
+    // filas en 0 y el costo queda contado una sola vez, desde su movimiento.
+    const totalVentas = vtsEnr.reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0)
     // Delivery desde el corte: se suma el cobro al cliente y se resta el costo (Uber/motoboy).
     const ordCorte = (ordenes || []).filter(o => o.fecha >= FECHA_CORTE_DELIVERY)
     const totalDeliveryCobrado = ordCorte.reduce((s, o) => s + (parseFloat(o.delivery_cobrado) || 0), 0)
@@ -102,7 +111,7 @@ export default function Caja() {
   }
 
   const handleTipo = (tipo) => {
-    setForm(f => ({ ...f, tipo, categoria: tipo === 'entrada' ? 'Venta' : 'Publicidad' }))
+    setForm(f => ({ ...f, tipo, categoria: tipo === 'entrada' ? 'Otro ingreso' : 'Publicidad' }))
   }
 
   const handleSubmit = async (e) => {

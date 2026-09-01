@@ -616,7 +616,10 @@ export default function Compras() {
     if (compra && compra.tipo !== 'activo_fijo') {
       await ajustarStockPorCompra(compra.insumo_nombre, compra.cantidad, -1)
     }
-    showToast('Compra eliminada · PPP recalculado · stock ajustado')
+    // OJO: el trigger que recalcula costo_ppp es `after insert`, así que borrar
+    // una compra NO recalcula el PPP — la compra borrada sigue pesando en el
+    // costo promedio. No prometer en el toast algo que no pasa.
+    showToast('Compra eliminada · stock ajustado · el PPP NO se recalcula')
     setConfirmar(null)
     loadData()
   }

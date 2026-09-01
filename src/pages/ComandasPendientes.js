@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { descontarStock } from '../lib/inventario'
+import { descontarStock, mensajeStock } from '../lib/inventario'
 import { construirEsVip } from '../lib/clientesVip'
 
 const fechaHoy = () => {
@@ -104,9 +104,8 @@ function ModalVenta({ comanda, recetas, onGuardar, onCerrar }) {
 
       // Descontar inventario por los ingredientes consumidos en esta venta.
       const resStock = await descontarStock(validos)
-      if (resStock && !resStock.ok) {
-        alert('Venta registrada, pero no se pudo descontar stock de: ' + resStock.fallidos.join(', '))
-      }
+      const avisoStock = mensajeStock(resStock)
+      if (avisoStock) alert('Venta registrada · OJO con el stock: ' + avisoStock)
 
       // Vincular la comanda con la venta creada. NO archivamos automáticamente:
       // si la comanda estaba "pendiente" sigue ahí (la TV la sigue mostrando con

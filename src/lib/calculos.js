@@ -39,8 +39,11 @@ export function calcularCostoReceta(ingredientes, insumos, merma = 0.08, costoEn
     // Se pasó un objeto { envase_formato, costoLegacy }
     const formato = costoEnvase.envase_formato
     const insumoEnvase = formato === '475ml' ? 'frascos 475ml' : 'frascos 1lt'
-    const pppEnvase = insumoMap[insumoEnvase]
-    if (pppEnvase != null && pppEnvase > 0) {
+    // insumoMap guarda objetos { ppp, aplicaMerma }, no números: hay que sacar
+    // el .ppp. Comparar el objeto contra 0 daba siempre false y TODAS las recetas
+    // caían al costoLegacy, así que el frasco de 475ml se cobraba como uno de 1lt.
+    const pppEnvase = insumoMap[insumoEnvase]?.ppp || 0
+    if (pppEnvase > 0) {
       costoEnvaseFinal = pppEnvase
     } else if (costoEnvase.costoLegacy != null) {
       costoEnvaseFinal = costoEnvase.costoLegacy

@@ -53,10 +53,11 @@ export default function Stock() {
   useEffect(() => { loadData() }, [])
 
   async function loadData() {
-    const [{ data: ins }, { data: vts }, { data: recIng }] = await Promise.all([
+    const [{ data: ins }, { data: vts }, { data: recIng }, { data: cfg }] = await Promise.all([
       supabase.from('insumos').select('*').order('nombre'),
       supabase.from('ventas').select('fecha, receta_nombre, litros').order('fecha', { ascending: false }).limit(200),
       supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad'),
+      supabase.from('config').select('clave, valor'),
     ])
     setInsumos(ins || [])
 
@@ -76,7 +77,10 @@ export default function Stock() {
 
     // Calcular consumo total de insumos en el período
     const consumoTotal = {}
-    const MERMA = 0.08
+    // Merma desde config: los días de cobertura que muestra esta pantalla tienen
+    // que salir de la misma merma con la que se costea y se descuenta bodega.
+    const cfgMap = Object.fromEntries((cfg || []).map(c => [c.clave, c.valor]))
+    const MERMA = parseFloat(cfgMap.merma_pct) || 0.08
     ;(recIng || []).forEach(ing => {
       if (!litrosPorReceta[ing.receta_nombre]) return
       const litros = litrosPorReceta[ing.receta_nombre]

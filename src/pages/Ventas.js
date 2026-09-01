@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { descontarStock, reintegrarStock } from '../lib/inventario'
+import { descontarStock, reintegrarStock, mensajeStock } from '../lib/inventario'
 import { formatCLP } from '../lib/calculos'
 import { descargarCSV, BotonExportar } from '../lib/exportar'
 
@@ -327,9 +327,8 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel, showToast }) {
 
     // Descontar stock por los nuevos ítems
     const resStock = await descontarStock(itemsValidos)
-    if (resStock && !resStock.ok) {
-      showToast('Pedido actualizado, pero no se ajustó el stock de: ' + resStock.fallidos.join(', '))
-    }
+    const avisoStock = mensajeStock(resStock)
+    if (avisoStock) showToast('Pedido actualizado · OJO con el stock: ' + avisoStock)
 
     setSaving(false)
     onSave()
@@ -904,9 +903,8 @@ export default function Ventas() {
     // Descuento de stock por ingredientes utilizados. La venta ya quedo
     // registrada; si el stock no se ajusta, avisamos pero no bloqueamos.
     const resStock = await descontarStock(itemsValidos)
-    if (resStock && !resStock.ok) {
-      showToast('Pedido guardado, pero no se ajusto el stock de: ' + resStock.fallidos.join(', '))
-    }
+    const avisoStock = mensajeStock(resStock)
+    if (avisoStock) showToast('Pedido guardado · OJO con el stock: ' + avisoStock)
 
     showToast(neonAplicado
       ? `Pedido registrado ✓ · NEON aplicado (-${formatCLP(Math.round(descuentoNeonTotal))})`

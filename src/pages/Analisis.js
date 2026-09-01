@@ -742,7 +742,7 @@ function HorasActivas({ ordenes }) {
 
 // ─── Bloque: Proyección de demanda y compras sugeridas ───────────────────────
 
-function ProyeccionDemanda({ ventas, recetaIngredientes, insumos }) {
+function ProyeccionDemanda({ ventas, recetaIngredientes, insumos, config }) {
   const [expandido, setExpandido] = useState(false)
 
   if (!ventas || ventas.length === 0) return null
@@ -764,7 +764,9 @@ function ProyeccionDemanda({ ventas, recetaIngredientes, insumos }) {
   Object.entries(porReceta).forEach(([r, total]) => { promedioSemanal[r] = total / semanas })
 
   const insumosNecesarios = {}
-  const MERMA = 0.08
+  // Misma merma que usa el costeo y el descuento de bodega. Si el dueño la
+  // cambia en Ajustes, las compras sugeridas tienen que moverse con ella.
+  const MERMA = parseFloat(config?.merma_pct) || 0.08
   Object.entries(promedioSemanal).forEach(([receta, litros]) => {
     const ings = (recetaIngredientes || []).filter(i => i.receta_nombre === receta && i.insumo_nombre !== 'ENVASE')
     ings.forEach(ing => {
@@ -1703,7 +1705,7 @@ export default function Analisis() {
           )}
 
           <MetricasDistancia ordenes={ordenes} />
-          <ProyeccionDemanda ventas={ventas} recetaIngredientes={recetaIngredientes} insumos={insumos} />
+          <ProyeccionDemanda ventas={ventas} recetaIngredientes={recetaIngredientes} insumos={insumos} config={config} />
           <EvolucionCostos compras={comprasDetalle} />
         </>
       )}

@@ -12,7 +12,21 @@
 
 import { supabase } from './supabase'
 
-const MERMA = 0.08
+// Fallback si `config.merma_pct` no está en la base. La merma REAL se lee de
+// config vía cargarMerma(): si el dueño la cambia en Ajustes, el costeo y el
+// descuento de bodega tienen que moverse juntos o los márgenes dejan de cuadrar.
+const MERMA_DEFAULT = 0.08
+
+// Lee la merma configurada. Se cachea por sesión: cambiarla es raro y esto se
+// llama en cada venta.
+let _mermaCache = null
+export async function cargarMerma() {
+  if (_mermaCache != null) return _mermaCache
+  const { data } = await supabase.from('config').select('clave, valor').eq('clave', 'merma_pct')
+  const v = parseFloat(data?.[0]?.valor)
+  _mermaCache = Number.isFinite(v) ? v : MERMA_DEFAULT
+  return _mermaCache
+}
 
 // ─── Movimientos por VENTAS ──────────────────────────────────────────────────
 // Calcula cuánto descontar/reintegrar de cada insumo para un set de ítems.
@@ -23,7 +37,7 @@ const MERMA = 0.08
 // "envase devuelto" (en cuyo caso el frasco vuelve al stock al instante).
 // Acepta opcionalmente `insumosMap` = { nombre.toLowerCase: { aplica_merma } }.
 // Si un insumo tiene aplica_merma=false, su descuento no se infla con merma.
-export function calcularMovimientosStock(itemsValidos, ingredientesPorReceta, signo, insumosMap = {}) {
+export function calcularMovimientosStock(itemsValidos, ingredientesPorReceta, signo, insumosMap = {}, merma = MERMA_DEFAULT) {
   const movs = {} // { insumo_nombre: cantidad (con signo) }
   itemsValidos.forEach(it => {
     const litros = parseFloat(it.litros) || 1
@@ -40,7 +54,7 @@ export function calcularMovimientosStock(itemsValidos, ingredientesPorReceta, si
       // - Insumos marcados aplica_merma=false en BD (latas cerradas, etc.).
       const meta = insumosMap[nombre.toLowerCase()]
       const aplicaMermaInsumo = meta ? meta.aplica_merma !== false : true
-      const factorMerma = (esEnvase || !aplicaMermaInsumo) ? 1 : (1 + MERMA)
+      const factorMerma = (esEnvase || !aplicaMermaInsumo) ? 1 : (1 + merma)
       const cantidad = ing.cantidad * litros * factorMerma
       movs[nombre] = (movs[nombre] || 0) + cantidad * signo
     })
@@ -49,22 +63,44 @@ export function calcularMovimientosStock(itemsValidos, ingredientesPorReceta, si
 }
 
 // Aplica un set de movimientos al stock (puede ser mezcla de + y -).
+//
+// Devuelve { ok, fallidos, faltantes, truncados }:
+//   - faltantes: insumos que NO existen con ese nombre exacto en la tabla. Antes
+//     se ignoraban en silencio: el `.in()` no los devolvía, no se actualizaba
+//     nada, y el toast decía "guardado ✓" con la bodega intacta. Es la causa más
+//     probable del descuadre entre lo comprado y lo que hay en bodega.
+//   - truncados: el descuento pedía más de lo que había y se cortó en 0. Importa
+//     avisar porque el reverso (reintegrarStock) devuelve el monto COMPLETO, así
+//     que cada ciclo descontar→borrar infla el inventario con producto que no existe.
+// `fallidos` incluye faltantes y errores de update, así los callers que ya miran
+// ese campo avisan sin cambiar nada.
 export async function aplicarMovimientosStock(movs) {
   const nombresInsumos = Object.keys(movs).filter(n => movs[n] !== 0)
-  if (nombresInsumos.length === 0) return
-  const { data: stocks } = await supabase
+  if (nombresInsumos.length === 0) return { ok: true, fallidos: [], faltantes: [], truncados: [] }
+  const { data: stocks, error } = await supabase
     .from('insumos')
     .select('nombre, stock_actual')
     .in('nombre', nombresInsumos)
-  if (!stocks) return { ok: false, fallidos: nombresInsumos }
+  if (error || !stocks) {
+    return { ok: false, fallidos: nombresInsumos, faltantes: [], truncados: [] }
+  }
+
+  const encontrados = new Set(stocks.map(s => s.nombre))
+  const faltantes = nombresInsumos.filter(n => !encontrados.has(n))
+
+  const truncados = []
   const resultados = await Promise.all(stocks.map(ins => {
     const delta = movs[ins.nombre] || 0
-    const nuevo = Math.max(0, (ins.stock_actual || 0) + delta)
+    const bruto = (ins.stock_actual || 0) + delta
+    const nuevo = Math.max(0, bruto)
+    if (bruto < 0) truncados.push({ nombre: ins.nombre, faltante: -bruto })
     return supabase.from('insumos').update({ stock_actual: nuevo }).eq('nombre', ins.nombre)
       .then(r => ({ nombre: ins.nombre, error: r.error }))
   }))
-  const fallidos = resultados.filter(r => r.error).map(r => r.nombre)
-  return { ok: fallidos.length === 0, fallidos }
+
+  const conError = resultados.filter(r => r.error).map(r => r.nombre)
+  const fallidos = [...faltantes, ...conError]
+  return { ok: fallidos.length === 0, fallidos, faltantes, truncados }
 }
 
 // Carga los ingredientes de las recetas que aparecen en estos ítems.
@@ -116,22 +152,42 @@ export async function cargarInsumosMeta() {
 
 // Descuenta ingredientes del stock al registrar una venta (api pública).
 export async function descontarStock(itemsValidos) {
-  const [ingredientes, insumosMap] = await Promise.all([
+  const [ingredientes, insumosMap, merma] = await Promise.all([
     cargarIngredientes(itemsValidos),
     cargarInsumosMeta(),
+    cargarMerma(),
   ])
-  const movs = calcularMovimientosStock(itemsValidos, ingredientes, -1, insumosMap)
+  const movs = calcularMovimientosStock(itemsValidos, ingredientes, -1, insumosMap, merma)
   return aplicarMovimientosStock(movs)
 }
 
 // Reintegra stock cuando se borra o edita una venta (lo opuesto a descontar).
 export async function reintegrarStock(itemsAnteriores) {
-  const [ingredientes, insumosMap] = await Promise.all([
+  const [ingredientes, insumosMap, merma] = await Promise.all([
     cargarIngredientes(itemsAnteriores),
     cargarInsumosMeta(),
+    cargarMerma(),
   ])
-  const movs = calcularMovimientosStock(itemsAnteriores, ingredientes, +1, insumosMap)
+  const movs = calcularMovimientosStock(itemsAnteriores, ingredientes, +1, insumosMap, merma)
   return aplicarMovimientosStock(movs)
+}
+
+// Arma el aviso para el operador a partir del resultado de aplicarMovimientosStock.
+// Devuelve null si no hay nada que avisar. Un insumo "no está en bodega" casi
+// siempre es un nombre que no calza exacto entre la receta y la tabla insumos.
+export function mensajeStock(res) {
+  if (!res) return null
+  const partes = []
+  if (res.faltantes?.length) {
+    partes.push(`no están en bodega (revisa que el nombre calce exacto): ${res.faltantes.join(', ')}`)
+  }
+  const conError = (res.fallidos || []).filter(n => !(res.faltantes || []).includes(n))
+  if (conError.length) partes.push(`no se pudieron actualizar: ${conError.join(', ')}`)
+  if (res.truncados?.length) {
+    const d = res.truncados.map(t => `${t.nombre} (faltaban ${Math.round(t.faltante)})`).join(', ')
+    partes.push(`quedaron en 0 porque no alcanzaba el stock: ${d}`)
+  }
+  return partes.length ? partes.join(' · ') : null
 }
 
 // ─── Movimientos por COMPRAS ─────────────────────────────────────────────────
