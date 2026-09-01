@@ -1,6 +1,9 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatCLP } from '../lib/calculos'
+import {
+  saldoDeuda, agruparPorContraparte, construirPlan, claveContraparte, SIN_CONTRAPARTE,
+} from '../lib/cuentas'
 
 const TIPOS = ['pagar', 'cobrar']
 const TIPO_LABEL = { pagar: '💸 Por pagar', cobrar: '💰 Por cobrar' }
@@ -9,7 +12,43 @@ const TIPO_COLOR = {
   cobrar: { bg: 'rgba(16,185,129,0.10)', color: 'var(--green)', border: 'rgba(16,185,129,0.25)' },
 }
 
-function DeudaModal({ deuda, onSave, onCancel }) {
+const hoyISO = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+const nuevoGrupoId = () =>
+  (globalThis.crypto?.randomUUID?.() || `liq-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+
+// La columna `grupo_id` llega con la migración 20260901_cuentas_liquidaciones.
+// Si todavía no se corrió, guardamos igual: se pierde la agrupación (y con
+// ella el "deshacer movimiento"), no el abono.
+async function insertarAbonos(filas) {
+  let { error } = await supabase.from('abonos').insert(filas)
+  if (error && /grupo_id/i.test(error.message || '')) {
+    const sinGrupo = filas.map(({ grupo_id, ...resto }) => resto)
+    const reintento = await supabase.from('abonos').insert(sinGrupo)
+    error = reintento.error
+  }
+  return error
+}
+
+// Tras borrar abonos hay que reabrir las deudas que volvieron a tener saldo.
+async function reabrirSiCorresponde(deudaIds) {
+  if (!deudaIds.length) return null
+  const [{ data: ds }, { data: abs }] = await Promise.all([
+    supabase.from('deudas').select('*').in('id', deudaIds),
+    supabase.from('abonos').select('*').in('deuda_id', deudaIds),
+  ])
+  const reabrir = (ds || [])
+    .filter(d => d.pagada && saldoDeuda(d, (abs || []).filter(a => a.deuda_id === d.id)) > 0)
+    .map(d => d.id)
+  if (!reabrir.length) return null
+  const { error } = await supabase.from('deudas').update({ pagada: false }).in('id', reabrir)
+  return error
+}
+
+function DeudaModal({ deuda, contrapartes, onSave, onCancel }) {
   const [descripcion, setDescripcion] = useState(deuda?.descripcion || '')
   const [tipo, setTipo] = useState(deuda?.tipo || 'pagar')
   const [montoTotal, setMontoTotal] = useState(deuda?.monto_total || '')
@@ -25,7 +64,7 @@ function DeudaModal({ deuda, onSave, onCancel }) {
     const payload = {
       descripcion, tipo,
       monto_total: parseFloat(montoTotal),
-      contraparte: contraparte || null,
+      contraparte: contraparte.trim() || null,
       fecha_vence: fechaVence || null,
       nota: nota || null,
     }
@@ -69,9 +108,15 @@ function DeudaModal({ deuda, onSave, onCancel }) {
           </div>
           <div className="form-group">
             <label className="form-label">{tipo === 'pagar' ? 'A quién' : 'De quién'}</label>
-            <input type="text" className="form-input" value={contraparte} placeholder="ej: Banco, Rodrigo..."
-              onChange={e => setContraparte(e.target.value)} />
+            <input type="text" className="form-input" value={contraparte} placeholder="ej: Camilo, Banco..."
+              list="contrapartes-conocidas" onChange={e => setContraparte(e.target.value)} />
+            <datalist id="contrapartes-conocidas">
+              {(contrapartes || []).map(c => <option key={c} value={c} />)}
+            </datalist>
           </div>
+        </div>
+        <div style={{ fontSize:11, color:'var(--muted)', marginTop:-6, marginBottom:14, lineHeight:1.4 }}>
+          Escribe el nombre siempre igual: así se juntan todas las cuentas de esa persona y se pueden cruzar.
         </div>
 
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
@@ -102,10 +147,7 @@ function DeudaModal({ deuda, onSave, onCancel }) {
 
 function AbonoModal({ deuda, saldoPendiente, onSave, onCancel }) {
   const [monto, setMonto] = useState('')
-  const [fecha, setFecha] = useState(() => {
-    const d = new Date()
-    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
-  })
+  const [fecha, setFecha] = useState(hoyISO)
   const [nota, setNota] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -113,12 +155,13 @@ function AbonoModal({ deuda, saldoPendiente, onSave, onCancel }) {
   const handleSave = async () => {
     if (!monto || parseFloat(monto) <= 0) return
     setSaving(true); setError('')
-    const { error: errInsert } = await supabase.from('abonos').insert({
+    const errInsert = await insertarAbonos([{
       deuda_id: deuda.id,
       monto: parseFloat(monto),
       fecha,
       nota: nota || null,
-    })
+      grupo_id: null,
+    }])
     if (errInsert) { setSaving(false); setError(errInsert.message); return }
     // Si saldo queda en 0, marcar deuda como pagada
     const nuevoSaldo = saldoPendiente - parseFloat(monto)
@@ -170,7 +213,292 @@ function AbonoModal({ deuda, saldoPendiente, onSave, onCancel }) {
   )
 }
 
-function DeudaCard({ deuda, abonos, onEdit, onAbono, onDelete, onTogglePagada }) {
+// ─── Liquidar con una contraparte ───────────────────────────────────────────
+// El movimiento grande: cruza lo que me deben contra lo que debo y reparte un
+// pago sobre lo que queda. Escribe abonos en varias deudas de una sola vez.
+
+function FilaPlan({ aplicacion, color }) {
+  return (
+    <div style={{ display:'flex', justifyContent:'space-between', gap:10, fontSize:12, padding:'3px 0' }}>
+      <span style={{ color:'var(--muted)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+        {aplicacion.descripcion}
+      </span>
+      <span style={{ flexShrink:0 }}>
+        <span style={{ color, fontWeight:600 }}>{formatCLP(aplicacion.monto)}</span>
+        <span style={{ color:'var(--muted)' }}>
+          {aplicacion.quedaEn === 0 ? ' · queda liquidada' : ` · quedan ${formatCLP(aplicacion.quedaEn)}`}
+        </span>
+      </span>
+    </div>
+  )
+}
+
+function LiquidarModal({ grupo, onSave, onCancel }) {
+  const [compensar, setCompensar] = useState(grupo.compensable > 0)
+  const [direccion, setDireccion] = useState(grupo.neto >= 0 ? 'pago' : 'cobro')
+  const [montoPago, setMontoPago] = useState('')
+  const [fecha, setFecha] = useState(hoyISO)
+  const [nota, setNota] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const plan = useMemo(() => construirPlan({
+    porPagar: grupo.porPagar,
+    porCobrar: grupo.porCobrar,
+    compensar,
+    direccion,
+    montoPago,
+  }), [grupo, compensar, direccion, montoPago])
+
+  const compensado = plan.compensado
+  const topePago = direccion === 'cobro'
+    ? grupo.totalCobrar - compensado
+    : grupo.totalPagar - compensado
+
+  const hayAlgoQueGuardar = compensado > 0 || plan.pago.monto > 0
+  const verboPago = direccion === 'cobro' ? 'Me pagan' : 'Pago yo'
+
+  const handleSave = async () => {
+    if (!hayAlgoQueGuardar) return
+    setSaving(true); setError('')
+    const grupoId = nuevoGrupoId()
+    const sufijo = nota.trim() ? ` — ${nota.trim()}` : ''
+    const filas = []
+    for (const a of plan.compPagar) {
+      filas.push({ deuda_id: a.id, monto: a.monto, fecha, grupo_id: grupoId,
+        nota: `Cruce con ${grupo.nombre}${sufijo}` })
+    }
+    for (const a of plan.compCobrar) {
+      filas.push({ deuda_id: a.id, monto: a.monto, fecha, grupo_id: grupoId,
+        nota: `Cruce con ${grupo.nombre}${sufijo}` })
+    }
+    for (const a of plan.pago.aplicaciones) {
+      filas.push({ deuda_id: a.id, monto: a.monto, fecha, grupo_id: grupoId,
+        nota: `${direccion === 'cobro' ? 'Cobro a' : 'Pago a'} ${grupo.nombre}${sufijo}` })
+    }
+
+    const errInsert = await insertarAbonos(filas)
+    if (errInsert) { setSaving(false); setError(errInsert.message); return }
+
+    const liquidadas = [...new Set(plan.liquidadas.map(a => a.id))]
+    if (liquidadas.length) {
+      const { error: errUpd } = await supabase.from('deudas').update({ pagada: true }).in('id', liquidadas)
+      if (errUpd) { setSaving(false); setError(errUpd.message); return }
+    }
+    setSaving(false)
+    onSave(filas.length, liquidadas.length)
+  }
+
+  const netoLinea = (neto) => neto === 0
+    ? <span style={{ color:'var(--green)', fontWeight:700 }}>a mano</span>
+    : <span style={{ color: neto > 0 ? 'var(--pink)' : 'var(--green)', fontWeight:700 }}>
+        {neto > 0 ? 'le debo ' : 'me debe '}{formatCLP(Math.abs(neto))}
+      </span>
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.8)', display:'flex', alignItems:'flex-start', justifyContent:'center', zIndex:300, padding:16, overflowY:'auto' }}>
+      <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:16, padding:22, maxWidth:440, width:'100%', margin:'20px 0' }}>
+        <div style={{ fontSize:16, fontWeight:800, color:'var(--text-strong)' }}>
+          Liquidar con {grupo.nombre}
+        </div>
+        <div style={{ fontSize:12, color:'var(--muted)', marginBottom:16, lineHeight:1.45 }}>
+          Ajusta las deudas de esta persona. No toca la caja de la app.
+        </div>
+
+        {/* Situación actual */}
+        <div style={{ background:'rgba(255,255,255,0.03)', borderRadius:10, padding:'10px 12px', marginBottom:16, fontSize:13 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', padding:'2px 0' }}>
+            <span style={{ color:'var(--muted)' }}>Le debo</span>
+            <span style={{ color:'var(--pink)', fontWeight:600 }}>{formatCLP(grupo.totalPagar)}</span>
+          </div>
+          <div style={{ display:'flex', justifyContent:'space-between', padding:'2px 0' }}>
+            <span style={{ color:'var(--muted)' }}>Me debe</span>
+            <span style={{ color:'var(--green)', fontWeight:600 }}>{formatCLP(grupo.totalCobrar)}</span>
+          </div>
+          <div style={{ display:'flex', justifyContent:'space-between', padding:'6px 0 0', marginTop:4, borderTop:'1px solid var(--border)' }}>
+            <span style={{ color:'var(--text)' }}>Neto hoy</span>
+            {netoLinea(grupo.neto)}
+          </div>
+        </div>
+
+        {/* Paso 1: cruce */}
+        {grupo.compensable > 0 && (
+          <div
+            onClick={() => setCompensar(c => !c)}
+            style={{
+              display:'flex', gap:10, alignItems:'flex-start', cursor:'pointer', marginBottom:16,
+              background: compensar ? 'rgba(0,180,180,0.08)' : 'rgba(255,255,255,0.03)',
+              border:`1px solid ${compensar ? 'var(--cyan-dim)' : 'var(--border)'}`,
+              borderRadius:10, padding:'10px 12px',
+            }}>
+            <div style={{
+              width:18, height:18, borderRadius:5, flexShrink:0, marginTop:1,
+              border:`1px solid ${compensar ? 'var(--cyan)' : 'rgba(255,255,255,0.25)'}`,
+              background: compensar ? 'var(--cyan)' : 'transparent',
+              color:'#000', fontSize:13, fontWeight:800, lineHeight:'17px', textAlign:'center',
+            }}>{compensar ? '✓' : ''}</div>
+            <div>
+              <div style={{ fontSize:13, fontWeight:700, color:'var(--text)' }}>
+                Cruzar {formatCLP(grupo.compensable)}
+              </div>
+              <div style={{ fontSize:11, color:'var(--muted)', lineHeight:1.4 }}>
+                Lo que {grupo.nombre} me debe se descuenta de lo que yo le debo. No se transfiere plata.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Paso 2: pago real */}
+        <div className="form-group">
+          <label className="form-label">Movimiento de plata</label>
+          <div className="toggle-row" style={{ marginBottom:10 }}>
+            <button type="button"
+              className={`toggle-btn ${direccion === 'pago' ? 'active-salida' : ''}`}
+              onClick={() => setDireccion('pago')}>Pago yo</button>
+            <button type="button"
+              className={`toggle-btn ${direccion === 'cobro' ? 'active-entrada' : ''}`}
+              onClick={() => setDireccion('cobro')}>Me pagan</button>
+          </div>
+          <input type="number" className="form-input" value={montoPago}
+            placeholder={topePago > 0 ? `hasta ${formatCLP(topePago)}` : 'no queda saldo de este lado'}
+            onChange={e => setMontoPago(e.target.value)} />
+          {topePago > 0 && (
+            <div className="chip-row" style={{ marginTop:8, marginBottom:0 }}>
+              <button type="button" className="chip" onClick={() => setMontoPago(String(topePago))}>
+                Todo ({formatCLP(topePago)})
+              </button>
+              <button type="button" className="chip" onClick={() => setMontoPago(String(Math.round(topePago / 2)))}>
+                Mitad
+              </button>
+              {montoPago !== '' && (
+                <button type="button" className="chip" onClick={() => setMontoPago('')}>Sin pago</button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {plan.pago.excedente > 0 && (
+          <div style={{ fontSize:12, color:'var(--pink)', marginTop:-6, marginBottom:12, lineHeight:1.4 }}>
+            {formatCLP(plan.pago.excedente)} de más: sobrepasa lo que queda pendiente de ese lado y no se va a
+            registrar. Si de verdad pagaste eso, crea la cuenta que falta.
+          </div>
+        )}
+
+        {/* Preview */}
+        {hayAlgoQueGuardar && (
+          <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid var(--border)', borderRadius:10, padding:'12px 14px', marginBottom:16 }}>
+            <div style={{ fontSize:11, color:'var(--muted)', textTransform:'uppercase', letterSpacing:1, marginBottom:8 }}>
+              Cómo queda
+            </div>
+
+            {compensado > 0 && (
+              <div style={{ marginBottom:10 }}>
+                <div style={{ fontSize:12, color:'var(--cyan)', fontWeight:700, marginBottom:2 }}>
+                  Cruce · {formatCLP(compensado)} a cada lado
+                </div>
+                {plan.compPagar.map(a => <FilaPlan key={`cp-${a.id}`} aplicacion={a} color="var(--cyan)" />)}
+                {plan.compCobrar.map(a => <FilaPlan key={`cc-${a.id}`} aplicacion={a} color="var(--cyan)" />)}
+              </div>
+            )}
+
+            {plan.pago.monto > 0 && (
+              <div style={{ marginBottom:10 }}>
+                <div style={{ fontSize:12, fontWeight:700, marginBottom:2,
+                  color: direccion === 'cobro' ? 'var(--green)' : 'var(--pink)' }}>
+                  {verboPago} · {formatCLP(plan.pago.monto)}
+                </div>
+                {plan.pago.aplicaciones.map(a => (
+                  <FilaPlan key={`pg-${a.id}`} aplicacion={a}
+                    color={direccion === 'cobro' ? 'var(--green)' : 'var(--pink)'} />
+                ))}
+              </div>
+            )}
+
+            <div style={{ borderTop:'1px solid var(--border)', paddingTop:8, fontSize:13 }}>
+              <div style={{ display:'flex', justifyContent:'space-between' }}>
+                <span style={{ color:'var(--muted)' }}>Neto después</span>
+                {netoLinea(plan.despues.neto)}
+              </div>
+              <div style={{ fontSize:11, color:'var(--muted)', marginTop:3 }}>
+                Le debo {formatCLP(plan.despues.pagar)} · me debe {formatCLP(plan.despues.cobrar)}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+          <div className="form-group">
+            <label className="form-label">Fecha</label>
+            <input type="date" className="form-input" value={fecha} onChange={e => setFecha(e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Nota</label>
+            <input type="text" className="form-input" value={nota} placeholder="opcional"
+              onChange={e => setNota(e.target.value)} />
+          </div>
+        </div>
+
+        {error && <div style={{ color:'var(--pink)', fontSize:13, marginBottom:10 }}>{error}</div>}
+        <div style={{ display:'flex', gap:10 }}>
+          <button className="btn btn-secondary" style={{ flex:1 }} onClick={onCancel}>Cancelar</button>
+          <button className="btn btn-primary" style={{ flex:1 }} onClick={handleSave}
+            disabled={saving || !hayAlgoQueGuardar}>
+            {saving ? 'Guardando...' : 'Confirmar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Saldo por persona ──────────────────────────────────────────────────────
+
+function PersonaCard({ grupo, onLiquidar, onVerDeudas }) {
+  const debo = grupo.neto > 0
+  const aMano = grupo.neto === 0
+  const color = aMano ? 'var(--cyan)' : debo ? 'var(--pink)' : 'var(--green)'
+
+  return (
+    <div style={{
+      background:'rgba(255,255,255,0.04)', border:`1px solid ${color}33`,
+      borderRadius:12, padding:'14px 16px', marginBottom:10,
+    }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:10 }}>
+        <div style={{ minWidth:0 }}>
+          <div style={{ fontWeight:700, fontSize:15, color:'var(--text-strong)' }}>{grupo.nombre}</div>
+          <div style={{ fontSize:12, color:'var(--muted)', marginTop:2 }}>
+            le debo {formatCLP(grupo.totalPagar)} · me debe {formatCLP(grupo.totalCobrar)}
+          </div>
+        </div>
+        <div style={{ textAlign:'right', flexShrink:0 }}>
+          <div style={{ fontSize:10, color:'var(--muted)', textTransform:'uppercase', letterSpacing:1 }}>
+            {aMano ? 'A mano' : debo ? 'Le debo' : 'Me debe'}
+          </div>
+          <div style={{ fontSize:20, fontWeight:800, color }}>{formatCLP(Math.abs(grupo.neto))}</div>
+        </div>
+      </div>
+
+      {grupo.compensable > 0 && (
+        <div style={{ fontSize:11, color:'var(--cyan)', marginTop:8 }}>
+          ⇄ Hay {formatCLP(grupo.compensable)} cruzables entre las dos puntas
+        </div>
+      )}
+
+      <div style={{ display:'flex', gap:8, marginTop:10 }}>
+        <button className="btn btn-primary btn-sm" style={{ fontSize:12 }} onClick={() => onLiquidar(grupo)}>
+          Liquidar
+        </button>
+        <button className="btn btn-secondary btn-sm" style={{ fontSize:12 }} onClick={() => onVerDeudas(grupo)}>
+          Ver sus {grupo.porPagar.length + grupo.porCobrar.length} cuentas
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Tarjeta de deuda ───────────────────────────────────────────────────────
+
+function DeudaCard({ deuda, abonos, onEdit, onAbono, onDelete, onTogglePagada, onBorrarAbono, onDeshacerGrupo }) {
   const [expandido, setExpandido] = useState(false)
   const totalAbonado = abonos.reduce((s, a) => s + (a.monto || 0), 0)
   const saldoPendiente = Math.max(0, (deuda.monto_total || 0) - totalAbonado)
@@ -263,12 +591,20 @@ function DeudaCard({ deuda, abonos, onEdit, onAbono, onDelete, onTogglePagada })
             <div style={{ fontSize:12, color:'var(--muted)', textAlign:'center', padding:'8px 0' }}>Sin abonos registrados</div>
           ) : (
             abonos.map(a => (
-              <div key={a.id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'5px 0', borderBottom:'1px solid rgba(255,255,255,0.04)', fontSize:13 }}>
-                <div>
+              <div key={a.id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, padding:'5px 0', borderBottom:'1px solid rgba(255,255,255,0.04)', fontSize:13 }}>
+                <div style={{ minWidth:0 }}>
                   <span style={{ color:'var(--text)' }}>{a.fecha}</span>
                   {a.nota && <span style={{ color:'var(--muted)', marginLeft:8 }}>{a.nota}</span>}
                 </div>
-                <span style={{ color:'var(--green)', fontWeight:600 }}>{formatCLP(a.monto)}</span>
+                <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
+                  <span style={{ color:'var(--green)', fontWeight:600 }}>{formatCLP(a.monto)}</span>
+                  <button
+                    onClick={() => (a.grupo_id ? onDeshacerGrupo(a) : onBorrarAbono(a))}
+                    title={a.grupo_id ? 'Deshacer el movimiento completo' : 'Borrar este abono'}
+                    style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)', padding:2, fontSize:11 }}>
+                    {a.grupo_id ? '↺' : '✕'}
+                  </button>
+                </div>
               </div>
             ))
           )}
@@ -278,13 +614,17 @@ function DeudaCard({ deuda, abonos, onEdit, onAbono, onDelete, onTogglePagada })
   )
 }
 
+// ─── Página ─────────────────────────────────────────────────────────────────
+
 export default function Cuentas() {
   const [deudas, setDeudas] = useState([])
   const [abonos, setAbonos] = useState([])
   const [modal, setModal] = useState(null)
   const [abonoModal, setAbonoModal] = useState(null) // { deuda, saldoPendiente }
-  const [confirmar, setConfirmar] = useState(null)
-  const [filtro, setFiltro] = useState('activas') // 'activas' | 'pagadas' | 'todos'
+  const [liquidar, setLiquidar] = useState(null)     // grupo de contraparte
+  const [confirmar, setConfirmar] = useState(null)   // { tipo, ...datos }
+  const [filtro, setFiltro] = useState('activas')    // 'activas' | 'pagadas' | 'todos'
+  const [persona, setPersona] = useState('todas')    // clave de contraparte
   const [toast, setToast] = useState('')
 
   useEffect(() => { load() }, [])
@@ -318,22 +658,61 @@ export default function Cuentas() {
     load()
   }
 
+  const handleBorrarAbono = async (abono) => {
+    const { error } = await supabase.from('abonos').delete().eq('id', abono.id)
+    if (error) { showToast(`No se pudo borrar: ${error.message}`); return }
+    const errReabrir = await reabrirSiCorresponde([abono.deuda_id])
+    if (errReabrir) { showToast(`Abono borrado, pero: ${errReabrir.message}`); load(); return }
+    setConfirmar(null)
+    showToast('Abono borrado')
+    load()
+  }
+
+  const handleDeshacerGrupo = async (abono) => {
+    const delGrupo = abonos.filter(a => a.grupo_id && a.grupo_id === abono.grupo_id)
+    const deudaIds = [...new Set(delGrupo.map(a => a.deuda_id))]
+    const { error } = await supabase.from('abonos').delete().eq('grupo_id', abono.grupo_id)
+    if (error) { showToast(`No se pudo deshacer: ${error.message}`); return }
+    const errReabrir = await reabrirSiCorresponde(deudaIds)
+    if (errReabrir) { showToast(`Deshecho, pero: ${errReabrir.message}`); load(); return }
+    setConfirmar(null)
+    showToast('Movimiento deshecho')
+    load()
+  }
+
+  // Saldos por persona, sobre las cuentas activas
+  const grupos = useMemo(
+    () => agruparPorContraparte(deudas, (id) => abonos.filter(a => a.deuda_id === id)),
+    [deudas, abonos]
+  )
+
+  const contrapartesConocidas = useMemo(() => {
+    const set = new Map()
+    for (const d of deudas) {
+      const nombre = (d.contraparte || '').trim()
+      if (nombre) set.set(claveContraparte(nombre), nombre)
+    }
+    return [...set.values()].sort((a, b) => a.localeCompare(b, 'es'))
+  }, [deudas])
+
   const deudasFiltradas = deudas.filter(d => {
-    if (filtro === 'activas') return !d.pagada
-    if (filtro === 'pagadas') return d.pagada
+    if (filtro === 'activas' && d.pagada) return false
+    if (filtro === 'pagadas' && !d.pagada) return false
+    if (persona !== 'todas' && claveContraparte(d.contraparte) !== persona) return false
     return true
   })
 
   // Resumen financiero
-  const activas = deudas.filter(d => !d.pagada)
-  const totalPorPagar = activas.filter(d => d.tipo === 'pagar').reduce((s, d) => {
-    const ab = getAbonos(d.id).reduce((x, a) => x + a.monto, 0)
-    return s + Math.max(0, d.monto_total - ab)
-  }, 0)
-  const totalPorCobrar = activas.filter(d => d.tipo === 'cobrar').reduce((s, d) => {
-    const ab = getAbonos(d.id).reduce((x, a) => x + a.monto, 0)
-    return s + Math.max(0, d.monto_total - ab)
-  }, 0)
+  const totalPorPagar = grupos.reduce((s, g) => s + g.totalPagar, 0)
+  const totalPorCobrar = grupos.reduce((s, g) => s + g.totalCobrar, 0)
+  const neto = totalPorPagar - totalPorCobrar
+
+  const listaRef = useRef(null)
+  const irAPersona = (grupo) => {
+    setPersona(grupo.clave)
+    setFiltro('activas')
+    listaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
 
   return (
     <div className="page">
@@ -342,6 +721,7 @@ export default function Cuentas() {
       {modal && (
         <DeudaModal
           deuda={modal === 'nueva' ? null : modal}
+          contrapartes={contrapartesConocidas}
           onSave={() => { setModal(null); showToast(modal === 'nueva' ? 'Cuenta creada ✓' : 'Cuenta actualizada ✓'); load() }}
           onCancel={() => setModal(null)}
         />
@@ -356,27 +736,51 @@ export default function Cuentas() {
         />
       )}
 
+      {liquidar && (
+        <LiquidarModal
+          grupo={liquidar}
+          onSave={(nAbonos, nLiquidadas) => {
+            setLiquidar(null)
+            showToast(`Liquidación aplicada ✓ ${nAbonos} abono${nAbonos === 1 ? '' : 's'}${nLiquidadas ? `, ${nLiquidadas} cuenta${nLiquidadas === 1 ? '' : 's'} al día` : ''}`)
+            load()
+          }}
+          onCancel={() => setLiquidar(null)}
+        />
+      )}
+
       {confirmar && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, padding:24 }}>
           <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:14, padding:24, maxWidth:320, width:'100%' }}>
             <div style={{ fontSize:15, color:'var(--text)', marginBottom:20, lineHeight:1.5 }}>
-              ¿Eliminar "{confirmar.descripcion}"?
+              {confirmar.tipo === 'deuda' && `¿Eliminar "${confirmar.deuda.descripcion}"?`}
+              {confirmar.tipo === 'abono' && `¿Borrar el abono de ${formatCLP(confirmar.abono.monto)} del ${confirmar.abono.fecha}?`}
+              {confirmar.tipo === 'grupo' && `¿Deshacer el movimiento completo? Se borran los ${confirmar.cantidad} abonos que se crearon juntos.`}
             </div>
             <div style={{ display:'flex', gap:10 }}>
               <button className="btn btn-secondary btn-sm" style={{ flex:1 }} onClick={() => setConfirmar(null)}>Cancelar</button>
-              <button className="btn btn-primary btn-sm" style={{ flex:1, background:'var(--pink)' }} onClick={() => handleDelete(confirmar)}>Eliminar</button>
+              <button className="btn btn-primary btn-sm" style={{ flex:1, background:'var(--pink)' }}
+                onClick={() => {
+                  if (confirmar.tipo === 'deuda') handleDelete(confirmar.deuda)
+                  else if (confirmar.tipo === 'abono') handleBorrarAbono(confirmar.abono)
+                  else handleDeshacerGrupo(confirmar.abono)
+                }}>
+                {confirmar.tipo === 'grupo' ? 'Deshacer' : 'Eliminar'}
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
         <div className="page-title" style={{ margin:0 }}>Cuentas</div>
         <button className="btn btn-primary btn-sm" onClick={() => setModal('nueva')}>+ Nueva</button>
       </div>
+      <div style={{ fontSize:11, color:'var(--muted)', marginBottom:16, lineHeight:1.45 }}>
+        Deudas y cobros para cuadrar el banco. Nada de acá toca la caja de la app.
+      </div>
 
       {/* Resumen */}
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:16 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:10 }}>
         <div style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:12, padding:'12px 14px' }}>
           <div style={{ fontSize:11, color:'var(--muted)', marginBottom:4 }}>Por pagar</div>
           <div style={{ fontSize:20, fontWeight:700, color:'var(--pink)' }}>{formatCLP(totalPorPagar)}</div>
@@ -386,14 +790,59 @@ export default function Cuentas() {
           <div style={{ fontSize:20, fontWeight:700, color:'var(--green)' }}>{formatCLP(totalPorCobrar)}</div>
         </div>
       </div>
+      <div style={{
+        background:'rgba(255,255,255,0.04)', border:'1px solid var(--border)',
+        borderRadius:12, padding:'12px 14px', marginBottom:18,
+        display:'flex', justifyContent:'space-between', alignItems:'center',
+      }}>
+        <div>
+          <div style={{ fontSize:11, color:'var(--muted)' }}>
+            {neto === 0 ? 'Todo a mano' : neto > 0 ? 'Neto por pagar' : 'Neto por cobrar'}
+          </div>
+          <div style={{ fontSize:10, color:'var(--muted)', marginTop:2 }}>
+            Lo que hay que mover en el banco si se cruza todo
+          </div>
+        </div>
+        <div style={{ fontSize:24, fontWeight:800, color: neto === 0 ? 'var(--cyan)' : neto > 0 ? 'var(--pink)' : 'var(--green)' }}>
+          {formatCLP(Math.abs(neto))}
+        </div>
+      </div>
+
+      {/* Saldos por persona */}
+      {grupos.length > 0 && (
+        <>
+          <div className="section-divider">Saldos por persona</div>
+          {grupos.map(g => (
+            <PersonaCard key={g.clave} grupo={g} onLiquidar={setLiquidar} onVerDeudas={irAPersona} />
+          ))}
+        </>
+      )}
 
       {/* Filtros */}
-      <div className="toggle-row" style={{ marginBottom:16 }}>
+      <div className="section-divider" ref={listaRef}>Todas las cuentas</div>
+      <div className="toggle-row" style={{ marginBottom:10 }}>
         {[['activas','Activas'], ['pagadas','Pagadas'], ['todos','Todas']].map(([val, label]) => (
           <button key={val} className={`toggle-btn ${filtro === val ? 'active-entrada' : ''}`}
             onClick={() => setFiltro(val)}>{label}</button>
         ))}
       </div>
+      {contrapartesConocidas.length > 0 && (
+        <div className="chip-row">
+          <button className={`chip ${persona === 'todas' ? 'selected' : ''}`}
+            onClick={() => setPersona('todas')}>Todas</button>
+          {contrapartesConocidas.map(nombre => {
+            const clave = claveContraparte(nombre)
+            return (
+              <button key={clave} className={`chip ${persona === clave ? 'selected' : ''}`}
+                onClick={() => setPersona(clave)}>{nombre}</button>
+            )
+          })}
+          {deudas.some(d => claveContraparte(d.contraparte) === SIN_CONTRAPARTE) && (
+            <button className={`chip ${persona === SIN_CONTRAPARTE ? 'selected' : ''}`}
+              onClick={() => setPersona(SIN_CONTRAPARTE)}>Sin contraparte</button>
+          )}
+        </div>
+      )}
 
       {/* Lista */}
       {deudasFiltradas.length === 0 ? (
@@ -408,8 +857,13 @@ export default function Cuentas() {
             abonos={getAbonos(d.id)}
             onEdit={setModal}
             onAbono={(deuda, saldo) => setAbonoModal({ deuda, saldoPendiente: saldo })}
-            onDelete={setConfirmar}
+            onDelete={(deuda) => setConfirmar({ tipo:'deuda', deuda })}
             onTogglePagada={handleTogglePagada}
+            onBorrarAbono={(abono) => setConfirmar({ tipo:'abono', abono })}
+            onDeshacerGrupo={(abono) => setConfirmar({
+              tipo:'grupo', abono,
+              cantidad: abonos.filter(a => a.grupo_id === abono.grupo_id).length,
+            })}
           />
         ))
       )}
