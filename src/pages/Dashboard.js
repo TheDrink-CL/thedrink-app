@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { calcularCostoReceta, formatCLP, formatPct, esOrigenIGAds } from '../lib/calculos'
 import { calcularRentabilidad } from '../lib/rentabilidad'
-import { enriquecerVentasConDelivery, FECHA_CORTE_DELIVERY } from '../lib/calculos'
+import { enriquecerVentasConDelivery, calcularSaldoCaja } from '../lib/calculos'
 import CaminoAlBar from './CaminoAlBar'
 import SaludNegocio from './SaludNegocio'
 
@@ -366,6 +366,12 @@ export default function Dashboard() {
       }
       let [{ data: cfg }, { data: vts }, { data: cja }, { data: cmp }, { data: ins }, { data: ordenes }, { data: recIng }, { data: insumosConPPP }, { data: clientesRows }] = results
 
+      // Saldo de caja: plata real, sobre TODAS las filas y con la misma función
+      // que Caja, MiDinero, CaminoAlBar y Proyecciones. Va antes del filtro de
+      // clientes excluidos: ese filtro es para estadísticas, y sacar a alguien
+      // de las métricas no borra la plata que entró o salió por sus pedidos.
+      const saldoCaja = calcularSaldoCaja({ ventas: vts, ordenes, compras: cmp, caja: cja })
+
       // Clientes excluidos (fraude, estado_contacto = 'excluido') salen de
       // TODAS las estadísticas — mismo criterio que dashboardMetrics.js
       // (Indicadores), para que las pantallas no diverjan.
@@ -452,17 +458,6 @@ export default function Dashboard() {
       }, 0)
       // capital de trabajo (envases / capital operativo) = misma `inversion`
       const capitalTrabajoStock = inversion
-
-      // Con ventas enriquecidas, cada fila trae el costo y el cobro de delivery
-      // de su orden (asignado a una sola fila por orden, sin duplicar).
-      const totalVentas = (vts || []).reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0)
-      const ordCorte = (ordenes || []).filter(o => o.fecha >= FECHA_CORTE_DELIVERY)
-      const totalDeliveryCobrado = ordCorte.reduce((s, o) => s + (parseFloat(o.delivery_cobrado) || 0), 0)
-      const totalCostoDelivery = ordCorte.reduce((s, o) => s + (parseFloat(o.delivery) || 0), 0)
-      const totalCompras = cmp?.reduce((s, c) => s + (c.es_inversion ? 0 : c.precio_total), 0) || 0
-      const movExtraEntradas = cja?.filter(m => m.tipo === 'entrada' && m.categoria !== 'Venta').reduce((s, m) => s + m.monto, 0) || 0
-      const movExtraSalidas = cja?.filter(m => m.tipo === 'salida' && m.categoria !== 'Insumos').reduce((s, m) => s + m.monto, 0) || 0
-      const saldoCaja = totalVentas + totalDeliveryCobrado - totalCostoDelivery - totalCompras + movExtraEntradas - movExtraSalidas
 
       const hace30 = new Date(); hace30.setDate(hace30.getDate() - 30)
       const vtsMes = vts?.filter(v => parseFecha(v.fecha) >= hace30) || []

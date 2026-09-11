@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { formatCLP, FECHA_CORTE_DELIVERY } from '../lib/calculos'
+import { formatCLP, calcularSaldoCaja } from '../lib/calculos'
 import { calcularRentabilidad } from '../lib/rentabilidad'
 import { enriquecerVentasConDelivery } from '../lib/calculos'
 import { calcularRitmo, proyectarCapital } from '../lib/proyecciones'
@@ -198,16 +198,8 @@ export default function CaminoAlBar() {
       const inventarioRotable = (ins || []).reduce((s, i) =>
         s + (parseFloat(i.stock_actual) || 0) * (parseFloat(i.costo_ppp) || 0), 0)
 
-      // caja disponible (mismo cálculo que el Dashboard)
-      const totalVentas = (vts || []).reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0)
-      const totalCompras = (cmp || []).reduce((s, c) => s + (c.es_inversion ? 0 : c.precio_total), 0)
-      // 'Delivery' suma al saldo: es cobro al cliente, sin contraparte en otra tabla
-      const movExtraEntradas = caja.filter(m => m.tipo === 'entrada' && m.categoria !== 'Venta').reduce((s, m) => s + m.monto, 0)
-      const movExtraSalidas = caja.filter(m => m.tipo === 'salida' && m.categoria !== 'Insumos').reduce((s, m) => s + m.monto, 0)
-      const ordCorte = (ords || []).filter(o => o.fecha >= FECHA_CORTE_DELIVERY)
-      const totalDeliveryCobrado = ordCorte.reduce((s, o) => s + (parseFloat(o.delivery_cobrado) || 0), 0)
-      const totalCostoDelivery = ordCorte.reduce((s, o) => s + (parseFloat(o.delivery) || 0), 0)
-      const cajaDisponible = totalVentas + totalDeliveryCobrado - totalCostoDelivery - totalCompras + movExtraEntradas - movExtraSalidas
+      // caja disponible: misma función que Caja e Inicio
+      const cajaDisponible = calcularSaldoCaja({ ventas: vts, ordenes: ords, compras: cmp, caja })
 
       const patrimonioNeto = cajaDisponible + inventarioRotable + activosFijos
 

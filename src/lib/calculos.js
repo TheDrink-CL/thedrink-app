@@ -125,3 +125,39 @@ export const esDeliveryAdelantado = (t) => TIPOS_DELIVERY_ADELANTADO.includes(t)
 // (cobro como movimiento manual en caja, costo pagado por fuera), y esos meses
 // ya estan conciliados con el banco: NO se recalculan.
 export const FECHA_CORTE_DELIVERY = '2026-07-01'
+
+// ── Saldo de caja: LA fórmula ────────────────────────────────────────────────
+// Único lugar donde se calcula el saldo disponible. La usan Caja, Inicio
+// (Dashboard), MiDinero, CaminoAlBar y Proyecciones: si cambia cómo se cuenta
+// la plata, se cambia acá y en ningún otro lado. Antes estaba copiada a mano en
+// las cinco pantallas y divergió dos veces (jun y sep 2026); la última vez Caja
+// mostró ~$500k menos que Inicio por restar el costo de delivery dos veces.
+//
+//   saldo = ventas (litros × precio)
+//         + delivery cobrado al cliente      (órdenes desde FECHA_CORTE_DELIVERY)
+//         − costo de delivery (Uber/DiDi)    (órdenes desde FECHA_CORTE_DELIVERY)
+//         − compras que no son inversión
+//         + entradas manuales de caja, salvo 'Venta'   (ya está en `ventas`)
+//         − salidas manuales de caja, salvo 'Insumos'  (ya está en `compras`)
+//
+// `ventas.delivery` NO se resta. Es una columna legacy del primer mes (abr 2026):
+// solo 4 filas la tienen y ese mismo costo está registrado como salida de caja
+// "Transporte / Uber" — restarla dejaba esos $12.286 contados dos veces. Desde
+// que existen órdenes el costo vive en `ordenes.delivery` y se resta arriba.
+// Las órdenes previas al corte no se tocan: ese delivery se pagó por fuera y
+// esos meses ya están conciliados con el banco.
+//
+// Recibe las filas crudas de Supabase, sin enriquecer:
+//   ventas  { litros, precio_venta }        ordenes { fecha, delivery, delivery_cobrado }
+//   compras { precio_total, es_inversion }  caja    { tipo, categoria, monto }
+export function calcularSaldoCaja({ ventas = [], ordenes = [], compras = [], caja = [] }) {
+  const n = (x) => parseFloat(x) || 0
+  const totalVentas = (ventas || []).reduce((s, v) => s + n(v.litros) * n(v.precio_venta), 0)
+  const ordCorte = (ordenes || []).filter(o => (o.fecha || '') >= FECHA_CORTE_DELIVERY)
+  const deliveryCobrado = ordCorte.reduce((s, o) => s + n(o.delivery_cobrado), 0)
+  const costoDelivery = ordCorte.reduce((s, o) => s + n(o.delivery), 0)
+  const totalCompras = (compras || []).reduce((s, c) => s + (c.es_inversion ? 0 : n(c.precio_total)), 0)
+  const entradasManuales = (caja || []).filter(m => m.tipo === 'entrada' && m.categoria !== 'Venta').reduce((s, m) => s + n(m.monto), 0)
+  const salidasManuales = (caja || []).filter(m => m.tipo === 'salida' && m.categoria !== 'Insumos').reduce((s, m) => s + n(m.monto), 0)
+  return totalVentas + deliveryCobrado - costoDelivery - totalCompras + entradasManuales - salidasManuales
+}

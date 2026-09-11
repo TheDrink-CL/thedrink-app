@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { formatCLP, enriquecerVentasConDelivery, FECHA_CORTE_DELIVERY, esDeliveryAdelantado } from '../lib/calculos'
+import { formatCLP, calcularSaldoCaja, FECHA_CORTE_DELIVERY, esDeliveryAdelantado } from '../lib/calculos'
 
 // La pestaña "Publicidad" se eliminó (jun 2026): duplicaba el análisis de pauta
 // que ahora vive en Indicadores (ROAS semanal) y Análisis (origen de clientes),
@@ -56,35 +56,17 @@ export default function Caja() {
   async function loadData() {
     const [{ data: mov }, { data: vts }, { data: compras }, { data: ordenes }] = await Promise.all([
       supabase.from('caja').select('*').order('fecha', { ascending: false }),
-      supabase.from('ventas').select('litros, precio_venta, delivery, orden_id'),
+      supabase.from('ventas').select('litros, precio_venta'),
       supabase.from('compras').select('precio_total, es_inversion'),
       supabase.from('ordenes').select('id, fecha, delivery, delivery_cobrado, delivery_tipo'),
     ])
 
     setMovimientos(mov || [])
 
-    // Enriquecer ventas con el delivery (costo) y cobro de su orden, igual que
-    // el Dashboard, para que ambas pantallas muestren el MISMO saldo. El costo
-    // de delivery vive en `ordenes`, no en las filas de `ventas`.
-    const vtsEnr = enriquecerVentasConDelivery(vts || [], ordenes || [])
-    // Usar vtsEnr, no vts: era la razón de que Caja y Dashboard mostraran saldos
-    // distintos. Además, las 4 ventas legacy sin orden_id traen `delivery` en la
-    // fila Y ese mismo costo está como salida "Transporte / Uber" en caja, así
-    // que el saldo lo restaba dos veces. enriquecerVentasConDelivery deja esas
-    // filas en 0 y el costo queda contado una sola vez, desde su movimiento.
-    const totalVentas = vtsEnr.reduce((s, v) => s + (v.litros * v.precio_venta) - (v.delivery || 0), 0)
-    // Delivery desde el corte: se suma el cobro al cliente y se resta el costo (Uber/motoboy).
+    // La fórmula del saldo vive en calcularSaldoCaja (lib/calculos.js), la misma
+    // que usan Inicio, MiDinero, CaminoAlBar y Proyecciones. No recalcular acá.
+    setSaldo(calcularSaldoCaja({ ventas: vts, ordenes, compras, caja: mov }))
     const ordCorte = (ordenes || []).filter(o => o.fecha >= FECHA_CORTE_DELIVERY)
-    const totalDeliveryCobrado = ordCorte.reduce((s, o) => s + (parseFloat(o.delivery_cobrado) || 0), 0)
-    const totalCostoDelivery = ordCorte.reduce((s, o) => s + (parseFloat(o.delivery) || 0), 0)
-    const totalCompras = (compras || []).reduce((s, c) => s + (c.es_inversion ? 0 : c.precio_total), 0)
-    // Entradas manuales: se excluye 'Venta' (ya viene de la tabla ventas).
-    // 'Delivery' SÍ suma — es el cobro al cliente y no existe en ninguna otra tabla
-    // (ventas.delivery es lo que se PAGA a terceros, no lo que se cobra).
-    const movExtraEntradas = (mov || []).filter(m => m.tipo === 'entrada' && m.categoria !== 'Venta').reduce((s, m) => s + m.monto, 0)
-    const movExtraSalidas = (mov || []).filter(m => m.tipo === 'salida' && m.categoria !== 'Insumos').reduce((s, m) => s + m.monto, 0)
-
-    setSaldo(totalVentas + totalDeliveryCobrado - totalCostoDelivery - totalCompras + movExtraEntradas - movExtraSalidas)
 
     // Por pagarte: costo de delivery del mes en curso que saliÓ de la tarjeta
     // personal (DiDi), no de la cuenta del negocio. Uber se cobra de la misma
