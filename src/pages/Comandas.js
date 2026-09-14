@@ -58,7 +58,7 @@ function colorUrgencia(minutos) {
 }
 
 // ─── Tarjeta de comanda ───────────────────────────────────────────────────────
-function TarjetaComanda({ comanda, onListo, comandasConfig = {}, clientesPorNombre = {}, esVIP }) {
+function TarjetaComanda({ comanda, onListo, onToggleItem, comandasConfig = {}, clientesPorNombre = {}, esVIP }) {
   // Resolver distancia: del cliente vinculado o del cliente_nombre
   const cli = clientesPorNombre[(comanda.cliente_nombre || '').trim().toLowerCase()]
   const distanciaKm = cli ? cli.distancia_km : null
@@ -73,6 +73,8 @@ function TarjetaComanda({ comanda, onListo, comandasConfig = {}, clientesPorNomb
     ? { bg: 'rgba(127,119,221,0.06)', border: 'rgba(127,119,221,0.35)', texto: '#AFA9EC', label: '⏰' }
     : colorUrgencia(t.minutos)
   const items = Array.isArray(comanda.items) ? comanda.items : []
+  const nListos = items.filter(it => it.listo).length
+  const todoListo = items.length > 0 && nListos === items.length
 
   return (
     <div style={{
@@ -140,65 +142,113 @@ function TarjetaComanda({ comanda, onListo, comandasConfig = {}, clientesPorNomb
         </div>
       </div>
 
-      {/* Divisor */}
-      <div style={{ borderTop: `1px solid ${urgencia.border}`, opacity: 0.4 }} />
-
-      {/* Ítems */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {items.map((item, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-            <span style={{
-              fontSize: 'clamp(22px, 3.5vw, 42px)',
-              fontWeight: 900,
-              color: urgencia.texto,
-              lineHeight: 1,
-              minWidth: '1.8ch',
-              textAlign: 'right',
-              flexShrink: 0
-            }}>
-              {item.cantidad}×
-            </span>
-            <div>
-              <span style={{
-                fontSize: 'clamp(18px, 2.8vw, 36px)',
-                fontWeight: 700,
-                color: '#fff',
-                lineHeight: 1.2,
-                textTransform: 'capitalize'
-              }}>
-                {item.nombre}
-              </span>
-              {item.nota && (
-                <div style={{ fontSize: 'clamp(11px, 1.4vw, 16px)', color: 'rgba(255,255,255,0.5)', marginTop: 2 }}>
-                  {item.nota}
-                </div>
-              )}
-              {/* Receta armada en el LAB: el bartender no la conoce de memoria,
-                  así que la comanda tiene que traer el build completo. Se lee a
-                  distancia, no como nota al pie. */}
-              {item.build && (
-                <div style={{
-                  marginTop: 6, padding: '6px 10px', borderRadius: 8,
-                  background: 'rgba(127,119,221,0.14)',
-                  border: '1px solid rgba(127,119,221,0.4)',
-                }}>
-                  <div style={{
-                    fontSize: 'clamp(10px, 1.1vw, 14px)', color: '#AFA9EC',
-                    fontWeight: 800, letterSpacing: '0.08em', marginBottom: 2,
-                  }}>
-                    ⬡ RECETA NUEVA{item.lab_codigo ? ' · ' + item.lab_codigo : ''}
-                  </div>
-                  <div style={{
-                    fontSize: 'clamp(13px, 1.7vw, 22px)', color: '#fff',
-                    fontWeight: 600, lineHeight: 1.45,
-                  }}>
-                    {item.build}
-                  </div>
-                </div>
-              )}
-            </div>
+      {/* Divisor → barra de avance: cuántas líneas ya están preparadas */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ flex: 1, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+          <div style={{
+            width: `${items.length ? (nListos / items.length) * 100 : 0}%`, height: '100%',
+            background: todoListo ? '#48c78e' : urgencia.texto,
+            transition: 'width 0.3s ease, background 0.3s ease',
+          }} />
+        </div>
+        {items.length > 0 && (
+          <div style={{
+            fontSize: 'clamp(11px, 1.3vw, 15px)', fontWeight: 800, flexShrink: 0,
+            color: todoListo ? '#48c78e' : 'rgba(255,255,255,0.45)', letterSpacing: '0.05em',
+          }}>
+            {nListos}/{items.length} listos
           </div>
-        ))}
+        )}
+      </div>
+
+      {/* Ítems: cada línea se toca para marcarla como preparada. En comandas
+          grandes es la única forma de no perder la cuenta. El estado vive en
+          el JSON de items (item.listo) y se guarda en la base, así TV y
+          celular ven lo mismo y sobrevive a un refresh. */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {items.map((item, i) => {
+          const listo = !!item.listo
+          return (
+            <div key={i}
+              role="button" tabIndex={0} aria-pressed={listo}
+              onClick={() => onToggleItem(comanda, i)}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggleItem(comanda, i) } }}
+              style={{
+                display: 'flex', alignItems: 'baseline', gap: 10,
+                padding: '7px 10px', margin: '0 -10px', borderRadius: 12,
+                cursor: 'pointer', userSelect: 'none',
+                background: listo ? 'rgba(72,199,142,0.08)' : 'transparent',
+                transition: 'background 0.2s ease',
+              }}>
+              <span style={{
+                fontSize: 'clamp(22px, 3.5vw, 42px)',
+                fontWeight: 900,
+                color: listo ? '#48c78e' : urgencia.texto,
+                lineHeight: 1,
+                minWidth: '1.8ch',
+                textAlign: 'right',
+                flexShrink: 0,
+                opacity: listo ? 0.5 : 1,
+              }}>
+                {item.cantidad}×
+              </span>
+              <div style={{ flex: 1, minWidth: 0, opacity: listo ? 0.45 : 1, transition: 'opacity 0.2s ease' }}>
+                <span style={{
+                  fontSize: 'clamp(18px, 2.8vw, 36px)',
+                  fontWeight: 700,
+                  color: '#fff',
+                  lineHeight: 1.2,
+                  textTransform: 'capitalize',
+                  textDecoration: listo ? 'line-through' : 'none',
+                }}>
+                  {item.nombre}
+                </span>
+                {item.nota && (
+                  <div style={{ fontSize: 'clamp(11px, 1.4vw, 16px)', color: 'rgba(255,255,255,0.5)', marginTop: 2 }}>
+                    {item.nota}
+                  </div>
+                )}
+                {/* Receta armada en el LAB: el bartender no la conoce de memoria,
+                    así que la comanda tiene que traer el build completo. Se lee a
+                    distancia, no como nota al pie. Una vez preparado se pliega:
+                    ocupa mucho y ya no hace falta. */}
+                {item.build && !listo && (
+                  <div style={{
+                    marginTop: 6, padding: '6px 10px', borderRadius: 8,
+                    background: 'rgba(127,119,221,0.14)',
+                    border: '1px solid rgba(127,119,221,0.4)',
+                  }}>
+                    <div style={{
+                      fontSize: 'clamp(10px, 1.1vw, 14px)', color: '#AFA9EC',
+                      fontWeight: 800, letterSpacing: '0.08em', marginBottom: 2,
+                    }}>
+                      ⬡ RECETA NUEVA{item.lab_codigo ? ' · ' + item.lab_codigo : ''}
+                    </div>
+                    <div style={{
+                      fontSize: 'clamp(13px, 1.7vw, 22px)', color: '#fff',
+                      fontWeight: 600, lineHeight: 1.45,
+                    }}>
+                      {item.build}
+                    </div>
+                  </div>
+                )}
+              </div>
+              {/* Casilla: vacía = pendiente, llena = preparado */}
+              <span aria-hidden="true" style={{
+                alignSelf: 'flex-start', marginTop: 3, flexShrink: 0,
+                width: 'clamp(26px, 3vw, 40px)', height: 'clamp(26px, 3vw, 40px)',
+                borderRadius: '50%',
+                border: `2px solid ${listo ? '#48c78e' : 'rgba(255,255,255,0.25)'}`,
+                background: listo ? '#48c78e' : 'transparent',
+                color: '#09090f', fontWeight: 900, fontSize: 'clamp(14px, 1.8vw, 24px)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'background 0.2s ease, border-color 0.2s ease',
+              }}>
+                {listo ? '✓' : ''}
+              </span>
+            </div>
+          )
+        })}
       </div>
 
       {/* Nota de la comanda */}
@@ -211,14 +261,15 @@ function TarjetaComanda({ comanda, onListo, comandasConfig = {}, clientesPorNomb
         </>
       )}
 
-      {/* Botón listo — solo visible en modo no-TV (para uso desde la app normal) */}
+      {/* Botón de la comanda completa: la saca del panel. Cuando todas las
+          líneas ya están marcadas se enciende para que salte a la vista. */}
       <button
         onClick={() => { if (!esFutura) onListo(comanda.id) }}
         disabled={esFutura}
         style={{
-          background: esFutura ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.08)',
-          border: `1px solid ${urgencia.border}`,
-          color: urgencia.texto,
+          background: esFutura ? 'rgba(255,255,255,0.03)' : todoListo ? '#48c78e' : 'rgba(255,255,255,0.08)',
+          border: `1px solid ${todoListo && !esFutura ? '#48c78e' : urgencia.border}`,
+          color: todoListo && !esFutura ? '#09090f' : urgencia.texto,
           fontWeight: 800,
           fontSize: 'clamp(12px, 1.5vw, 16px)',
           padding: '10px 0',
@@ -228,8 +279,9 @@ function TarjetaComanda({ comanda, onListo, comandasConfig = {}, clientesPorNomb
           width: '100%',
           marginTop: 4,
           opacity: esFutura ? 0.7 : 1,
+          transition: 'background 0.3s ease, color 0.3s ease',
         }}>
-        {esFutura ? `🔒 Aún no es hora (faltan ${t.texto})` : '✓ LISTO'}
+        {esFutura ? `🔒 Aún no es hora (faltan ${t.texto})` : '✓ COMANDA LISTA'}
       </button>
     </div>
   )
@@ -307,6 +359,17 @@ export default function Comandas() {
   const marcarListo = async (id) => {
     await supabase.from('comandas').update({ estado: 'listo' }).eq('id', id)
     // No filtramos localmente — el realtime lo actualiza solo
+  }
+
+  // Marca/desmarca una línea como preparada. Optimista: el toque se ve al
+  // instante y el realtime confirma después. Si la base rechaza, se recarga
+  // para no quedar mostrando algo que no se guardó.
+  const toggleItemListo = async (comanda, idx) => {
+    const items = Array.isArray(comanda.items) ? comanda.items : []
+    const nuevos = items.map((it, i) => i === idx ? { ...it, listo: !it.listo } : it)
+    setComandas(prev => prev.map(c => c.id === comanda.id ? { ...c, items: nuevos } : c))
+    const { error } = await supabase.from('comandas').update({ items: nuevos }).eq('id', comanda.id)
+    if (error) cargarComandas()
   }
 
   // ─── Layout ───────────────────────────────────────────────────────────────
@@ -414,7 +477,7 @@ export default function Comandas() {
             activas.sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
             futuras.sort((a, b) => new Date(a.hora_objetivo) - new Date(b.hora_objetivo))
             return [...activas, ...futuras].map(c => (
-              <TarjetaComanda key={c.id} comanda={c} onListo={marcarListo}
+              <TarjetaComanda key={c.id} comanda={c} onListo={marcarListo} onToggleItem={toggleItemListo}
                 comandasConfig={comandasConfig} clientesPorNombre={clientesPorNombre} esVIP={esVip(c)} />
             ))
           })()}

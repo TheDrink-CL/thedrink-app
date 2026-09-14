@@ -236,6 +236,7 @@ function TarjetaComanda({ comanda, onConvertir, onArchivar, esVIP }) {
   const esListo = comanda.estado === 'listo'
   const color = esListo ? '#00b4b4' : minutos < 5 ? '#48c78e' : minutos < 10 ? '#ffc832' : '#ff5082'
   const items = comanda.items || []
+  const nListos = items.filter(it => it.listo).length
 
   return (
     <div style={{
@@ -260,16 +261,23 @@ function TarjetaComanda({ comanda, onConvertir, onArchivar, esVIP }) {
             </div>
           )}
         </div>
-        <div style={{ fontFamily:'monospace', fontSize:20, fontWeight:900, color, lineHeight:1 }}>{texto}</div>
+        <div style={{ textAlign:'right' }}>
+          <div style={{ fontFamily:'monospace', fontSize:20, fontWeight:900, color, lineHeight:1 }}>{texto}</div>
+          {/* Avance del bartender: lo va marcando línea a línea desde el panel /tv */}
+          {!esListo && nListos > 0 && (
+            <div style={{ fontSize:10, fontWeight:700, color:'#48c78e', marginTop:4 }}>{nListos}/{items.length} preparados</div>
+          )}
+        </div>
       </div>
 
       <div style={{ marginBottom:12 }}>
         {items.map((it, i) => (
-          <div key={i} style={{ display:'flex', gap:8, alignItems:'center', marginBottom:3 }}>
-            <span style={{ fontSize:14, fontWeight:800, color, minWidth:28 }}>{it.cantidad}x</span>
-            <span style={{ fontSize:14, color:'var(--text-strong)', fontWeight:600 }}>
+          <div key={i} style={{ display:'flex', gap:8, alignItems:'center', marginBottom:3, opacity: it.listo ? 0.6 : 1 }}>
+            <span style={{ fontSize:14, fontWeight:800, color: it.listo ? '#48c78e' : color, minWidth:28 }}>{it.cantidad}x</span>
+            <span style={{ fontSize:14, color:'var(--text-strong)', fontWeight:600, textDecoration: it.listo ? 'line-through' : 'none' }}>
               {it.receta_nombre || it.nombre}
             </span>
+            {it.listo && <span style={{ fontSize:12, fontWeight:800, color:'#48c78e' }}>✓</span>}
             {it.precio_venta && (
               <span style={{ fontSize:11, color:'var(--muted)', marginLeft:'auto' }}>
                 {formatCLP(it.precio_venta * it.cantidad)}
