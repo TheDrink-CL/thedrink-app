@@ -191,9 +191,10 @@ function EditRecetaModal({ receta, ingredientes, insumos, recetasExistentes, con
     setError('')
 
     // ── 0. Renombrar en cascada si el nombre cambió ─────────────────────────
-    // receta_ingredientes y ventas referencian la receta por nombre, así que
-    // hay que actualizar las tres tablas. Lo hacemos antes que cualquier otro
-    // update para que el nombre nuevo sea la fuente de verdad en adelante.
+    // receta_ingredientes, ventas y salidas_stock referencian la receta por
+    // nombre, así que hay que actualizar las cuatro tablas. Lo hacemos antes
+    // que cualquier otro update para que el nombre nuevo sea la fuente de
+    // verdad en adelante.
     const renombrado = nombreTrim !== receta.nombre
     if (renombrado) {
       const oldNombre = receta.nombre
@@ -219,6 +220,12 @@ function EditRecetaModal({ receta, ingredientes, insumos, recetasExistentes, con
         setError('No se pudo renombrar en ventas; se revirtio el cambio. Detalle: ' + errR3.message)
         setSaving(false); return
       }
+      // Salidas sin venta: su costo ya quedó congelado al registrarse, así que
+      // un nombre viejo solo afecta cómo se lee el historial. Se avisa, no se
+      // revierte todo por esto.
+      const { error: errR4 } = await supabase
+        .from('salidas_stock').update({ receta_nombre: nombreTrim }).eq('receta_nombre', oldNombre)
+      if (errR4) console.warn('Receta renombrada, pero no en salidas_stock:', errR4.message)
     }
 
     // ── 1. Actualizar campos de la receta ──────────────────────────────────

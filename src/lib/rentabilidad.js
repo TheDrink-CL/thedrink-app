@@ -6,6 +6,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { calcularCostoReceta } from './calculos'
+import { agruparSalidasPorMotivo } from './salidas'
 
 // Tarifa de costo de oportunidad del operador. Si no hay horas registradas o
 // la tarifa es 0, el margen neto = margen operativo (no se descuenta nada).
@@ -19,6 +20,7 @@ export const COSTO_OPORTUNIDAD_DEFAULT = 0 // $/hora — configurable desde Ajus
  * @param {Array}  p.recetaIngredientes filas de `receta_ingredientes`
  * @param {Array}  p.insumosPPP    filas de `insumos` con { nombre, costo_ppp }
  * @param {Array}  p.gastosCaja    filas de `caja` tipo salida (monto, categoria)
+ * @param {Array}  p.salidas       filas de `salidas_stock` (motivo, costo_valorizado)
  * @param {Object} p.config        { merma_pct, costo_envase }
  * @param {number} p.horasTrabajadas total de horas registradas (opcional)
  * @param {number} p.costoHora     tarifa $/h del operador (opcional)
@@ -30,6 +32,7 @@ export function calcularRentabilidad({
   recetaIngredientes = [],
   insumosPPP = [],
   gastosCaja = [],
+  salidas = [],
   config = {},
   horasTrabajadas = 0,
   costoHora = 0,
@@ -81,6 +84,13 @@ export function calcularRentabilidad({
     .filter(m => m.categoria !== 'Publicidad' && m.categoria !== 'Insumos')
     .reduce((s, m) => s + m.monto, 0)
 
+  // Producto sin venta: lo que salió de bodega y nadie pagó (marketing, canjes,
+  // pruebas, consumo interno, roturas), valorizado a COSTO. No es caja (la
+  // plata salió al comprar el insumo) y no es COGS (no hubo venta): cae acá,
+  // entre el margen bruto y el operativo, para que el bruto mida solo lo
+  // vendido y el operativo absorba lo que realmente cuesta operar.
+  const { porMotivo: salidasPorMotivo, total: productoSinVenta } = agruparSalidasPorMotivo(salidas)
+
   // ── Costo de oportunidad del operador ──────────────────────────────────────
   const costoOportunidad = (horasTrabajadas || 0) * (costoHora || 0)
   const tieneCostoOportunidad = costoOportunidad > 0
@@ -89,7 +99,7 @@ export function calcularRentabilidad({
   const gananciaBruta = ingresos - cogs
   const margenBruto = ingresos > 0 ? gananciaBruta / ingresos : 0
 
-  const gananciaOperativa = gananciaBruta - publicidad - transporte - otrosGastos
+  const gananciaOperativa = gananciaBruta - publicidad - transporte - otrosGastos - productoSinVenta
   const margenOperativo = ingresos > 0 ? gananciaOperativa / ingresos : 0
 
   const gananciaNeta = gananciaOperativa - costoOportunidad
@@ -112,6 +122,8 @@ export function calcularRentabilidad({
     transporte,
     mermasEstimadas,
     otrosGastos,
+    productoSinVenta,
+    salidasPorMotivo,
     costoOportunidad,
     tieneCostoOportunidad,
   }

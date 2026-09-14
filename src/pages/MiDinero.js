@@ -5,6 +5,7 @@ import { enriquecerVentasConDelivery } from '../lib/calculos'
 import { calcularFinanzasMensuales, sueldoPromedio, calcularRunway,
          calcularReservaSugerida, calcularRetirable, proyectarMesActual } from '../lib/finanzasMes'
 import { descargarCSV, BotonExportar } from '../lib/exportar'
+import { resumenMotivos } from '../lib/salidas'
 
 const MESES_ES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
 function labelMes(mes) {
@@ -409,6 +410,12 @@ function TableroMensual({ filas, splitSueldo, onEditMes, onEditSplit, onEditRese
                 <Stat label={`Margen op · ${(f.pctOperativo*100).toFixed(1)}%`}
                   valor={f.margenOperativo} color={f.esNegativo ? 'var(--pink)' : 'var(--green)'} />
               </div>
+              {f.productoSinVenta > 0 && (
+                <div style={{ fontSize:11, color:'var(--muted)', marginTop:-2, marginBottom:8, lineHeight:1.5 }}>
+                  El margen op. ya descuenta {formatCLP(f.productoSinVenta)} de producto sin venta
+                  {' '}({resumenMotivos(f.salidasPorMotivo, formatCLP)}).
+                </div>
+              )}
 
               {/* Sueldo y reposición */}
               {esActual ? (
@@ -690,7 +697,7 @@ export default function MiDinero() {
       const [
         { data: vts }, { data: cjaSalidas }, { data: cjaTodo },
         { data: cmp }, { data: recIng }, { data: ins },
-        { data: cfg }, { data: hist }, { data: ords },
+        { data: cfg }, { data: hist }, { data: ords }, { data: salidasStock },
       ] = await Promise.all([
         supabase.from('ventas').select('fecha, litros, precio_venta, delivery, receta_nombre, orden_id'),
         supabase.from('caja').select('fecha, monto, categoria, tipo').eq('tipo', 'salida'),
@@ -701,6 +708,9 @@ export default function MiDinero() {
         supabase.from('config').select('*'),
         supabase.from('historial_personal').select('*'),
         supabase.from('ordenes').select('id, fecha, delivery, delivery_cobrado'),
+        // Producto que salió sin venta (marketing, canjes, pruebas, consumo
+        // interno): baja el margen operativo del mes a costo. Ver lib/salidas.js.
+        supabase.from('salidas_stock').select('fecha, motivo, costo_valorizado'),
       ])
 
       const cfgMap = {}
@@ -713,6 +723,7 @@ export default function MiDinero() {
       const f = calcularFinanzasMensuales({
         ventas: vtsEnr,
         gastosCaja: cjaSalidas || [],
+        salidas: salidasStock || [],
         recetaIngredientes: recIng || [],
         insumosPPP: ins || [],
         config: {
@@ -801,12 +812,12 @@ export default function MiDinero() {
         <div className="page-title" style={{ marginBottom:0 }}>Mi Dinero</div>
         {filas.length > 0 && (
           <BotonExportar onClick={() => {
-            const headers = ['Mes','Ingresos','COGS','Margen bruto','Margen op','Sueldo (calc)','Sueldo (real)','Reposicion','Gasto personal','Colchon']
+            const headers = ['Mes','Ingresos','COGS','Margen bruto','Producto sin venta','Margen op','Sueldo (calc)','Sueldo (real)','Reposicion','Gasto personal','Colchon']
             const rows = filas.map(f => {
               const reg = historialMap[f.mes] || {}
               return [
                 f.mes, Math.round(f.ingresos), Math.round(f.cogs),
-                Math.round(f.margenBruto), Math.round(f.margenOperativo),
+                Math.round(f.margenBruto), Math.round(f.productoSinVenta || 0), Math.round(f.margenOperativo),
                 Math.round(f.sueldo), reg.sueldo_real ?? '',
                 Math.round(f.reposicion), reg.gasto ?? '', reg.colchon ?? '',
               ]

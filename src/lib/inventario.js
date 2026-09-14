@@ -199,3 +199,24 @@ export async function ajustarStockPorCompra(insumoNombre, cantidad, signo = 1) {
   if (!insumoNombre || !qty || isNaN(qty)) return { ok: true, fallidos: [] }
   return aplicarMovimientosStock({ [insumoNombre]: qty * signo })
 }
+
+// ─── Movimientos por SALIDAS SIN VENTA ───────────────────────────────────────
+// Producto que salió y nadie pagó (consumo interno, marketing, desarrollo,
+// canje, merma). Ver lib/salidas.js. Una salida por receta se descuenta EXACTO
+// igual que una venta (merma incluida; `sin_envase` equivale al "envase
+// devuelto" de una venta: el frasco no se toca). Una salida de insumo suelto
+// descuenta la cantidad declarada tal cual, sin merma: lo que se declara ya es
+// lo que realmente salió. `signo` -1 al registrar, +1 al borrar la salida.
+export async function ajustarStockPorSalida(salida, signo = -1) {
+  if (salida.receta_nombre) {
+    const item = {
+      receta_nombre: salida.receta_nombre,
+      litros: parseFloat(salida.litros) || 1,
+      devuelve_envase: !!salida.sin_envase,
+    }
+    return signo < 0 ? descontarStock([item]) : reintegrarStock([item])
+  }
+  const qty = parseFloat(salida.cantidad)
+  if (!salida.insumo_nombre || !qty || isNaN(qty)) return { ok: true, fallidos: [], faltantes: [], truncados: [] }
+  return aplicarMovimientosStock({ [salida.insumo_nombre]: qty * signo })
+}

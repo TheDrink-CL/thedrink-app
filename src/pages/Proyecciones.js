@@ -84,7 +84,7 @@ export default function Proyecciones() {
     try {
       const [
         { data: vts }, { data: ords }, { data: cmp }, { data: ins },
-        { data: recIng }, { data: cajaArr }, { data: cfgReal },
+        { data: recIng }, { data: cajaArr }, { data: cfgReal }, { data: salidasStock },
       ] = await Promise.all([
         supabase.from('ventas').select('id, fecha, litros, precio_venta, receta_nombre, orden_id, delivery'),
         supabase.from('ordenes').select('id, fecha, delivery, delivery_cobrado'),
@@ -93,6 +93,7 @@ export default function Proyecciones() {
         supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad, unidad'),
         supabase.from('caja').select('monto, tipo, categoria, fecha'),
         supabase.from('config').select('*'),
+        supabase.from('salidas_stock').select('fecha, motivo, costo_valorizado'),
       ])
       const caja = cajaArr || []
       const cfgMap = {}
@@ -116,6 +117,7 @@ export default function Proyecciones() {
         recetaIngredientes: recIng || [],
         insumosPPP: ins || [],
         gastosCaja: caja.filter(m => m.tipo === 'salida'),
+        salidas: salidasStock || [], // producto sin venta, a costo (lib/salidas.js)
         config: { merma_pct: merma, costo_envase: costoEnvase },
       })
       const ritmo = calcularRitmo(vts || [], rent)

@@ -27,17 +27,19 @@ function parseFecha(f) {
  * @param {Object} p
  * @param {Array}  p.ventas        filas de `ventas` con fecha, litros, precio_venta, delivery, receta_nombre
  * @param {Array}  p.gastosCaja    filas de `caja` tipo salida con fecha, monto, categoria
+ * @param {Array}  p.salidas       filas de `salidas_stock` con fecha, motivo, costo_valorizado
  * @param {Array}  p.recetaIngredientes
  * @param {Array}  p.insumosPPP
  * @param {Object} p.config        { merma_pct, costo_envase, split_sueldo_pct, split_reposicion_pct }
  *
  * @returns {Array} array ordenado por mes DESC, cada item:
- *   { mes, ingresos, cogs, margenBruto, margenOperativo,
+ *   { mes, ingresos, cogs, productoSinVenta, margenBruto, margenOperativo,
  *     pctBruto, pctOperativo, sueldo, reposicion, esNegativo }
  */
 export function calcularFinanzasMensuales({
   ventas = [],
   gastosCaja = [],
+  salidas = [],
   recetaIngredientes = [],
   insumosPPP = [],
   config = {},
@@ -63,19 +65,32 @@ export function calcularFinanzasMensuales({
     gastosPorMes[m].push(g)
   })
 
+  // Agrupar salidas sin venta por mes (producto que salió y nadie pagó)
+  const salidasPorMes = {}
+  salidas.forEach(s => {
+    const m = mesDe(s.fecha)
+    if (!m) return
+    if (!salidasPorMes[m]) salidasPorMes[m] = []
+    salidasPorMes[m].push(s)
+  })
+
   // Conjunto de meses que tienen al menos un movimiento
-  const meses = new Set([...Object.keys(ventasPorMes), ...Object.keys(gastosPorMes)])
+  const meses = new Set([
+    ...Object.keys(ventasPorMes), ...Object.keys(gastosPorMes), ...Object.keys(salidasPorMes),
+  ])
 
   // Para cada mes, correr el cálculo de rentabilidad acotado a ese mes
   const filas = []
   meses.forEach(mes => {
     const ventasMes = ventasPorMes[mes] || []
     const gastosMes = gastosPorMes[mes] || []
+    const salidasMes = salidasPorMes[mes] || []
     const rent = calcularRentabilidad({
       ventas: ventasMes,
       recetaIngredientes,
       insumosPPP,
       gastosCaja: gastosMes,
+      salidas: salidasMes,
       config,
     })
     // El sueldo del operador es el split aplicado al margen operativo.
@@ -94,6 +109,8 @@ export function calcularFinanzasMensuales({
       publicidad: rent.publicidad,
       transporte: rent.transporte,
       otrosGastos: rent.otrosGastos,
+      productoSinVenta: rent.productoSinVenta,
+      salidasPorMotivo: rent.salidasPorMotivo,
       margenBruto: rent.gananciaBruta,
       margenOperativo: margenOp,
       pctBruto: rent.margenBruto,

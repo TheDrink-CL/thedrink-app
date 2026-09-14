@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { calcularCostoReceta, formatCLP, formatPct, esOrigenIGAds } from '../lib/calculos'
 import { calcularRentabilidad } from '../lib/rentabilidad'
+import { resumenMotivos } from '../lib/salidas'
 import { enriquecerVentasConDelivery, calcularSaldoCaja } from '../lib/calculos'
 import CaminoAlBar from './CaminoAlBar'
 import SaludNegocio from './SaludNegocio'
@@ -183,7 +184,10 @@ function Rentabilidad({ r, comp }) {
       pesos: r.gananciaOperativa,
       color: 'var(--cyan)',
       delta: comp ? comp.operativo : null,
-      desc: 'Margen bruto menos publicidad, transporte/delivery y otros gastos variables. Es lo que deja la operación del día a día.',
+      desc: 'Margen bruto menos publicidad, transporte/delivery, otros gastos variables y el producto que salió sin venta (marketing, canjes, pruebas, consumo interno), a costo. Es lo que deja la operación del día a día.',
+      sub: r.productoSinVenta > 0
+        ? `incluye ${formatCLP(r.productoSinVenta)} de producto sin venta · ${resumenMotivos(r.salidasPorMotivo, formatCLP)}`
+        : null,
     },
     {
       label: 'Margen neto',
@@ -213,6 +217,11 @@ function Rentabilidad({ r, comp }) {
             <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
               {formatCLP(f.pesos)} {f.pesos >= 0 ? 'de ganancia' : 'de pérdida'}
             </div>
+            {f.sub && (
+              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2, lineHeight: 1.4 }}>
+                {f.sub}
+              </div>
+            )}
           </div>
           <div style={{ textAlign: 'right', flexShrink: 0 }}>
             <div style={{ fontSize: 22, fontWeight: 800, color: f.color }}>
@@ -358,13 +367,17 @@ export default function Dashboard() {
         supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad, unidad'),
         supabase.from('insumos').select('nombre, costo_ppp'),
         supabase.from('clientes').select('id, estado_contacto'),
+        supabase.from('salidas_stock').select('fecha, motivo, costo_valorizado'),
       ])
       const errores = results.map((r, i) => r.error ? { idx: i, msg: r.error.message } : null).filter(Boolean)
       if (errores.length > 0) {
-        const tablas = ['config', 'ventas', 'caja', 'compras', 'insumos', 'ordenes', 'receta_ingredientes', 'insumosConPPP', 'clientes']
+        const tablas = ['config', 'ventas', 'caja', 'compras', 'insumos', 'ordenes', 'receta_ingredientes', 'insumosConPPP', 'clientes', 'salidas_stock']
         throw new Error(errores.map(e => `${tablas[e.idx]}: ${e.msg}`).join(' · '))
       }
-      let [{ data: cfg }, { data: vts }, { data: cja }, { data: cmp }, { data: ins }, { data: ordenes }, { data: recIng }, { data: insumosConPPP }, { data: clientesRows }] = results
+      let [{ data: cfg }, { data: vts }, { data: cja }, { data: cmp }, { data: ins }, { data: ordenes }, { data: recIng }, { data: insumosConPPP }, { data: clientesRows }, { data: salidasRows }] = results
+      // Salidas sin venta (marketing, canjes, pruebas, consumo interno): entran
+      // al margen operativo a costo. Ver lib/salidas.js.
+      const salidas = salidasRows || []
 
       // Saldo de caja: plata real, sobre TODAS las filas y con la misma función
       // que Caja, MiDinero, CaminoAlBar y Proyecciones. Va antes del filtro de
@@ -422,6 +435,7 @@ export default function Dashboard() {
         recetaIngredientes: recIng || [],
         insumosPPP: insumosConPPP || [],
         gastosCaja: gastosCajaSalida,
+        salidas,
         config: { merma_pct: merma, costo_envase: costoEnvase },
         horasTrabajadas,
         costoHora,
@@ -435,13 +449,15 @@ export default function Dashboard() {
       const vtsPrev = vtsEnr.filter(v => parseFecha(v.fecha) >= _h60 && parseFecha(v.fecha) < _h30)
       const gastos30 = gastosCajaSalida.filter(m => m.fecha && parseFecha(m.fecha) >= _h30)
       const gastosPrev = gastosCajaSalida.filter(m => m.fecha && parseFecha(m.fecha) >= _h60 && parseFecha(m.fecha) < _h30)
+      const salidas30 = salidas.filter(x => x.fecha && parseFecha(x.fecha) >= _h30)
+      const salidasPrev = salidas.filter(x => x.fecha && parseFecha(x.fecha) >= _h60 && parseFecha(x.fecha) < _h30)
       const rent30 = calcularRentabilidad({
         ventas: vts30, recetaIngredientes: recIng || [], insumosPPP: insumosConPPP || [],
-        gastosCaja: gastos30, config: { merma_pct: merma, costo_envase: costoEnvase },
+        gastosCaja: gastos30, salidas: salidas30, config: { merma_pct: merma, costo_envase: costoEnvase },
       })
       const rentPrev = calcularRentabilidad({
         ventas: vtsPrev, recetaIngredientes: recIng || [], insumosPPP: insumosConPPP || [],
-        gastosCaja: gastosPrev, config: { merma_pct: merma, costo_envase: costoEnvase },
+        gastosCaja: gastosPrev, salidas: salidasPrev, config: { merma_pct: merma, costo_envase: costoEnvase },
       })
       const comparacionRent = {
         bruto:     rentPrev.ingresos > 0 ? rent30.margenBruto    - rentPrev.margenBruto    : null,

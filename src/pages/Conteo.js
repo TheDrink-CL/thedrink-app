@@ -13,6 +13,13 @@ import { formatCLP } from '../lib/calculos'
 // IMPORTANTE: esto NO toca la tabla `caja`. La plata salio de caja al comprar.
 // Re-contar mueve el valor del ACTIVO inventario, no el efectivo. Un faltante es
 // una perdida de valor (merma/robo/error), no una salida de caja nueva.
+//
+// Las SALIDAS SIN VENTA (marketing, canjes, pruebas, consumo interno; ver
+// lib/salidas.js) ya descontaron el stock teorico cuando se registraron, asi
+// que la diferencia del conteo es solo lo que NO esta explicado. Se muestran
+// como contexto para que el numero se lea bien. Se comparan por `created_at`
+// (cuando tocaron el stock), no por `fecha`: una salida cargada con fecha
+// atrasada igual descuenta el stock de hoy.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const fmtNum = (n) => {
@@ -32,30 +39,54 @@ export default function Conteo() {
 
   const [historial, setHistorial] = useState([])   // cabeceras
   const [lineasHist, setLineasHist] = useState([])  // todas las lineas, para tendencias
+  const [salidasHist, setSalidasHist] = useState([]) // salidas sin venta, para el contexto de cada conteo
   const [loadingHist, setLoadingHist] = useState(false)
+  // Salidas sin venta registradas despues del ultimo conteo: ya estan
+  // descontadas del teorico, la diferencia que salga ahora NO las incluye.
+  const [salidasDesde, setSalidasDesde] = useState({ desde: null, n: 0, total: 0 })
 
   useEffect(() => { loadInsumos() }, [])
   useEffect(() => { if (tab === 'historial') loadHistorial() }, [tab])
 
   async function loadInsumos() {
     setLoading(true)
-    const { data } = await supabase
-      .from('insumos')
-      .select('nombre, unidad, stock_actual, costo_ppp')
-      .order('nombre')
+    const [{ data }, { data: ultimo }, { data: sal }] = await Promise.all([
+      supabase.from('insumos').select('nombre, unidad, stock_actual, costo_ppp').order('nombre'),
+      supabase.from('conteos_inventario').select('fecha, created_at').order('created_at', { ascending: false }).limit(1),
+      supabase.from('salidas_stock').select('created_at, costo_valorizado'),
+    ])
     setInsumos(data || [])
+    const ult = ultimo?.[0] || null
+    const desdeUltimo = (sal || []).filter(x => !ult || x.created_at > ult.created_at)
+    setSalidasDesde({
+      desde: ult?.fecha || null,
+      n: desdeUltimo.length,
+      total: desdeUltimo.reduce((acc, x) => acc + (parseFloat(x.costo_valorizado) || 0), 0),
+    })
     setLoading(false)
   }
 
   async function loadHistorial() {
     setLoadingHist(true)
-    const [{ data: cab }, { data: lin }] = await Promise.all([
-      supabase.from('conteos_inventario').select('*').order('fecha', { ascending: false }).limit(60),
+    const [{ data: cab }, { data: lin }, { data: sal }] = await Promise.all([
+      supabase.from('conteos_inventario').select('*').order('created_at', { ascending: false }).limit(60),
       supabase.from('conteo_lineas').select('*').order('created_at', { ascending: false }).limit(2000),
+      supabase.from('salidas_stock').select('created_at, costo_valorizado'),
     ])
     setHistorial(cab || [])
     setLineasHist(lin || [])
+    setSalidasHist(sal || [])
     setLoadingHist(false)
+  }
+
+  // Salidas sin venta que tocaron el stock entre el conteo anterior y este.
+  // `historial` viene ordenado del mas nuevo al mas viejo: el anterior es i+1.
+  const salidasEntreConteos = (i) => {
+    const c = historial[i]
+    const prev = historial[i + 1]
+    return salidasHist
+      .filter(x => x.created_at <= c.created_at && (!prev || x.created_at > prev.created_at))
+      .reduce((acc, x) => acc + (parseFloat(x.costo_valorizado) || 0), 0)
   }
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2800) }
@@ -145,7 +176,7 @@ export default function Conteo() {
       .sort((a, b) => Math.abs(b.diff_valor) - Math.abs(a.diff_valor))
       .slice(0, 5)
 
-    setUltimoInforme({ ajuste, valorTeorico, valorReal, conDiff, total: lineas.length, culpables, fecha: cab.fecha })
+    setUltimoInforme({ ajuste, valorTeorico, valorReal, conDiff, total: lineas.length, culpables, fecha: cab.fecha, salidas: salidasDesde })
     setConteo({})
     setSaving(false)
     showToast('Conteo guardado')
@@ -207,6 +238,13 @@ export default function Conteo() {
               <div style={{ fontSize: 12, color: 'var(--text)' }}>
                 {ultimoInforme.conDiff} de {ultimoInforme.total} insumos con diferencia.
               </div>
+              {ultimoInforme.salidas?.n > 0 && (
+                <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.5, marginTop: 6 }}>
+                  Aparte, desde el conteo anterior registraste {ultimoInforme.salidas.n} salida{ultimoInforme.salidas.n === 1 ? '' : 's'} sin
+                  venta por {formatCLP(ultimoInforme.salidas.total)} (marketing, canjes, pruebas, consumo). Esas ya estaban
+                  descontadas: el ajuste de arriba es solo lo que NO esta explicado.
+                </div>
+              )}
               {ultimoInforme.culpables.length > 0 && (
                 <div style={{ marginTop: 10 }}>
                   <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Mayores diferencias:</div>
@@ -232,6 +270,19 @@ export default function Conteo() {
             Conta fisicamente lo que hay y anotalo. Deja vacio lo que no cuentes hoy.
             La app compara contra el stock teorico y valoriza la diferencia con el costo promedio.
           </div>
+
+          {salidasDesde.n > 0 && (
+            <div className="card" style={{ marginBottom: 12, padding: '10px 14px' }}>
+              <div style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.5 }}>
+                {salidasDesde.desde ? `Desde el conteo del ${salidasDesde.desde}` : 'Hasta ahora'} registraste{' '}
+                <strong>{salidasDesde.n} salida{salidasDesde.n === 1 ? '' : 's'} sin venta</strong> por{' '}
+                <strong style={{ color: 'var(--pink)' }}>{formatCLP(salidasDesde.total)}</strong>.
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.5, marginTop: 2 }}>
+                Ya estan descontadas del teorico. Lo que salga en este conteo es lo que NO tiene explicacion.
+              </div>
+            </div>
+          )}
 
           <div className="card" style={{ marginBottom: 90 }}>
             {insumos.length === 0 && (
@@ -360,12 +411,17 @@ export default function Conteo() {
                 <>
                   <div className="section-divider">Conteos</div>
                   <div className="card">
-                    {historial.map(c => (
+                    {historial.map((c, i) => {
+                      const salidasPeriodo = salidasEntreConteos(i)
+                      return (
                       <div className="list-item" key={c.id} style={{ gap: 8 }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div className="list-item-name">{c.fecha}</div>
                           <div className="list-item-sub">
                             {c.lineas_con_diff} con diferencia
+                            {salidasPeriodo > 0 && (
+                              <span> · {formatCLP(salidasPeriodo)} en salidas sin venta ya explicadas</span>
+                            )}
                             {c.nota && <span style={{ color: 'var(--muted)' }}> · {c.nota}</span>}
                           </div>
                         </div>
@@ -373,7 +429,8 @@ export default function Conteo() {
                           {c.ajuste_valor >= 0 ? '+' : '-'}{formatCLP(Math.abs(c.ajuste_valor))}
                         </div>
                       </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </>
               )}

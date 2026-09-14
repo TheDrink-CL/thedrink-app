@@ -53,30 +53,42 @@ export default function Stock() {
   useEffect(() => { loadData() }, [])
 
   async function loadData() {
-    const [{ data: ins }, { data: vts }, { data: recIng }, { data: cfg }] = await Promise.all([
+    const [{ data: ins }, { data: vts }, { data: recIng }, { data: cfg }, { data: sal }] = await Promise.all([
       supabase.from('insumos').select('*').order('nombre'),
       supabase.from('ventas').select('fecha, receta_nombre, litros').order('fecha', { ascending: false }).limit(200),
       supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad'),
       supabase.from('config').select('clave, valor'),
+      // Salidas sin venta (marketing, pruebas, consumo interno): no son demanda,
+      // pero sí gastan insumos. Si son recurrentes, hay que comprar para ellas.
+      supabase.from('salidas_stock').select('fecha, receta_nombre, litros, insumo_nombre, cantidad').order('fecha', { ascending: false }).limit(200),
     ])
     setInsumos(ins || [])
 
     // Calcular consumo diario promedio por insumo (últimos 14 días)
     const hoy = new Date()
     const hace14 = new Date(hoy); hace14.setDate(hoy.getDate() - 14)
-    const vtsPeriodo = (vts || []).filter(v => {
-      const [y, m, d] = (v.fecha || '').split('-').map(Number)
+    const enPeriodo = (f) => {
+      const [y, m, d] = (f || '').split('-').map(Number)
       return new Date(y, m - 1, d) >= hace14
-    })
+    }
+    const vtsPeriodo = (vts || []).filter(v => enPeriodo(v.fecha))
+    const salPeriodo = (sal || []).filter(x => enPeriodo(x.fecha))
 
-    // Agrupar ventas por receta en el período
+    // Agrupar ventas (y salidas por receta) por receta en el período
     const litrosPorReceta = {}
     vtsPeriodo.forEach(v => {
       litrosPorReceta[v.receta_nombre] = (litrosPorReceta[v.receta_nombre] || 0) + v.litros
     })
+    salPeriodo.filter(x => x.receta_nombre).forEach(x => {
+      litrosPorReceta[x.receta_nombre] = (litrosPorReceta[x.receta_nombre] || 0) + (parseFloat(x.litros) || 0)
+    })
 
     // Calcular consumo total de insumos en el período
     const consumoTotal = {}
+    // Salidas de insumo suelto: la cantidad declarada es la real, sin merma.
+    salPeriodo.filter(x => x.insumo_nombre).forEach(x => {
+      consumoTotal[x.insumo_nombre] = (consumoTotal[x.insumo_nombre] || 0) + (parseFloat(x.cantidad) || 0)
+    })
     // Merma desde config: los días de cobertura que muestra esta pantalla tienen
     // que salir de la misma merma con la que se costea y se descuenta bodega.
     const cfgMap = Object.fromEntries((cfg || []).map(c => [c.clave, c.valor]))
@@ -151,7 +163,7 @@ export default function Stock() {
       {tabStock === 'comprar' && (
         <div>
           <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.6 }}>
-            Basado en consumo real de los últimos 14 días. Ajusta el horizonte según cuántos días quieres cubrir.
+            Basado en consumo real de los últimos 14 días (ventas y salidas sin venta). Ajusta el horizonte según cuántos días quieres cubrir.
           </div>
           {/* Selector de días */}
           <div className="toggle-row" style={{ marginBottom: 14 }}>
@@ -279,7 +291,7 @@ export default function Stock() {
 
       {tabStock === 'estado' && <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.6 }}>
         Toca cualquier insumo para actualizar el stock o configurar el nivel de alerta.
-        El stock se actualiza automáticamente al registrar una compra.
+        El stock se actualiza automáticamente al registrar una compra, una venta o una salida sin venta.
       </div>}
 
       {tabStock === 'estado' && <div className="card">

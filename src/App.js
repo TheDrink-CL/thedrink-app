@@ -9,6 +9,7 @@ import Cuentas from './pages/Cuentas'
 import Catalogo from './pages/Catalogo'
 import Stock from './pages/Stock'
 import Conteo from './pages/Conteo'
+import Salidas from './pages/Salidas'
 import Clientes from './pages/Clientes'
 import Aprendizajes from './pages/Aprendizajes'
 import Proyecciones from './pages/Proyecciones'
@@ -111,6 +112,14 @@ const TABS_MAS = [
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <rect x="3" y="3" width="18" height="18" rx="2"/>
       <path d="M9 8h6"/><path d="M9 12h6"/><path d="M9 16h4"/>
+    </svg>
+  )},
+  { id: 'salidas', label: 'Salidas', icon: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M21 8v13H3V8"/>
+      <path d="M1 3h22v5H1z"/>
+      <path d="M10 12h4"/>
+      <path d="M16 17l3 3 3-3"/><path d="M19 14v6"/>
     </svg>
   )},
   { id: 'aprendizajes', label: 'Aprendizajes', icon: (
@@ -268,6 +277,7 @@ export default function App() {
       {tab === 'catalogo'     && <Catalogo />}
       {tab === 'stock'        && <Stock />}
       {tab === 'conteo'       && <Conteo />}
+      {tab === 'salidas'      && <Salidas />}
       {tab === 'clientes'     && <Clientes />}
       {tab === 'aprendizajes' && <Aprendizajes />}
       {tab === 'proyecciones' && <Proyecciones />}

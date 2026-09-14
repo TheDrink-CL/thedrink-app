@@ -161,7 +161,7 @@ export default function CaminoAlBar() {
       const [
         { data: vts }, { data: ords }, { data: cls },
         { data: cmp }, { data: ins }, { data: recIng },
-        { data: cajaArr }, { data: cfgReal },
+        { data: cajaArr }, { data: cfgReal }, { data: salidasStock },
       ] = await Promise.all([
         supabase.from('ventas').select('id, fecha, litros, precio_venta, receta_nombre, orden_id, delivery'),
         supabase.from('ordenes').select('id, fecha, cliente_nombre, delivery, delivery_cobrado'),
@@ -171,8 +171,12 @@ export default function CaminoAlBar() {
         supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad, unidad'),
         supabase.from('caja').select('monto, tipo, categoria, fecha'),
         supabase.from('config').select('*'),
+        supabase.from('salidas_stock').select('fecha, motivo, costo_valorizado'),
       ])
       const caja = cajaArr || []
+      // Producto sin venta (marketing, canjes, pruebas, consumo interno): baja
+      // el margen operativo a costo. Ver lib/salidas.js.
+      const salidas = salidasStock || []
 
       // ── Config: objetivos (con defaults si la fila no existe) ────────────
       const cfgMap = {}
@@ -210,6 +214,7 @@ export default function CaminoAlBar() {
         recetaIngredientes: recIng || [],
         insumosPPP: ins || [],
         gastosCaja: caja.filter(m => m.tipo === 'salida'),
+        salidas,
         config: { merma_pct: merma, costo_envase: costoEnvase },
       })
       const ritmo = calcularRitmo(vts || [], rent)
@@ -237,6 +242,7 @@ export default function CaminoAlBar() {
         recetaIngredientes: recIng || [],
         insumosPPP: ins || [],
         gastosCaja: caja.filter(m => m.tipo === 'salida' && m.fecha && parseFecha(m.fecha) >= hace30),
+        salidas: salidas.filter(x => x.fecha && parseFecha(x.fecha) >= hace30),
         config: { merma_pct: merma, costo_envase: costoEnvase },
       })
       const margen30 = rent30.ingresos > 0 ? rent30.margenBruto : 0
