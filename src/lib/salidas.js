@@ -76,6 +76,29 @@ export function resumenMotivos(porMotivo, formatCLP) {
     .join(' · ')
 }
 
+// ── Agrupar filas en salidas ─────────────────────────────────────────────────
+// Las líneas cargadas juntas comparten `grupo_id` (un canje de varios tragos).
+// Una fila sin grupo (anterior a la migración 20260915) es una salida de una
+// sola línea. Conserva el orden en que vienen las filas (fecha desc). Cada
+// salida: { key, fecha, motivo, destinatario, nota, lineas, ids, total }.
+export function agruparEnSalidas(filas = []) {
+  const grupos = new Map()
+  ;(filas || []).forEach(f => {
+    const key = f.grupo_id || `fila-${f.id}`
+    if (!grupos.has(key)) {
+      grupos.set(key, {
+        key, fecha: f.fecha, motivo: f.motivo, destinatario: f.destinatario, nota: f.nota,
+        lineas: [], ids: [], total: 0,
+      })
+    }
+    const g = grupos.get(key)
+    g.lineas.push(f)
+    g.ids.push(f.id)
+    g.total += parseFloat(f.costo_valorizado) || 0
+  })
+  return [...grupos.values()]
+}
+
 // Descripción humana de qué salió: "1 lt de Mojito" / "200 ml de Gin".
 export function describirSalida(s) {
   if (s.receta_nombre) {

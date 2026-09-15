@@ -202,21 +202,49 @@ export async function ajustarStockPorCompra(insumoNombre, cantidad, signo = 1) {
 
 // ─── Movimientos por SALIDAS SIN VENTA ───────────────────────────────────────
 // Producto que salió y nadie pagó (consumo interno, marketing, desarrollo,
-// canje, merma). Ver lib/salidas.js. Una salida por receta se descuenta EXACTO
+// canje, merma). Ver lib/salidas.js. Una línea por receta se descuenta EXACTO
 // igual que una venta (merma incluida; `sin_envase` equivale al "envase
-// devuelto" de una venta: el frasco no se toca). Una salida de insumo suelto
+// devuelto" de una venta: el frasco no se toca). Una línea de insumo suelto
 // descuenta la cantidad declarada tal cual, sin merma: lo que se declara ya es
 // lo que realmente salió. `signo` -1 al registrar, +1 al borrar la salida.
-export async function ajustarStockPorSalida(salida, signo = -1) {
-  if (salida.receta_nombre) {
-    const item = {
-      receta_nombre: salida.receta_nombre,
-      litros: parseFloat(salida.litros) || 1,
-      devuelve_envase: !!salida.sin_envase,
-    }
-    return signo < 0 ? descontarStock([item]) : reintegrarStock([item])
+//
+// Recibe TODAS las líneas de una salida y las aplica en (a lo más) dos
+// escrituras: una para las recetas y una para los insumos sueltos. No se
+// puede hacer una llamada por línea en paralelo: el patrón leer→sumar→escribir
+// de aplicarMovimientosStock haría que dos líneas del mismo insumo se pisen.
+export async function ajustarStockPorSalidas(lineas, signo = -1) {
+  const vacio = { ok: true, fallidos: [], faltantes: [], truncados: [] }
+  const porReceta = (lineas || [])
+    .filter(l => l.receta_nombre)
+    .map(l => ({
+      receta_nombre: l.receta_nombre,
+      litros: parseFloat(l.litros) || 1,
+      devuelve_envase: !!l.sin_envase,
+    }))
+  const movsInsumo = {}
+  ;(lineas || []).filter(l => !l.receta_nombre && l.insumo_nombre).forEach(l => {
+    const qty = parseFloat(l.cantidad)
+    if (!qty || isNaN(qty)) return
+    movsInsumo[l.insumo_nombre] = (movsInsumo[l.insumo_nombre] || 0) + qty * signo
+  })
+
+  const resultados = []
+  if (porReceta.length > 0) {
+    resultados.push(await (signo < 0 ? descontarStock(porReceta) : reintegrarStock(porReceta)))
   }
-  const qty = parseFloat(salida.cantidad)
-  if (!salida.insumo_nombre || !qty || isNaN(qty)) return { ok: true, fallidos: [], faltantes: [], truncados: [] }
-  return aplicarMovimientosStock({ [salida.insumo_nombre]: qty * signo })
+  if (Object.keys(movsInsumo).length > 0) {
+    resultados.push(await aplicarMovimientosStock(movsInsumo))
+  }
+  if (resultados.length === 0) return vacio
+  return resultados.reduce((acc, r) => ({
+    ok: acc.ok && !!r.ok,
+    fallidos: [...acc.fallidos, ...(r.fallidos || [])],
+    faltantes: [...acc.faltantes, ...(r.faltantes || [])],
+    truncados: [...acc.truncados, ...(r.truncados || [])],
+  }), vacio)
+}
+
+// Atajo para una salida de una sola línea.
+export async function ajustarStockPorSalida(salida, signo = -1) {
+  return ajustarStockPorSalidas([salida], signo)
 }
