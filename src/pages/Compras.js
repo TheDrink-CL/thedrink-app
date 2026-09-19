@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { ajustarStockPorCompra } from '../lib/inventario'
+import { aplicarMovimientosStock, mensajeStock } from '../lib/inventario'
 import { formatCLP } from '../lib/calculos'
 
 function ConfirmModal({ mensaje, onConfirm, onCancel }) {
@@ -207,14 +207,9 @@ function EditCompraModal({ compra, insumos, proveedores, onSave, onCancel }) {
       nota: nota || null
     }).eq('id', compra.id)
     if (err) { setSaving(false); setError(err.message); return }
-    // Ajustar inventario por el cambio: revertir la cantidad/insumo viejos y
-    // aplicar los nuevos. Solo afecta compras de insumo (no activos fijos).
-    // Solo se hace si el update anterior tuvo éxito, para no desajustar stock
-    // por una edición que en realidad no se guardó.
-    if (compra.tipo !== 'activo_fijo') {
-      await ajustarStockPorCompra(compra.insumo_nombre, compra.cantidad, -1)
-      await ajustarStockPorCompra(insumoNombre, parseFloat(cantidad), +1)
-    }
+    // El stock y el PPP los ajusta el trigger `compras_stock_ppp_trg` en la
+    // base (revierte la cantidad/insumo viejos y aplica los nuevos). Hacerlo
+    // también acá era contar la compra dos veces.
     setSaving(false)
     onSave()
   }
@@ -560,11 +555,11 @@ export default function Compras() {
       tipo: 'insumo',
     })
     if (!error) {
-      // Compra de insumo SUMA al inventario.
-      await ajustarStockPorCompra(form.insumo_nombre, cantidadFinal, +1)
+      // La compra SUMA al inventario y recalcula el PPP desde la base (trigger
+      // `compras_stock_ppp_trg`). No sumar acá: sería la segunda vez.
       const toastMsg = esCitrico && limonEnKg
-        ? `Compra registrada · ${limonMlCalculado}ml ${esNaranja ? 'naranja' : 'limón'} · PPP actualizado`
-        : 'Compra registrada · PPP actualizado'
+        ? `Compra registrada · ${limonMlCalculado}ml ${esNaranja ? 'naranja' : 'limón'} · stock y PPP actualizados`
+        : 'Compra registrada · stock y PPP actualizados'
       showToast(toastMsg)
       setForm(f => ({ ...f, insumo_nombre: '', cantidad: '', precio_total: '', proveedor_id: '', nota: '' }))
       setLimonEnKg(false)
@@ -610,16 +605,9 @@ export default function Compras() {
   const handleEliminar = async (compra) => {
     const { error } = await supabase.from('compras').delete().eq('id', compra.id)
     if (error) { showToast(`No se pudo eliminar la compra: ${error.message}`); setConfirmar(null); return }
-    // Revertir el stock que esta compra de insumo había sumado. Solo si el
-    // delete arriba tuvo éxito, para no desajustar stock de una compra que
-    // en realidad sigue existiendo.
-    if (compra && compra.tipo !== 'activo_fijo') {
-      await ajustarStockPorCompra(compra.insumo_nombre, compra.cantidad, -1)
-    }
-    // OJO: el trigger que recalcula costo_ppp es `after insert`, así que borrar
-    // una compra NO recalcula el PPP — la compra borrada sigue pesando en el
-    // costo promedio. No prometer en el toast algo que no pasa.
-    showToast('Compra eliminada · stock ajustado · el PPP NO se recalcula')
+    // El trigger `compras_stock_ppp_trg` resta del stock lo que esta compra
+    // había sumado y recalcula el PPP sin ella.
+    showToast('Compra eliminada · stock y PPP ajustados')
     setConfirmar(null)
     loadData()
   }
@@ -642,16 +630,15 @@ export default function Compras() {
     const goma = insumos.find(i => i.nombre === 'Goma')
     if (!azucar || !goma) { showToast('No se encontró Azúcar o Goma en insumos'); return }
     setLoading(true)
-    const [resAzucar, resGoma] = await Promise.all([
-      supabase.from('insumos').update({ stock_actual: Math.max(0, (azucar.stock_actual || 0) - azucarParaGoma) }).eq('nombre', 'Azúcar'),
-      supabase.from('insumos').update({ stock_actual: (goma.stock_actual || 0) + parseFloat(mlGoma) }).eq('nombre', 'Goma'),
-    ])
-    if (resAzucar.error || resGoma.error) {
-      showToast(`No se pudo fabricar goma: ${(resAzucar.error || resGoma.error).message}`)
+    // Mismo motor que ventas y salidas: un solo update atómico en la base.
+    const res = await aplicarMovimientosStock({ 'Azúcar': -azucarParaGoma, 'Goma': parseFloat(mlGoma) })
+    if (!res.ok) {
+      showToast(`No se pudo fabricar goma: ${mensajeStock(res) || 'error al actualizar'}`)
       setLoading(false)
       return
     }
-    showToast(`Goma fabricada ✓ · -${azucarParaGoma}g azúcar · +${mlGoma}ml goma`)
+    const aviso = mensajeStock(res)
+    showToast(`Goma fabricada ✓ · -${azucarParaGoma}g azúcar · +${mlGoma}ml goma${aviso ? ' · OJO: ' + aviso : ''}`)
     setFabricandoGoma(false)
     setMlGoma('')
     loadData()

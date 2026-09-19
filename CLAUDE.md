@@ -80,6 +80,29 @@ Debe devolver `[]` o error de permiso. Si devuelve filas, esa tabla está abiert
 - **Registro público de usuarios: debe seguir DESACTIVADO** en Supabase Auth. Si
   se reabre, cualquiera se registra como `authenticated` y saltea todo el
   blindaje.
+- **Funciones RPC: `security invoker` y `grant execute` solo a `authenticated`**
+  (ej. `ajustar_stock`, migración `20260919_stock_atomico.sql`). Invoker =
+  RLS sigue mandando adentro. Nunca `security definer` para algo que llame el
+  navegador: bypassa RLS igual que la service_role.
+
+## Inventario: quién mueve `insumos.stock_actual`
+
+Un solo dueño por movimiento. Migración `20260919_stock_atomico.sql`.
+
+- Ventas, comandas→venta y salidas sin venta: **solo el cliente**
+  (`src/lib/inventario.js` → RPC `ajustar_stock`, un UPDATE atómico que no se
+  corta en 0). Incluye la regla global de 1 sticker + 2 bombillas por unidad
+  (`EMPAQUE_POR_UNIDAD`). No hay trigger en `ventas`; no agregar uno.
+- Compras: **solo el trigger `compras_stock_trg`** (insert suma, delete resta,
+  update ajusta). El cliente NO toca el stock por compras: hasta el 19-sep lo
+  hacían el trigger y el cliente, y cada compra entraba dos veces.
+- Bolsas plásticas: trigger `trigger_bolsa_orden` (−1 por pedido, +1 al borrarlo).
+- PPP: trigger `on_compra_recalcula_ppp`, no se toca.
+- Conteo y edición manual en Stock: pisan el valor, a propósito.
+
+**La base tiene objetos que no nacieron en el repo.** Antes de agregar en el
+cliente algo que "la base debería hacer", mirar `pg_trigger` (query en la
+migración de arriba). Todo trigger nuevo va en una migración.
 
 ## La única excepción anónima: `public.feedback`
 

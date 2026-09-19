@@ -1,14 +1,19 @@
 // ─── Módulo central de inventario ────────────────────────────────────────────
-// Única fuente de verdad para mover `insumos.stock_actual`. Toda venta, compra
-// o ajuste que deba tocar el stock pasa por aquí, para que los tres puntos de
-// la app (página Ventas, conversión de Comandas y registro de Compras) usen
-// exactamente la misma lógica.
+// Única fuente de verdad para mover `insumos.stock_actual` desde el cliente:
+// ventas (página Ventas y conversión de Comandas) y salidas sin venta.
 //
-// NOTA sobre concurrencia: el patrón aquí es "leer stock_actual → sumar delta →
-// escribir". Si dos dispositivos guardan a la vez sobre el mismo insumo, una
-// escritura puede pisar a la otra y perderse un movimiento. Para volverlo
-// atómico habría que mover el ajuste a un RPC/trigger en Supabase. Por ahora se
-// mantiene en cliente para no introducir una migración de base.
+// Las COMPRAS ya no pasan por aquí: el trigger `compras_stock_ppp_trg`
+// (migración 20260919_stock_atomico) suma al insertar, resta al borrar y
+// ajusta la diferencia al editar. Antes lo hacían el trigger histórico Y el
+// cliente, y cada compra entraba dos veces a bodega.
+//
+// La resta la hace la base (RPC `ajustar_stock`, un solo UPDATE atómico), no
+// el navegador: dos dispositivos guardando a la vez ya no se pisan. Y no se
+// corta en 0: un stock negativo es información ("se vendió más de lo que la
+// app sabía que había" = falta registrar una compra o el conteo estaba mal),
+// no algo que esconder. Cortarlo en 0 creaba stock fantasma: el descuento se
+// truncaba pero el reintegro al editar/borrar el pedido devolvía el monto
+// completo.
 
 import { supabase } from './supabase'
 
@@ -29,12 +34,24 @@ export async function cargarMerma() {
 }
 
 // ─── Movimientos por VENTAS ──────────────────────────────────────────────────
+// Empaque que sale con CADA unidad (frasco) aparte de la receta: el sticker y
+// las 2 bombillas. Es una regla global, no una fila en cada una de las 40
+// recetas. Hasta el 19-sep la hacía un trigger en `ventas` que nunca los
+// devolvía al editar/borrar y que los cobraba dos veces a las recetas que ya
+// los listaban. Si una receta los trae como ingrediente explícito, manda la
+// receta. Sin merma: un sticker no se derrama.
+export const EMPAQUE_POR_UNIDAD = { 'Stickers': 1, 'Bombillas': 2 }
+
 // Calcula cuánto descontar/reintegrar de cada insumo para un set de ítems.
 // `signo`: -1 para descontar (venta nueva), +1 para reintegrar (venta borrada/editada).
 // Aplica merma del 8% al INSUMO al descontar; al reintegrar se devuelve el mismo
 // monto que se descontó originalmente (con merma incluida) para que el reverso
-// sea exacto. ENVASE se cuenta como un insumo más, EXCEPTO si la venta tiene
-// "envase devuelto" (en cuyo caso el frasco vuelve al stock al instante).
+// sea exacto. Cada ítem puede traer:
+//   - devuelve_envase / nota 'envase devuelto': el frasco vuelve al instante,
+//     así que no se descuenta ni se reintegra. El sticker y las bombillas se
+//     fueron igual.
+//   - sin_envase (salidas sin venta, prueba en coctelera): no hubo frasco, ni
+//     sticker, ni bombillas. Solo el líquido.
 // Acepta opcionalmente `insumosMap` = { nombre.toLowerCase: { aplica_merma } }.
 // Si un insumo tiene aplica_merma=false, su descuento no se infla con merma.
 export function calcularMovimientosStock(itemsValidos, ingredientesPorReceta, signo, insumosMap = {}, merma = MERMA_DEFAULT) {
@@ -42,21 +59,28 @@ export function calcularMovimientosStock(itemsValidos, ingredientesPorReceta, si
   itemsValidos.forEach(it => {
     const litros = parseFloat(it.litros) || 1
     const devuelve = !!it.devuelve_envase || it.nota === 'envase devuelto'
+    const sinEnvase = !!it.sin_envase
     const ingsReceta = ingredientesPorReceta[it.receta_nombre] || []
     ingsReceta.forEach(ing => {
       // "Envase" abarca el legacy 'ENVASE' y cualquier insumo 'Frascos *'.
       const nombre = ing.insumo_nombre || ''
       const esEnvase = nombre === 'ENVASE' || nombre.startsWith('Frascos ')
-      // Si el cliente devuelve el envase, no se descuenta ni se reintegra.
-      if (esEnvase && devuelve) return
+      const esEmpaque = Object.prototype.hasOwnProperty.call(EMPAQUE_POR_UNIDAD, nombre)
+      if (esEnvase && (devuelve || sinEnvase)) return
+      if (esEmpaque && sinEnvase) return
       // Merma aplica a insumos consumibles fraccionables. Se excluye:
-      // - Cualquier envase/frasco (reutilizable).
+      // - Cualquier envase/frasco (reutilizable) y el empaque (unidades enteras).
       // - Insumos marcados aplica_merma=false en BD (latas cerradas, etc.).
       const meta = insumosMap[nombre.toLowerCase()]
       const aplicaMermaInsumo = meta ? meta.aplica_merma !== false : true
-      const factorMerma = (esEnvase || !aplicaMermaInsumo) ? 1 : (1 + merma)
+      const factorMerma = (esEnvase || esEmpaque || !aplicaMermaInsumo) ? 1 : (1 + merma)
       const cantidad = ing.cantidad * litros * factorMerma
       movs[nombre] = (movs[nombre] || 0) + cantidad * signo
+    })
+    if (sinEnvase) return
+    Object.entries(EMPAQUE_POR_UNIDAD).forEach(([nombre, porUnidad]) => {
+      if (ingsReceta.some(ing => ing.insumo_nombre === nombre)) return
+      movs[nombre] = (movs[nombre] || 0) + porUnidad * litros * signo
     })
   })
   return movs
@@ -64,43 +88,69 @@ export function calcularMovimientosStock(itemsValidos, ingredientesPorReceta, si
 
 // Aplica un set de movimientos al stock (puede ser mezcla de + y -).
 //
-// Devuelve { ok, fallidos, faltantes, truncados }:
+// Devuelve { ok, fallidos, faltantes, negativos }:
 //   - faltantes: insumos que NO existen con ese nombre exacto en la tabla. Antes
-//     se ignoraban en silencio: el `.in()` no los devolvía, no se actualizaba
-//     nada, y el toast decía "guardado ✓" con la bodega intacta. Es la causa más
-//     probable del descuadre entre lo comprado y lo que hay en bodega.
-//   - truncados: el descuento pedía más de lo que había y se cortó en 0. Importa
-//     avisar porque el reverso (reintegrarStock) devuelve el monto COMPLETO, así
-//     que cada ciclo descontar→borrar infla el inventario con producto que no existe.
+//     se ignoraban en silencio: no se actualizaba nada y el toast decía
+//     "guardado ✓" con la bodega intacta. Casi siempre es un nombre que no
+//     calza exacto entre la receta y la tabla insumos.
+//   - negativos: insumos que quedaron bajo 0 después de descontar. No es un
+//     error del movimiento (se descontó lo que correspondía); es un aviso de
+//     que la bodega no tenía registrado lo que realmente había.
 // `fallidos` incluye faltantes y errores de update, así los callers que ya miran
 // ese campo avisan sin cambiar nada.
+const RES_VACIO = { ok: true, fallidos: [], faltantes: [], negativos: [] }
+
+// PostgREST responde así cuando el RPC todavía no existe (migración sin correr).
+const esRpcAusente = (error) =>
+  error && (error.code === 'PGRST202' || /could not find the function/i.test(error.message || ''))
+
 export async function aplicarMovimientosStock(movs) {
   const nombresInsumos = Object.keys(movs).filter(n => movs[n] !== 0)
-  if (nombresInsumos.length === 0) return { ok: true, fallidos: [], faltantes: [], truncados: [] }
+  if (nombresInsumos.length === 0) return { ...RES_VACIO }
+  const payload = {}
+  nombresInsumos.forEach(n => { payload[n] = movs[n] })
+
+  const { data, error } = await supabase.rpc('ajustar_stock', { movs: payload })
+  if (esRpcAusente(error)) return aplicarMovimientosStockLegacy(movs)
+  if (error || !data) {
+    return { ok: false, fallidos: nombresInsumos, faltantes: [], negativos: [] }
+  }
+  return armarResultado(nombresInsumos, movs, data.map(r => ({ nombre: r.nombre, stock: parseFloat(r.stock_actual) })), [])
+}
+
+// Camino viejo (leer → sumar → escribir), solo mientras `ajustar_stock` no
+// exista en la base. Sin el corte en 0, por la misma razón que el RPC.
+async function aplicarMovimientosStockLegacy(movs) {
+  const nombresInsumos = Object.keys(movs).filter(n => movs[n] !== 0)
   const { data: stocks, error } = await supabase
     .from('insumos')
     .select('nombre, stock_actual')
     .in('nombre', nombresInsumos)
   if (error || !stocks) {
-    return { ok: false, fallidos: nombresInsumos, faltantes: [], truncados: [] }
+    return { ok: false, fallidos: nombresInsumos, faltantes: [], negativos: [] }
   }
-
-  const encontrados = new Set(stocks.map(s => s.nombre))
-  const faltantes = nombresInsumos.filter(n => !encontrados.has(n))
-
-  const truncados = []
   const resultados = await Promise.all(stocks.map(ins => {
-    const delta = movs[ins.nombre] || 0
-    const bruto = (ins.stock_actual || 0) + delta
-    const nuevo = Math.max(0, bruto)
-    if (bruto < 0) truncados.push({ nombre: ins.nombre, faltante: -bruto })
+    const nuevo = (parseFloat(ins.stock_actual) || 0) + (movs[ins.nombre] || 0)
     return supabase.from('insumos').update({ stock_actual: nuevo }).eq('nombre', ins.nombre)
-      .then(r => ({ nombre: ins.nombre, error: r.error }))
+      .then(r => ({ nombre: ins.nombre, stock: nuevo, error: r.error }))
   }))
+  return armarResultado(
+    nombresInsumos, movs,
+    resultados.filter(r => !r.error),
+    resultados.filter(r => r.error).map(r => r.nombre),
+  )
+}
 
-  const conError = resultados.filter(r => r.error).map(r => r.nombre)
+function armarResultado(pedidos, movs, actualizados, conError) {
+  const ok = new Set(actualizados.map(r => r.nombre))
+  const faltantes = pedidos.filter(n => !ok.has(n) && !conError.includes(n))
+  // Solo avisa el negativo cuando ESTE movimiento descontó: reintegrar un
+  // pedido sobre un stock ya negativo no es noticia nueva.
+  const negativos = actualizados
+    .filter(r => r.stock < 0 && (movs[r.nombre] || 0) < 0)
+    .map(r => ({ nombre: r.nombre, stock: r.stock }))
   const fallidos = [...faltantes, ...conError]
-  return { ok: fallidos.length === 0, fallidos, faltantes, truncados }
+  return { ok: fallidos.length === 0, fallidos, faltantes, negativos }
 }
 
 // Carga los ingredientes de las recetas que aparecen en estos ítems.
@@ -183,43 +233,33 @@ export function mensajeStock(res) {
   }
   const conError = (res.fallidos || []).filter(n => !(res.faltantes || []).includes(n))
   if (conError.length) partes.push(`no se pudieron actualizar: ${conError.join(', ')}`)
-  if (res.truncados?.length) {
-    const d = res.truncados.map(t => `${t.nombre} (faltaban ${Math.round(t.faltante)})`).join(', ')
-    partes.push(`quedaron en 0 porque no alcanzaba el stock: ${d}`)
+  if (res.negativos?.length) {
+    const d = res.negativos.map(t => `${t.nombre} (${Math.round(t.stock)})`).join(', ')
+    partes.push(`quedaron en negativo, falta registrar compra o corregir el stock: ${d}`)
   }
   return partes.length ? partes.join(' · ') : null
-}
-
-// ─── Movimientos por COMPRAS ─────────────────────────────────────────────────
-// Una compra de insumo SUMA `cantidad` al stock de ese insumo. Solo aplica a
-// compras de tipo 'insumo' (los activos fijos no son inventario). `signo` es +1
-// al registrar y -1 al revertir (editar/borrar una compra).
-export async function ajustarStockPorCompra(insumoNombre, cantidad, signo = 1) {
-  const qty = parseFloat(cantidad)
-  if (!insumoNombre || !qty || isNaN(qty)) return { ok: true, fallidos: [] }
-  return aplicarMovimientosStock({ [insumoNombre]: qty * signo })
 }
 
 // ─── Movimientos por SALIDAS SIN VENTA ───────────────────────────────────────
 // Producto que salió y nadie pagó (consumo interno, marketing, desarrollo,
 // canje, merma). Ver lib/salidas.js. Una línea por receta se descuenta EXACTO
-// igual que una venta (merma incluida; `sin_envase` equivale al "envase
-// devuelto" de una venta: el frasco no se toca). Una línea de insumo suelto
+// igual que una venta (merma incluida, frasco, sticker y bombillas; con
+// `sin_envase` solo el líquido). Una línea de insumo suelto
 // descuenta la cantidad declarada tal cual, sin merma: lo que se declara ya es
 // lo que realmente salió. `signo` -1 al registrar, +1 al borrar la salida.
 //
 // Recibe TODAS las líneas de una salida y las aplica en (a lo más) dos
-// escrituras: una para las recetas y una para los insumos sueltos. No se
-// puede hacer una llamada por línea en paralelo: el patrón leer→sumar→escribir
-// de aplicarMovimientosStock haría que dos líneas del mismo insumo se pisen.
+// escrituras: una para las recetas y una para los insumos sueltos. Se agrupan
+// para que dos líneas del mismo insumo se sumen antes de ir a la base (y
+// porque el camino viejo, leer→sumar→escribir, las haría pisarse).
 export async function ajustarStockPorSalidas(lineas, signo = -1) {
-  const vacio = { ok: true, fallidos: [], faltantes: [], truncados: [] }
+  const vacio = { ...RES_VACIO }
   const porReceta = (lineas || [])
     .filter(l => l.receta_nombre)
     .map(l => ({
       receta_nombre: l.receta_nombre,
       litros: parseFloat(l.litros) || 1,
-      devuelve_envase: !!l.sin_envase,
+      sin_envase: !!l.sin_envase,
     }))
   const movsInsumo = {}
   ;(lineas || []).filter(l => !l.receta_nombre && l.insumo_nombre).forEach(l => {
@@ -240,7 +280,7 @@ export async function ajustarStockPorSalidas(lineas, signo = -1) {
     ok: acc.ok && !!r.ok,
     fallidos: [...acc.fallidos, ...(r.fallidos || [])],
     faltantes: [...acc.faltantes, ...(r.faltantes || [])],
-    truncados: [...acc.truncados, ...(r.truncados || [])],
+    negativos: [...acc.negativos, ...(r.negativos || [])],
   }), vacio)
 }
 

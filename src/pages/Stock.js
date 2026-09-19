@@ -334,7 +334,7 @@ export default function Stock() {
                   <div style={{ marginTop: 5, height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden' }}>
                     <div style={{
                       height: '100%', borderRadius: 2,
-                      width: Math.min(100, (ins.stock_actual / (ins.stock_minimo * 3)) * 100) + '%',
+                      width: Math.max(0, Math.min(100, (ins.stock_actual / (ins.stock_minimo * 3)) * 100)) + '%',
                       background: estadoColor[estado],
                       transition: 'width 0.4s'
                     }} />
