@@ -151,6 +151,23 @@ decodifica en `ImportarPedido` y materializa los prototipos como recetas.
 (`Páginas web/app pedidos/deploy/v1/index.html`). Si cambias una, cambia la
 otra en el mismo movimiento o los pedidos se rechazan en silencio.
 
+## Campañas de WhatsApp (pestaña «Campañas»)
+
+Tablas `campanas` y `campana_mensajes` (migración `20260920_campanas.sql`,
+RLS cerrado como todo). Una campaña = un mensaje base + un texto por cliente,
+escrito a partir de las fichas de WhatsApp y las órdenes.
+
+- **La app solo lee y marca** (`pendiente` → `enviado` / `omitido`). El botón
+  abre `wa.me` con el texto puesto; nadie manda nada automático. Helpers en
+  `src/lib/whatsapp.js` (`normalizarTelefono`, `linkWhatsApp`).
+- **El escritor está fuera del repo**: `Documents/The Drink/campañas/publicar.js`
+  inserta la campaña con la service_role desde el PC de Rodrigo (la key vive en
+  `Documents/The Drink/informe-semanal/.env`, nunca acá ni en Vercel para esto).
+- Respeta el veto de Reactivar: `clientes.estado_contacto` en
+  `no_contactar`/`excluido` deja el mensaje sin botón aunque la campaña lo traiga.
+  No usa `estado_contacto` para marcar envíos: eso es de la máquina de estados de
+  Reactivar (1 compra → toques → frío) y no se mezcla.
+
 ## Referencias
 
 - `BLINDAJE-pasos.md` — runbook de despliegue del blindaje (orden seguro).
