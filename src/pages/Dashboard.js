@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { calcularCostoReceta, formatCLP, formatPct, esOrigenIGAds } from '../lib/calculos'
 import { calcularRentabilidad } from '../lib/rentabilidad'
 import { resumenMotivos } from '../lib/salidas'
+import { fuenteDeCompra } from '../lib/inventario'
 import { enriquecerVentasConDelivery, calcularSaldoCaja } from '../lib/calculos'
 import CaminoAlBar from './CaminoAlBar'
 import SaludNegocio from './SaludNegocio'
@@ -362,7 +363,7 @@ export default function Dashboard() {
         supabase.from('ventas').select('*').order('fecha', { ascending: false }),
         supabase.from('caja').select('*'),
         supabase.from('compras').select('precio_total, es_inversion, tipo'),
-        supabase.from('insumos').select('nombre, stock_actual, stock_minimo, unidad, costo_ppp'),
+        supabase.from('insumos').select('nombre, stock_actual, stock_minimo, unidad, costo_ppp, rinde_insumo, rinde_factor'),
         supabase.from('ordenes').select('id, fecha, medio_pago, cliente_nombre, cliente_id, delivery, delivery_cobrado'),
         supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad, unidad'),
         supabase.from('insumos').select('nombre, costo_ppp'),
@@ -561,7 +562,11 @@ export default function Dashboard() {
       const topRecetas = Object.entries(porReceta).sort((a, b) => b[1].litros - a[1].litros).slice(0, 5)
       const topPorGanancia = Object.entries(porReceta).sort((a, b) => b[1].ganancia - a[1].ganancia).slice(0, 5)
 
-      const alertas = (ins || []).filter(i => i.stock_actual != null && i.stock_minimo != null && i.stock_actual <= i.stock_minimo)
+      // Cada alerta lleva qué se compra para reponerla: la goma baja se
+      // repone comprando azúcar (insumos.rinde_insumo), y la alerta lo dice.
+      const alertas = (ins || [])
+        .filter(i => i.stock_actual != null && i.stock_minimo != null && i.stock_actual <= i.stock_minimo)
+        .map(i => ({ ...i, fuente: fuenteDeCompra(i, ins) }))
       setAlertasStock(alertas)
 
       const ahora = new Date()
@@ -655,12 +660,30 @@ export default function Dashboard() {
           <div style={{ fontSize: 11, color: 'var(--pink)', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700, marginBottom: 8 }}>
             Stock critico
           </div>
-          {alertasStock.map(i => (
-            <div key={i.nombre} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-              <div style={{ fontSize: 14, color: 'var(--text-strong)', fontWeight: 600 }}>{i.nombre}</div>
-              <div style={{ fontSize: 12, color: 'var(--pink)' }}>{i.stock_actual} {i.unidad} (min {i.stock_minimo})</div>
-            </div>
-          ))}
+          {alertasStock.map(i => {
+            // Lo que falta para volver al mínimo, en la unidad de lo que se compra.
+            const faltaCompra = i.fuente ? Math.ceil((i.stock_minimo - i.stock_actual) / i.fuente.factor) : null
+            return (
+              <div key={i.nombre} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <div style={{ fontSize: 14, color: 'var(--text-strong)', fontWeight: 600 }}>
+                  {i.nombre}
+                  {i.fuente && (
+                    <span style={{ fontSize: 12, color: 'var(--cyan)', fontWeight: 600, marginLeft: 8 }}>
+                      → comprar {i.fuente.nombre.toLowerCase()}
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--pink)', textAlign: 'right' }}>
+                  {Math.round(i.stock_actual * 10) / 10} {i.unidad} (min {i.stock_minimo})
+                  {i.fuente && (
+                    <div style={{ color: 'var(--cyan)' }}>
+                      ≥ {faltaCompra} {i.fuente.unidad} de {i.fuente.nombre.toLowerCase()}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
 

@@ -55,6 +55,15 @@ export const insumosQueSeCompran = (insumos) => {
   return (insumos || []).filter(i => !derivados.has(i.nombre))
 }
 
+// Para un insumo que se obtiene de otro (Goma ← Azúcar), el que hay que
+// comprar: { nombre, unidad, factor }, o null si se compra tal cual. Las
+// alertas y la lista de compras hablan del que se compra, no del que se
+// stockea: cuando la goma esté baja, lo que falta es azúcar.
+export const fuenteDeCompra = (ins, insumos) => {
+  const f = (insumos || []).find(i => i.rinde_insumo && i.rinde_insumo === ins?.nombre)
+  return f ? { nombre: f.nombre, unidad: f.unidad, factor: parseFloat(f.rinde_factor) || 1 } : null
+}
+
 // { nombre: delta } → lo mismo, con los insumos que rinden otro sumados en su
 // destino y multiplicados por el factor.
 function enrutarMovimientos(movs, insumosMap) {

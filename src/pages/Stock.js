@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { insumosEnBodega } from '../lib/inventario'
+import { insumosEnBodega, fuenteDeCompra } from '../lib/inventario'
 
 function EditModal({ insumo, onSave, onCancel }) {
   const [stockActual, setStockActual] = useState(insumo.stock_actual ?? '')
@@ -144,10 +144,7 @@ export default function Stock() {
   // (insumos.rinde_insumo, migración 20260921). Acá se lista lo que sí hay.
   const enBodega = insumosEnBodega(insumos)
   // Para un insumo que se obtiene de otro (Goma ← Azúcar), el que se compra.
-  const fuenteDe = (ins) => {
-    const f = insumos.find(i => i.rinde_insumo === ins.nombre)
-    return f ? { nombre: f.nombre, unidad: f.unidad, factor: parseFloat(f.rinde_factor) || 1 } : null
-  }
+  const fuenteDe = (ins) => fuenteDeCompra(ins, insumos)
 
   const criticos = enBodega.filter(i => getEstado(i) === 'critico')
   const bajos = enBodega.filter(i => getEstado(i) === 'bajo')
@@ -281,24 +278,23 @@ export default function Stock() {
           <div className="card-title" style={{ color: criticos.length > 0 ? 'var(--pink)' : '#f59e0b' }}>
             ⚠ Alertas de stock
           </div>
-          {criticos.map(i => (
-            <div className="list-item" key={i.nombre}>
-              <div>
-                <div className="list-item-name" style={{ color: 'var(--pink)' }}>{i.nombre}</div>
-                <div className="list-item-sub">Stock actual: {i.stock_actual} {i.unidad} · Mínimo: {i.stock_minimo} {i.unidad}</div>
+          {[...criticos.map(i => ({ i, nivel: 'Crítico', color: 'var(--pink)' })),
+            ...bajos.map(i => ({ i, nivel: 'Bajo', color: '#f59e0b' }))].map(({ i, nivel, color }) => {
+            // La goma baja se repone comprando azúcar: la alerta dice qué comprar.
+            const fuente = fuenteDe(i)
+            return (
+              <div className="list-item" key={i.nombre}>
+                <div>
+                  <div className="list-item-name" style={{ color }}>
+                    {i.nombre}
+                    {fuente && <span style={{ fontSize: 12, color: 'var(--cyan)', marginLeft: 8 }}>→ comprar {fuente.nombre.toLowerCase()}</span>}
+                  </div>
+                  <div className="list-item-sub">Stock actual: {Math.round(i.stock_actual * 10) / 10} {i.unidad} · Mínimo: {i.stock_minimo} {i.unidad}</div>
+                </div>
+                <div style={{ fontSize: 11, fontWeight: 700, color, textTransform: 'uppercase' }}>{nivel}</div>
               </div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--pink)', textTransform: 'uppercase' }}>Crítico</div>
-            </div>
-          ))}
-          {bajos.map(i => (
-            <div className="list-item" key={i.nombre}>
-              <div>
-                <div className="list-item-name" style={{ color: '#f59e0b' }}>{i.nombre}</div>
-                <div className="list-item-sub">Stock actual: {i.stock_actual} {i.unidad} · Mínimo: {i.stock_minimo} {i.unidad}</div>
-              </div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#f59e0b', textTransform: 'uppercase' }}>Bajo</div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 

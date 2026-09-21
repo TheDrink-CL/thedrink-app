@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatCLP } from '../lib/calculos'
-import { insumosEnBodega } from '../lib/inventario'
+import { insumosEnBodega, fuenteDeCompra } from '../lib/inventario'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Conteo de inventario — "el stock es dinero"
@@ -96,7 +96,7 @@ export default function Conteo() {
   // (insumos.rinde_insumo, migracion 20260921). La lista completa queda solo
   // para el recordatorio en la fila de Goma.
   const enBodega = insumosEnBodega(insumos)
-  const fuenteDe = (ins) => insumos.find(i => i.rinde_insumo === ins.nombre) || null
+  const fuenteDe = (ins) => fuenteDeCompra(ins, insumos)
 
   const costoDe = (ins) => parseFloat(ins.costo_ppp) || 0
   const teoricoDe = (ins) => parseFloat(ins.stock_actual) || 0
@@ -308,7 +308,7 @@ export default function Conteo() {
                     </div>
                     {fuente && (
                       <div className="list-item-sub" style={{ fontSize: 11 }}>
-                        Suma el {fuente.nombre.toLowerCase()} sin preparar: 1000 {fuente.unidad} = {Math.round(1000 * (parseFloat(fuente.rinde_factor) || 1))} {ins.unidad || ''}
+                        Suma el {fuente.nombre.toLowerCase()} sin preparar: 1000 {fuente.unidad} = {Math.round(1000 * fuente.factor)} {ins.unidad || ''}
                       </div>
                     )}
                   </div>
