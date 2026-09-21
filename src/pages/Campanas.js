@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { linkWhatsApp, normalizarTelefono } from '../lib/whatsapp'
+import Reactivar from './Reactivar'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CAMPAÑAS — mensajes de WhatsApp preparados con IA desde el PC (tablas
@@ -10,6 +11,9 @@ import { linkWhatsApp, normalizarTelefono } from '../lib/whatsapp'
 // WhatsApp con el texto puesto y marca el mensaje como enviado; vos decidís.
 // Respeta el veto de Reactivar: un cliente `no_contactar` / `excluido` sale
 // sin botón, aunque la campaña lo traiga.
+// Reactivar (la lista automática de clientes de 1 compra, con sus toques,
+// fríos y vetos) vive acá adentro como segunda vista: mismo objetivo, un solo
+// lugar en el menú.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const FILTROS = [
@@ -120,6 +124,7 @@ export default function Campanas() {
   const [mensajes, setMensajes] = useState([])
   const [vetados, setVetados] = useState({})   // últimos 8 dígitos del teléfono → true
   const [filtro, setFiltro] = useState('pendiente')
+  const [vista, setVista] = useState('campanas') // 'campanas' | 'reactivar'
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
@@ -183,6 +188,26 @@ export default function Campanas() {
     showToast(nuevo === 'cerrada' ? 'Campaña cerrada' : 'Campaña reabierta')
   }
 
+  const selectorVista = (
+    <div className="toggle-row" style={{ marginBottom: 12 }}>
+      <button className={`toggle-btn ${vista === 'campanas' ? 'active-entrada' : ''}`} onClick={() => setVista('campanas')} style={{ fontSize: 12 }}>
+        📣 Campañas preparadas
+      </button>
+      <button className={`toggle-btn ${vista === 'reactivar' ? 'active-entrada' : ''}`} onClick={() => setVista('reactivar')} style={{ fontSize: 12 }}>
+        🔁 Reactivar (1 compra)
+      </button>
+    </div>
+  )
+
+  if (vista === 'reactivar') {
+    return (
+      <div>
+        <div className="page" style={{ paddingBottom: 0 }}>{selectorVista}</div>
+        <Reactivar />
+      </div>
+    )
+  }
+
   if (cargando) return <div className="loading">Cargando...</div>
 
   const esVetado = (m) => { const t = normalizarTelefono(m.telefono); return !!(t && vetados[t.slice(-8)]) }
@@ -194,6 +219,7 @@ export default function Campanas() {
       {toast && <div className="toast">{toast}</div>}
 
       <div className="page-title">Campañas</div>
+      {selectorVista}
 
       <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6, marginBottom: 12 }}>
         Mensajes escritos <b style={{ color: 'var(--text-strong)' }}>para cada persona</b> a partir de su historial. El botón abre WhatsApp con el texto

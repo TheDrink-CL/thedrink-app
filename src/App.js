@@ -11,11 +11,6 @@ import Stock from './pages/Stock'
 import Conteo from './pages/Conteo'
 import Salidas from './pages/Salidas'
 import Clientes from './pages/Clientes'
-import Aprendizajes from './pages/Aprendizajes'
-import Proyecciones from './pages/Proyecciones'
-import Conciliacion from './pages/Conciliacion'
-import Horas from './pages/Horas'
-import Alertas, { useAlertasCount } from './pages/Alertas'
 import Opiniones, { useOpinionesCount } from './pages/Opiniones'
 import MiDinero from './pages/MiDinero'
 import DeliveryLogin, { isDeliveryUnlocked } from './pages/DeliveryLogin'
@@ -27,7 +22,6 @@ import ImportarPedido from './pages/ImportarPedido'
 import Comandas from './pages/Comandas'
 import ComandasPendientes from './pages/ComandasPendientes'
 import Indicadores from './pages/Indicadores'
-import Reactivar from './pages/Reactivar'
 import Campanas from './pages/Campanas'
 
 const TABS_MAIN = [
@@ -67,11 +61,6 @@ const TABS_MAS = [
   { id: 'analisis', label: 'Analisis', icon: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-    </svg>
-  )},
-  { id: 'reactivar', label: 'Reactivar', icon: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
     </svg>
   )},
   { id: 'campanas', label: 'Campañas', icon: (
@@ -129,39 +118,6 @@ const TABS_MAS = [
       <path d="M16 17l3 3 3-3"/><path d="M19 14v6"/>
     </svg>
   )},
-  { id: 'aprendizajes', label: 'Aprendizajes', icon: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
-      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
-    </svg>
-  )},
-  { id: 'proyecciones', label: 'Proyecciones', icon: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <line x1="18" y1="20" x2="18" y2="10"/>
-      <line x1="12" y1="20" x2="12" y2="4"/>
-      <line x1="6" y1="20" x2="6" y2="14"/>
-    </svg>
-  )},
-  { id: 'conciliacion', label: 'Conciliacion', icon: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M3 3v18h18"/>
-      <path d="M7 14l4-4 4 4 5-7"/>
-      <circle cx="7" cy="14" r="1.2"/>
-      <circle cx="15" cy="14" r="1.2"/>
-    </svg>
-  )},
-  { id: 'horas', label: 'Horas', icon: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="12" r="9"/>
-      <polyline points="12 7 12 12 15 14"/>
-    </svg>
-  )},
-  { id: 'alertas', label: 'Alertas', icon: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/>
-      <path d="M13.7 21a2 2 0 0 1-3.4 0"/>
-    </svg>
-  )},
   { id: 'opiniones', label: 'Opiniones', icon: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <circle cx="12" cy="12" r="9"/>
@@ -214,12 +170,11 @@ export default function App() {
   // true = logueado. Es el candado real: sin sesion, la base (RLS cerrado) no
   // devuelve ni acepta nada.
   const [sesion, setSesion] = useState(null)
-  const alertasCount = useAlertasCount()
   const opinionesCount = useOpinionesCount()
   // El badge del boton "Mas" suma todo lo que hay pendiente ahi adentro.
-  const pendientesMas = alertasCount + opinionesCount
+  const pendientesMas = opinionesCount
   const badgeDe = (id) =>
-    id === 'alertas' ? alertasCount : id === 'opiniones' ? opinionesCount : 0
+    id === 'opiniones' ? opinionesCount : 0
 
   useEffect(() => {
     let vivo = true
@@ -274,7 +229,6 @@ export default function App() {
     <div>
       {tab === 'dashboard'    && <Dashboard />}
       {tab === 'indicadores'  && <Indicadores />}
-      {tab === 'reactivar'    && <Reactivar />}
       {tab === 'campanas'     && <Campanas />}
       {tab === 'ventas'       && <Ventas />}
       {tab === 'compras'      && <Compras />}
@@ -287,11 +241,6 @@ export default function App() {
       {tab === 'conteo'       && <Conteo />}
       {tab === 'salidas'      && <Salidas />}
       {tab === 'clientes'     && <Clientes />}
-      {tab === 'aprendizajes' && <Aprendizajes />}
-      {tab === 'proyecciones' && <Proyecciones />}
-      {tab === 'conciliacion' && <Conciliacion />}
-      {tab === 'horas'        && <Horas />}
-      {tab === 'alertas'      && <Alertas />}
       {tab === 'opiniones'    && <Opiniones />}
       {tab === 'mi-dinero'    && <MiDinero />}
       {tab === 'importar-pedido' && <ImportarPedido />}
@@ -304,9 +253,11 @@ export default function App() {
           <div style={{
             position:'fixed', bottom:70, right:12, zIndex:100,
             background:'var(--card)', border:'1px solid var(--border)',
-            borderRadius:14, padding:8, minWidth:180,
+            borderRadius:14, padding:8, width:'min(360px, calc(100vw - 24px))',
+            maxHeight:'calc(100vh - 90px)', overflowY:'auto',
             boxShadow:'0 8px 32px rgba(0,0,0,0.5)'
           }}>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:2 }}>
             {TABS_MAS.map(t => (
               <button key={t.id} onClick={() => handleNavClick(t.id)}
                 style={{
@@ -327,6 +278,7 @@ export default function App() {
                 )}
               </button>
             ))}
+            </div>
 
             <div style={{ borderTop:'1px solid var(--border)', margin:'6px 0' }} />
 
