@@ -98,6 +98,15 @@ Un solo dueño por movimiento. Migración `20260919_stock_atomico.sql`.
   hacían el trigger y el cliente, y cada compra entraba dos veces.
 - Bolsas plásticas: trigger `trigger_bolsa_orden` (−1 por pedido, +1 al borrarlo).
 - PPP: trigger `on_compra_recalcula_ppp`, no se toca.
+- Azúcar → Goma (`insumos.rinde_insumo` / `rinde_factor`, migración
+  `20260921_azucar_rinde_goma.sql`): la compra se registra como azúcar (g,
+  con su PPP) y el mismo `compras_stock_trg` la manda a bodega como goma
+  × 1,5. El PPP de la goma se deriva (azúcar ÷ 1,5) con el trigger
+  `insumos_rinde_ppp_trg`. El azúcar no se stockea: el cliente lo esconde
+  de Stock, Conteo, Salidas y recetas (`insumosEnBodega`), y
+  `aplicarMovimientosStock` enruta a goma cualquier movimiento que lo
+  nombre. Goma no se compra (`insumosQueSeCompran` la saca del
+  formulario): una compra propia le pisaría el PPP derivado.
 - Conteo y edición manual en Stock: pisan el valor, a propósito.
 
 **La base tiene objetos que no nacieron en el repo.** Antes de agregar en el

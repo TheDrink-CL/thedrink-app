@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatCLP } from '../lib/calculos'
+import { insumosEnBodega } from '../lib/inventario'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Conteo de inventario — "el stock es dinero"
@@ -51,7 +52,7 @@ export default function Conteo() {
   async function loadInsumos() {
     setLoading(true)
     const [{ data }, { data: ultimo }, { data: sal }] = await Promise.all([
-      supabase.from('insumos').select('nombre, unidad, stock_actual, costo_ppp').order('nombre'),
+      supabase.from('insumos').select('nombre, unidad, stock_actual, costo_ppp, rinde_insumo, rinde_factor').order('nombre'),
       supabase.from('conteos_inventario').select('fecha, created_at').order('created_at', { ascending: false }).limit(1),
       supabase.from('salidas_stock').select('created_at, costo_valorizado'),
     ])
@@ -91,6 +92,12 @@ export default function Conteo() {
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2800) }
 
+  // Se cuenta lo que esta en bodega. El azucar no se stockea: entra como goma
+  // (insumos.rinde_insumo, migracion 20260921). La lista completa queda solo
+  // para el recordatorio en la fila de Goma.
+  const enBodega = insumosEnBodega(insumos)
+  const fuenteDe = (ins) => insumos.find(i => i.rinde_insumo === ins.nombre) || null
+
   const costoDe = (ins) => parseFloat(ins.costo_ppp) || 0
   const teoricoDe = (ins) => parseFloat(ins.stock_actual) || 0
 
@@ -107,7 +114,7 @@ export default function Conteo() {
   }
 
   // Resumen en vivo de lo que se ingreso hasta ahora
-  const previewLineas = insumos
+  const previewLineas = enBodega
     .map(ins => ({ ins, p: lineaPreview(ins) }))
     .filter(x => x.p !== null)
   const previewAjuste = previewLineas.reduce((s, x) => s + x.p.diffValor, 0)
@@ -285,11 +292,12 @@ export default function Conteo() {
           )}
 
           <div className="card" style={{ marginBottom: 90 }}>
-            {insumos.length === 0 && (
+            {enBodega.length === 0 && (
               <div style={{ color: 'var(--muted)', textAlign: 'center', padding: 20 }}>No hay insumos cargados</div>
             )}
-            {insumos.map(ins => {
+            {enBodega.map(ins => {
               const p = lineaPreview(ins)
+              const fuente = fuenteDe(ins)
               return (
                 <div className="list-item" key={ins.nombre} style={{ gap: 10, alignItems: 'center' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -298,6 +306,11 @@ export default function Conteo() {
                       Teorico: {fmtNum(teoricoDe(ins))} {ins.unidad || ''}
                       <span style={{ color: 'var(--muted)', marginLeft: 6 }}>· ${fmtNum(costoDe(ins))}/{ins.unidad || 'u'}</span>
                     </div>
+                    {fuente && (
+                      <div className="list-item-sub" style={{ fontSize: 11 }}>
+                        Suma el {fuente.nombre.toLowerCase()} sin preparar: 1000 {fuente.unidad} = {Math.round(1000 * (parseFloat(fuente.rinde_factor) || 1))} {ins.unidad || ''}
+                      </div>
+                    )}
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
                     {p && (

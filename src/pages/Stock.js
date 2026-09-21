@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { insumosEnBodega } from '../lib/inventario'
 
 function EditModal({ insumo, onSave, onCancel }) {
   const [stockActual, setStockActual] = useState(insumo.stock_actual ?? '')
@@ -139,8 +140,17 @@ export default function Stock() {
 
   if (loading) return <div className="loading">Cargando...</div>
 
-  const criticos = insumos.filter(i => getEstado(i) === 'critico')
-  const bajos = insumos.filter(i => getEstado(i) === 'bajo')
+  // El azúcar no está en bodega: sus compras entran como goma
+  // (insumos.rinde_insumo, migración 20260921). Acá se lista lo que sí hay.
+  const enBodega = insumosEnBodega(insumos)
+  // Para un insumo que se obtiene de otro (Goma ← Azúcar), el que se compra.
+  const fuenteDe = (ins) => {
+    const f = insumos.find(i => i.rinde_insumo === ins.nombre)
+    return f ? { nombre: f.nombre, unidad: f.unidad, factor: parseFloat(f.rinde_factor) || 1 } : null
+  }
+
+  const criticos = enBodega.filter(i => getEstado(i) === 'critico')
+  const bajos = enBodega.filter(i => getEstado(i) === 'bajo')
 
   return (
     <div className="page">
@@ -175,7 +185,7 @@ export default function Stock() {
 
           {/* Lista de insumos que necesitan compra */}
           {(() => {
-            const necesitan = insumos
+            const necesitan = enBodega
               .map(ins => {
                 const cd = consumoDiario[ins.nombre] || 0
                 if (cd <= 0) return null
@@ -183,7 +193,7 @@ export default function Stock() {
                 const necesidadTotal = cd * diasProyeccion
                 const falta = Math.max(0, necesidadTotal - stockActual)
                 const diasRestantes = cd > 0 ? Math.floor(stockActual / cd) : null
-                return { ins, cd, stockActual, necesidadTotal, falta, diasRestantes }
+                return { ins, cd, stockActual, necesidadTotal, falta, diasRestantes, fuente: fuenteDe(ins) }
               })
               .filter(Boolean)
               .sort((a, b) => {
@@ -205,7 +215,7 @@ export default function Stock() {
 
             return (
               <div className="card">
-                {necesitan.map(({ ins, cd, stockActual, necesidadTotal, falta, diasRestantes }) => {
+                {necesitan.map(({ ins, cd, stockActual, necesidadTotal, falta, diasRestantes, fuente }) => {
                   const necesitaCompra = falta > 0
                   const urgente = diasRestantes !== null && diasRestantes <= 3
                   const colorBorde = urgente ? 'rgba(196,0,90,0.3)' : necesitaCompra ? 'rgba(245,158,11,0.3)' : 'rgba(16,185,129,0.2)'
@@ -234,10 +244,13 @@ export default function Stock() {
                         <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 12 }}>
                           {necesitaCompra ? (
                             <>
+                              {/* La goma se compra como azúcar: la falta va en gramos. */}
                               <div style={{ fontSize: 15, fontWeight: 800, color: colorTexto }}>
-                                +{Math.ceil(falta)} {ins.unidad}
+                                +{Math.ceil(fuente ? falta / fuente.factor : falta)} {fuente ? fuente.unidad : ins.unidad}
                               </div>
-                              <div style={{ fontSize: 11, color: 'var(--muted)' }}>comprar</div>
+                              <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                                {fuente ? `comprar ${fuente.nombre.toLowerCase()} (= ${Math.ceil(falta)} ${ins.unidad})` : 'comprar'}
+                              </div>
                             </>
                           ) : (
                             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--green)' }}>✓ OK</div>
@@ -295,8 +308,9 @@ export default function Stock() {
       </div>}
 
       {tabStock === 'estado' && <div className="card">
-        {insumos.map(ins => {
+        {enBodega.map(ins => {
           const estado = getEstado(ins)
+          const fuente = fuenteDe(ins)
           const cdIns = consumoDiario[ins.nombre] || null
           const diasRestantes = cdIns > 0 && ins.stock_actual != null
             ? Math.floor(ins.stock_actual / cdIns)
@@ -320,6 +334,7 @@ export default function Stock() {
                     ? `${Math.round(ins.stock_actual)} ${ins.unidad}`
                     : `Sin datos · ${ins.unidad}`}
                   {ins.stock_minimo != null && ` · Mín: ${ins.stock_minimo} ${ins.unidad}`}
+                  {fuente && ` · se compra como ${fuente.nombre.toLowerCase()}`}
                   {diasRestantes !== null && (
                     <span style={{
                       marginLeft: 6, fontWeight: 700,

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { aplicarMovimientosStock, mensajeStock } from '../lib/inventario'
+import { insumosEnBodega, insumosQueSeCompran } from '../lib/inventario'
 import { formatCLP } from '../lib/calculos'
 
 function ConfirmModal({ mensaje, onConfirm, onCancel }) {
@@ -494,14 +494,27 @@ export default function Compras() {
   const [editandoCompra, setEditandoCompra] = useState(null)
   const [editandoProveedor, setEditandoProveedor] = useState(null) // null | 'nuevo' | proveedor
   const [confirmarProveedor, setConfirmarProveedor] = useState(null)
-  const [fabricandoGoma, setFabricandoGoma] = useState(false)
-  const [mlGoma, setMlGoma] = useState('')
   const [creandoInsumo, setCreandoInsumo] = useState(false)
 
   // ── Frascos: detecta si el insumo seleccionado es un frasco ────────────────
   // y permite mostrar un banner aclaratorio sobre el formato.
   const esFrasco = form.insumo_nombre?.startsWith('Frascos ')
   const formatoFrasco = esFrasco ? form.insumo_nombre.replace('Frascos ', '') : null
+
+  // ── Insumo que rinde otro (Azúcar → Goma) ──────────────────────────────────
+  // `insumos.rinde_insumo` / `rinde_factor` (migración 20260921). La compra se
+  // registra como azúcar, en gramos y con su propio PPP, pero el trigger de
+  // compras la manda a bodega como goma × factor, y el PPP de la goma se
+  // deriva solo. Acá solo se muestra la conversión; no se mueve stock.
+  const insumoSel = insumos.find(i => i.nombre === form.insumo_nombre)
+  const rinde = insumoSel?.rinde_insumo
+    ? {
+        nombre: insumoSel.rinde_insumo,
+        factor: parseFloat(insumoSel.rinde_factor) || 1,
+        unidad: insumos.find(i => i.nombre === insumoSel.rinde_insumo)?.unidad || '',
+      }
+    : null
+  const rindeCalculado = rinde && form.cantidad ? Math.round(parseFloat(form.cantidad) * rinde.factor) : null
 
   useEffect(() => {
     const hoy = fechaHoy()
@@ -559,7 +572,9 @@ export default function Compras() {
       // `compras_stock_ppp_trg`). No sumar acá: sería la segunda vez.
       const toastMsg = esCitrico && limonEnKg
         ? `Compra registrada · ${limonMlCalculado}ml ${esNaranja ? 'naranja' : 'limón'} · stock y PPP actualizados`
-        : 'Compra registrada · stock y PPP actualizados'
+        : rinde && rindeCalculado
+          ? `Compra registrada · ${cantidadFinal} ${unidadFinal} de ${form.insumo_nombre.toLowerCase()} → +${rindeCalculado} ${rinde.unidad} de ${rinde.nombre.toLowerCase()} en bodega`
+          : 'Compra registrada · stock y PPP actualizados'
       showToast(toastMsg)
       setForm(f => ({ ...f, insumo_nombre: '', cantidad: '', precio_total: '', proveedor_id: '', nota: '' }))
       setLimonEnKg(false)
@@ -618,31 +633,6 @@ export default function Compras() {
     if (error) { showToast(`No se pudo actualizar el stock: ${error.message}`); return }
     showToast('Stock actualizado')
     loadData()
-  }
-
-  // Proporción: 1000g azúcar → 1500ml goma
-  const GOMA_POR_KG = 1500 // ml de goma por 1000g de azúcar
-  const azucarParaGoma = mlGoma ? Math.round((parseFloat(mlGoma) / GOMA_POR_KG) * 1000) : 0
-
-  const handleFabricarGoma = async () => {
-    if (!mlGoma || parseFloat(mlGoma) <= 0) return
-    const azucar = insumos.find(i => i.nombre === 'Azúcar')
-    const goma = insumos.find(i => i.nombre === 'Goma')
-    if (!azucar || !goma) { showToast('No se encontró Azúcar o Goma en insumos'); return }
-    setLoading(true)
-    // Mismo motor que ventas y salidas: un solo update atómico en la base.
-    const res = await aplicarMovimientosStock({ 'Azúcar': -azucarParaGoma, 'Goma': parseFloat(mlGoma) })
-    if (!res.ok) {
-      showToast(`No se pudo fabricar goma: ${mensajeStock(res) || 'error al actualizar'}`)
-      setLoading(false)
-      return
-    }
-    const aviso = mensajeStock(res)
-    showToast(`Goma fabricada ✓ · -${azucarParaGoma}g azúcar · +${mlGoma}ml goma${aviso ? ' · OJO: ' + aviso : ''}`)
-    setFabricandoGoma(false)
-    setMlGoma('')
-    loadData()
-    setLoading(false)
   }
 
   const costoPorUnidad = form.cantidad && form.precio_total
@@ -753,7 +743,7 @@ export default function Compras() {
                     <select className="form-select" style={{ flex:1 }} value={form.insumo_nombre}
                       onChange={e => handleSelectInsumo(e.target.value)}>
                       <option value="">Seleccionar insumo...</option>
-                      {insumos.map(i => <option key={i.nombre} value={i.nombre}>{i.nombre}</option>)}
+                      {insumosQueSeCompran(insumos).map(i => <option key={i.nombre} value={i.nombre}>{i.nombre}</option>)}
                     </select>
                     <button type="button" className="btn btn-secondary btn-sm"
                       style={{ flexShrink:0, width:44, padding:0, fontSize:20, lineHeight:1 }}
@@ -818,6 +808,20 @@ export default function Compras() {
                   </div>
                 )}
 
+                {/* Banner insumo que rinde otro: se compra azúcar, a bodega entra goma */}
+                {rinde && (
+                  <div style={{ background: 'rgba(0,180,180,0.06)', border: '1px solid rgba(0,180,180,0.2)', borderRadius: 10, padding: '10px 14px', marginBottom: 12 }}>
+                    <div style={{ fontSize: 12, color: 'var(--cyan)', fontWeight: 600, marginBottom: 4 }}>
+                      🧪 {form.insumo_nombre} → {rinde.nombre}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.5 }}>
+                      Se compra {form.insumo_nombre.toLowerCase()}, pero a bodega entra {rinde.nombre.toLowerCase()}:
+                      1000 {form.unidad} rinden {Math.round(1000 * rinde.factor)} {rinde.unidad}.
+                      La conversión es automática al guardar; {form.insumo_nombre.toLowerCase()} no se lleva como stock aparte.
+                    </div>
+                  </div>
+                )}
+
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div className="form-group">
                     <label className="form-label">
@@ -843,9 +847,22 @@ export default function Compras() {
                   </div>
                 )}
 
+                {/* Azúcar → Goma: lo comprado entra a bodega ya convertido */}
+                {rinde && rindeCalculado > 0 && (
+                  <div style={{ background: 'rgba(0,180,180,0.08)', borderRadius: 8, padding: '8px 12px', marginBottom: 10, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ color: 'var(--muted)' }}>
+                      {parseFloat(form.cantidad)} {form.unidad}
+                      {form.unidad === 'g' && parseFloat(form.cantidad) >= 1000 && ` (${(parseFloat(form.cantidad) / 1000).toLocaleString('es-CL')} kg)`}
+                      {' '}→{' '}
+                    </span>
+                    <span style={{ color: 'var(--cyan)', fontWeight: 700 }}>+{rindeCalculado} {rinde.unidad} de {rinde.nombre.toLowerCase()}</span>
+                  </div>
+                )}
+
                 {costoPorUnidad && (
                   <div style={{ color: 'var(--cyan)', fontSize: 13, marginBottom: 12, textAlign: 'center' }}>
                     ${costoPorUnidad} por {esCitrico && limonEnKg ? 'ml (ya convertido)' : form.unidad}
+                    {rinde && ` · $${(parseFloat(costoPorUnidad) / rinde.factor).toFixed(2)} por ${rinde.unidad} de ${rinde.nombre.toLowerCase()}`}
                   </div>
                 )}
                 <div className="form-group">
@@ -968,7 +985,10 @@ export default function Compras() {
             <div className="list-item" key={i.nombre}>
               <div>
                 <div className="list-item-name">{i.nombre}</div>
-                <div className="list-item-sub">{i.unidad}</div>
+                <div className="list-item-sub">
+                  {i.unidad}
+                  {i.rinde_insumo && ` · rinde ${i.rinde_insumo} × ${i.rinde_factor} (su PPP se deriva de este)`}
+                </div>
               </div>
               <div className="list-item-right">
                 <div className="list-item-value">${parseFloat(i.costo_ppp || 0).toFixed(2)}</div>
@@ -1055,7 +1075,7 @@ export default function Compras() {
         <>
           <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.6 }}>
             Toca un insumo para actualizar su stock o configurar la alerta mínima.
-            Las compras suman automáticamente al stock.
+            Las compras suman automáticamente al stock; el azúcar entra directo como goma.
           </div>
 
           {/* Banner corrección limón */}
@@ -1077,44 +1097,9 @@ export default function Compras() {
             )
           })()}
 
-          {/* Botón fabricar goma */}
-          <button
-            onClick={() => setFabricandoGoma(true)}
-            style={{ width: '100%', background: 'rgba(0,180,180,0.08)', border: '1px solid rgba(0,180,180,0.3)', borderRadius: 10, padding: '10px 0', color: 'var(--cyan)', cursor: 'pointer', fontSize: 13, fontWeight: 600, marginBottom: 12 }}>
-            🧪 Fabricar goma
-          </button>
-
-          {/* Modal fabricar goma */}
-          {fabricandoGoma && (
-            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: 24 }}>
-              <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24, maxWidth: 320, width: '100%' }}>
-                <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text-strong)', marginBottom: 4 }}>🧪 Fabricar goma</div>
-                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>
-                  Proporción: 1000g azúcar → 1500ml goma
-                </div>
-                <div className="form-group">
-                  <label className="form-label">¿Cuántos ml de goma vas a fabricar?</label>
-                  <input type="number" className="form-input" value={mlGoma}
-                    placeholder="ej: 1500"
-                    onChange={e => setMlGoma(e.target.value)} />
-                </div>
-                {azucarParaGoma > 0 && (
-                  <div style={{ background: 'rgba(0,180,180,0.06)', borderRadius: 8, padding: '10px 12px', marginBottom: 16, fontSize: 13 }}>
-                    <div style={{ color: 'var(--pink)' }}>Se rebajarán <strong>{azucarParaGoma}g</strong> de azúcar</div>
-                    <div style={{ color: 'var(--green)', marginTop: 4 }}>Se sumarán <strong>{mlGoma}ml</strong> de goma</div>
-                  </div>
-                )}
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={() => { setFabricandoGoma(false); setMlGoma('') }}>Cancelar</button>
-                  <button className="btn btn-primary btn-sm" style={{ flex: 1 }} disabled={loading || !mlGoma} onClick={handleFabricarGoma}>
-                    {loading ? 'Guardando...' : 'Confirmar'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+          {/* Solo lo que está en bodega: el azúcar entra como goma (rinde_insumo). */}
           <div className="card">
-            {insumos.map(ins => {
+            {insumosEnBodega(insumos).map(ins => {
               const estado = getEstadoStock(ins)
               return (
                 <div className="list-item" key={ins.nombre}

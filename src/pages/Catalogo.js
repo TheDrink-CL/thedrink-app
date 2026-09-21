@@ -374,7 +374,10 @@ function EditRecetaModal({ receta, ingredientes, insumos, recetasExistentes, con
             <select className="form-select" value={ing.insumo_nombre}
               onChange={e => updateIng(idx, 'insumo_nombre', e.target.value)}>
               <option value="">Insumo...</option>
-              {insumos.filter(i => i.nombre !== 'ENVASE' && !i.nombre.startsWith('Frascos ')).map(i => (
+              {/* Sin envases ni insumos que rinden otro (Azúcar: las recetas usan Goma),
+                  salvo que la receta ya lo tenga puesto, para no dejar el select en blanco. */}
+              {insumos.filter(i => i.nombre !== 'ENVASE' && !i.nombre.startsWith('Frascos ')
+                && (!i.rinde_insumo || i.nombre === ing.insumo_nombre)).map(i => (
                 <option key={i.nombre} value={i.nombre}>{i.nombre}</option>
               ))}
             </select>

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatCLP } from '../lib/calculos'
-import { ajustarStockPorSalidas, mensajeStock } from '../lib/inventario'
+import { ajustarStockPorSalidas, mensajeStock, insumosEnBodega } from '../lib/inventario'
 import {
   MOTIVOS_SALIDA, labelMotivo, costoSalida, agruparSalidasPorMotivo,
   agruparEnSalidas, resumenMotivos, describirSalida,
@@ -107,7 +107,7 @@ export default function Salidas() {
   async function load() {
     const [{ data: rec }, { data: ins }, { data: recIng }, { data: cfg }, { data: sal }] = await Promise.all([
       supabase.from('recetas').select('nombre, envase_formato, es_prototipo').order('nombre'),
-      supabase.from('insumos').select('nombre, unidad, stock_actual, costo_ppp, aplica_merma').order('nombre'),
+      supabase.from('insumos').select('nombre, unidad, stock_actual, costo_ppp, aplica_merma, rinde_insumo, rinde_factor').order('nombre'),
       supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad'),
       supabase.from('config').select('clave, valor'),
       supabase.from('salidas_stock').select('*')
@@ -335,7 +335,8 @@ export default function Salidas() {
                       <select className="form-select" value={it.insumo_nombre} style={{ marginBottom: 8 }}
                         onChange={e => updateItem(i, 'insumo_nombre', e.target.value)}>
                         <option value="">Seleccionar insumo...</option>
-                        {insumos.map(x => (
+                        {/* Solo lo que está en bodega: el azúcar entra como goma. */}
+                        {insumosEnBodega(insumos).map(x => (
                           <option key={x.nombre} value={x.nombre}>{x.nombre} ({x.unidad || 'u'})</option>
                         ))}
                       </select>

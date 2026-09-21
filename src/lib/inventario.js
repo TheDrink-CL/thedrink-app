@@ -2,10 +2,12 @@
 // Única fuente de verdad para mover `insumos.stock_actual` desde el cliente:
 // ventas (página Ventas y conversión de Comandas) y salidas sin venta.
 //
-// Las COMPRAS ya no pasan por aquí: el trigger `compras_stock_ppp_trg`
+// Las COMPRAS ya no pasan por aquí: el trigger `compras_stock_trg`
 // (migración 20260919_stock_atomico) suma al insertar, resta al borrar y
 // ajusta la diferencia al editar. Antes lo hacían el trigger histórico Y el
-// cliente, y cada compra entraba dos veces a bodega.
+// cliente, y cada compra entraba dos veces a bodega. Desde 20260921 el mismo
+// trigger manda la compra de un insumo que "rinde" otro (Azúcar → Goma × 1,5)
+// directo al destino: ver «Insumos que rinden otro» más abajo.
 //
 // La resta la hace la base (RPC `ajustar_stock`, un solo UPDATE atómico), no
 // el navegador: dos dispositivos guardando a la vez ya no se pisan. Y no se
@@ -31,6 +33,39 @@ export async function cargarMerma() {
   const v = parseFloat(data?.[0]?.valor)
   _mermaCache = Number.isFinite(v) ? v : MERMA_DEFAULT
   return _mermaCache
+}
+
+// ─── Insumos que "rinden" otro (Azúcar → Goma) ───────────────────────────────
+// `insumos.rinde_insumo` / `rinde_factor` (migración 20260921): un insumo que
+// se compra pero no se stockea. Azúcar rinde Goma × 1,5: la compra de azúcar
+// entra a bodega como goma (lo hace el trigger de compras en la base) y el
+// PPP de la goma se deriva del del azúcar (trigger en `insumos`). Del lado
+// del cliente el azúcar solo existe en Compras: Stock, Conteo, Salidas y las
+// recetas trabajan con la goma. Un movimiento que igual nombre al azúcar se
+// enruta acá a la goma, para que no quede stock escondido en un insumo que
+// nadie mira.
+
+// Los que sí están en bodega: todo menos los que rinden otro.
+export const insumosEnBodega = (insumos) => (insumos || []).filter(i => !i.rinde_insumo)
+
+// Los que se compran: todo menos los que se obtienen de otro. La goma no se
+// compra, se compra azúcar; una compra de goma le pisaría el PPP derivado.
+export const insumosQueSeCompran = (insumos) => {
+  const derivados = new Set((insumos || []).map(i => i.rinde_insumo).filter(Boolean))
+  return (insumos || []).filter(i => !derivados.has(i.nombre))
+}
+
+// { nombre: delta } → lo mismo, con los insumos que rinden otro sumados en su
+// destino y multiplicados por el factor.
+function enrutarMovimientos(movs, insumosMap) {
+  const out = {}
+  Object.entries(movs).forEach(([nombre, delta]) => {
+    const meta = insumosMap[nombre.toLowerCase()]
+    const destino = meta?.rinde_insumo || nombre
+    const factor = meta?.rinde_insumo ? (meta.rinde_factor || 1) : 1
+    out[destino] = (out[destino] || 0) + delta * factor
+  })
+  return out
 }
 
 // ─── Movimientos por VENTAS ──────────────────────────────────────────────────
@@ -104,7 +139,12 @@ const RES_VACIO = { ok: true, fallidos: [], faltantes: [], negativos: [] }
 const esRpcAusente = (error) =>
   error && (error.code === 'PGRST202' || /could not find the function/i.test(error.message || ''))
 
-export async function aplicarMovimientosStock(movs) {
+// `insumosMap` (de cargarInsumosMeta) es opcional: si no viene, se carga acá.
+// Los movimientos se enrutan primero (Azúcar → Goma); lo que llega a la base
+// ya nombra solo insumos que están en bodega.
+export async function aplicarMovimientosStock(movsPedidos, insumosMap = null) {
+  const meta = insumosMap || await cargarInsumosMeta()
+  const movs = enrutarMovimientos(movsPedidos, meta)
   const nombresInsumos = Object.keys(movs).filter(n => movs[n] !== 0)
   if (nombresInsumos.length === 0) return { ...RES_VACIO }
   const payload = {}
@@ -189,13 +229,17 @@ export async function cargarIngredientes(itemsValidos) {
   return porReceta
 }
 
-// Carga la flag aplica_merma de todos los insumos relevantes.
-// Devuelve un map { nombre.toLowerCase: { aplica_merma } }.
+// Carga las flags de todos los insumos: merma y a qué insumo rinden.
+// Devuelve un map { nombre.toLowerCase: { aplica_merma, rinde_insumo, rinde_factor } }.
 export async function cargarInsumosMeta() {
-  const { data } = await supabase.from('insumos').select('nombre, aplica_merma')
+  const { data } = await supabase.from('insumos').select('nombre, aplica_merma, rinde_insumo, rinde_factor')
   const map = {}
   ;(data || []).forEach(i => {
-    map[(i.nombre || '').toLowerCase()] = { aplica_merma: i.aplica_merma !== false }
+    map[(i.nombre || '').toLowerCase()] = {
+      aplica_merma: i.aplica_merma !== false,
+      rinde_insumo: i.rinde_insumo || null,
+      rinde_factor: parseFloat(i.rinde_factor) || null,
+    }
   })
   return map
 }
@@ -208,7 +252,7 @@ export async function descontarStock(itemsValidos) {
     cargarMerma(),
   ])
   const movs = calcularMovimientosStock(itemsValidos, ingredientes, -1, insumosMap, merma)
-  return aplicarMovimientosStock(movs)
+  return aplicarMovimientosStock(movs, insumosMap)
 }
 
 // Reintegra stock cuando se borra o edita una venta (lo opuesto a descontar).
@@ -219,7 +263,7 @@ export async function reintegrarStock(itemsAnteriores) {
     cargarMerma(),
   ])
   const movs = calcularMovimientosStock(itemsAnteriores, ingredientes, +1, insumosMap, merma)
-  return aplicarMovimientosStock(movs)
+  return aplicarMovimientosStock(movs, insumosMap)
 }
 
 // Arma el aviso para el operador a partir del resultado de aplicarMovimientosStock.
