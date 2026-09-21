@@ -163,6 +163,11 @@ escrito a partir de las fichas de WhatsApp y las órdenes.
 - **El escritor está fuera del repo**: `Documents/The Drink/campañas/publicar.js`
   inserta la campaña con la service_role desde el PC de Rodrigo (la key vive en
   `Documents/The Drink/informe-semanal/.env`, nunca acá ni en Vercel para esto).
+- **Reactivar ya no está en el menú**: es la segunda vista dentro de Campañas
+  (`src/pages/Reactivar.js` sigue siendo la lista automática de 1 compra, con
+  toques, fríos y vetos). Mismo objetivo, un solo lugar. Del menú «Más» también
+  salieron Aprendizajes, Proyecciones, Conciliación, Horas y Alertas (20-sep,
+  pedido de Rodrigo: no las usa); las páginas quedan en el repo por si vuelven.
 - Respeta el veto de Reactivar: `clientes.estado_contacto` en
   `no_contactar`/`excluido` deja el mensaje sin botón aunque la campaña lo traiga.
   No usa `estado_contacto` para marcar envíos: eso es de la máquina de estados de
