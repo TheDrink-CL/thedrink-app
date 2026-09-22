@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { insumosEnBodega, fuenteDeCompra } from '../lib/inventario'
+import { leerMerma } from '../lib/calculos'
 
 function EditModal({ insumo, onSave, onCancel }) {
   const [stockActual, setStockActual] = useState(insumo.stock_actual ?? '')
@@ -93,7 +94,7 @@ export default function Stock() {
     // Merma desde config: los días de cobertura que muestra esta pantalla tienen
     // que salir de la misma merma con la que se costea y se descuenta bodega.
     const cfgMap = Object.fromEntries((cfg || []).map(c => [c.clave, c.valor]))
-    const MERMA = parseFloat(cfgMap.merma_pct) || 0.08
+    const MERMA = leerMerma(cfgMap.merma_pct)
     ;(recIng || []).forEach(ing => {
       if (!litrosPorReceta[ing.receta_nombre]) return
       const litros = litrosPorReceta[ing.receta_nombre]

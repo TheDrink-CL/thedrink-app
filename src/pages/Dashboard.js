@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { calcularCostoReceta, formatCLP, formatPct, esOrigenIGAds } from '../lib/calculos'
+import { calcularCostoReceta, formatCLP, formatPct, esOrigenIGAds, leerMerma } from '../lib/calculos'
 import { calcularRentabilidad } from '../lib/rentabilidad'
 import { resumenMotivos } from '../lib/salidas'
 import { fuenteDeCompra } from '../lib/inventario'
 import { enriquecerVentasConDelivery, calcularSaldoCaja } from '../lib/calculos'
 import CaminoAlBar from './CaminoAlBar'
 import SaludNegocio from './SaludNegocio'
+import { todas } from '../lib/todas'
 
 // Parsea "YYYY-MM-DD" sin desfase de zona horaria (new Date(str) parsea UTC)
 function parseFecha(f) {
@@ -360,11 +361,11 @@ export default function Dashboard() {
       try {
       const results = await Promise.all([
         supabase.from('config').select('*'),
-        supabase.from('ventas').select('*').order('fecha', { ascending: false }),
-        supabase.from('caja').select('*'),
-        supabase.from('compras').select('precio_total, es_inversion, tipo'),
+        todas(supabase.from('ventas').select('*').order('fecha', { ascending: false })),
+        todas(supabase.from('caja').select('*')),
+        todas(supabase.from('compras').select('precio_total, es_inversion, tipo')),
         supabase.from('insumos').select('nombre, stock_actual, stock_minimo, unidad, costo_ppp, rinde_insumo, rinde_factor'),
-        supabase.from('ordenes').select('id, fecha, medio_pago, cliente_nombre, cliente_id, delivery, delivery_cobrado'),
+        todas(supabase.from('ordenes').select('id, fecha, medio_pago, cliente_nombre, cliente_id, delivery, delivery_cobrado')),
         supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad, unidad'),
         supabase.from('insumos').select('nombre, costo_ppp'),
         supabase.from('clientes').select('id, estado_contacto'),
@@ -414,7 +415,7 @@ export default function Dashboard() {
       const ingresoTotal = vts?.reduce((s, v) => s + (v.litros * v.precio_venta), 0) || 0
       const litrosTotales = vts?.reduce((s, v) => s + v.litros, 0) || 0
 
-      const merma = parseFloat(config.merma_pct) || 0.08
+      const merma = leerMerma(config.merma_pct)
       const costoEnvase = parseFloat(config.costo_envase) || 794.6
       const costoPorReceta = {}
       const recetasUnicas = [...new Set((recIng || []).map(i => i.receta_nombre))]

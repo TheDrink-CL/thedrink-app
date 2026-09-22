@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { formatCLP } from '../lib/calculos'
+import { formatCLP, leerMerma } from '../lib/calculos'
 import { ajustarStockPorSalidas, mensajeStock, insumosEnBodega } from '../lib/inventario'
 import {
   MOTIVOS_SALIDA, labelMotivo, costoSalida, agruparSalidasPorMotivo,
@@ -119,7 +119,7 @@ export default function Salidas() {
     setRecetaIngredientes(recIng || [])
     const cfgMap = Object.fromEntries((cfg || []).map(c => [c.clave, c.valor]))
     setConfig({
-      merma_pct: parseFloat(cfgMap.merma_pct) || 0.08,
+      merma_pct: leerMerma(cfgMap.merma_pct),
       costo_envase: parseFloat(cfgMap.costo_envase) || 794.6,
     })
     setFilas(sal || [])

@@ -5,7 +5,7 @@
 // Análisis mezclaba todas las compras no-inversión: ahora ambos usan esto.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { calcularCostoReceta } from './calculos'
+import { calcularCostoReceta, leerMerma } from './calculos'
 import { agruparSalidasPorMotivo } from './salidas'
 
 // Tarifa de costo de oportunidad del operador. Si no hay horas registradas o
@@ -37,7 +37,7 @@ export function calcularRentabilidad({
   horasTrabajadas = 0,
   costoHora = 0,
 }) {
-  const merma = parseFloat(config.merma_pct) || 0.08
+  const merma = leerMerma(config.merma_pct)
   const costoEnvase = parseFloat(config.costo_envase) || 794.6
 
   // ── Ingresos ───────────────────────────────────────────────────────────────

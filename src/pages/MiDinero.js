@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { formatCLP, calcularSaldoCaja } from '../lib/calculos'
+import { formatCLP, calcularSaldoCaja, leerMerma } from '../lib/calculos'
 import { enriquecerVentasConDelivery } from '../lib/calculos'
 import { calcularFinanzasMensuales, sueldoPromedio, calcularRunway,
          calcularReservaSugerida, calcularRetirable, proyectarMesActual } from '../lib/finanzasMes'
 import { descargarCSV, BotonExportar } from '../lib/exportar'
 import { resumenMotivos } from '../lib/salidas'
+import { todas } from '../lib/todas'
 
 const MESES_ES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
 function labelMes(mes) {
@@ -699,15 +700,15 @@ export default function MiDinero() {
         { data: cmp }, { data: recIng }, { data: ins },
         { data: cfg }, { data: hist }, { data: ords }, { data: salidasStock },
       ] = await Promise.all([
-        supabase.from('ventas').select('fecha, litros, precio_venta, delivery, receta_nombre, orden_id'),
-        supabase.from('caja').select('fecha, monto, categoria, tipo').eq('tipo', 'salida'),
-        supabase.from('caja').select('fecha, monto, categoria, tipo'),
-        supabase.from('compras').select('precio_total, es_inversion'),
+        todas(supabase.from('ventas').select('fecha, litros, precio_venta, delivery, receta_nombre, orden_id')),
+        todas(supabase.from('caja').select('fecha, monto, categoria, tipo').eq('tipo', 'salida')),
+        todas(supabase.from('caja').select('fecha, monto, categoria, tipo')),
+        todas(supabase.from('compras').select('precio_total, es_inversion')),
         supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad'),
         supabase.from('insumos').select('nombre, costo_ppp'),
         supabase.from('config').select('*'),
         supabase.from('historial_personal').select('*'),
-        supabase.from('ordenes').select('id, fecha, delivery, delivery_cobrado'),
+        todas(supabase.from('ordenes').select('id, fecha, delivery, delivery_cobrado')),
         // Producto que salió sin venta (marketing, canjes, pruebas, consumo
         // interno): baja el margen operativo del mes a costo. Ver lib/salidas.js.
         supabase.from('salidas_stock').select('fecha, motivo, costo_valorizado'),
@@ -727,7 +728,7 @@ export default function MiDinero() {
         recetaIngredientes: recIng || [],
         insumosPPP: ins || [],
         config: {
-          merma_pct: parseFloat(cfgMap.merma_pct) || 0.08,
+          merma_pct: leerMerma(cfgMap.merma_pct),
           costo_envase: parseFloat(cfgMap.costo_envase) || 794.6,
           split_sueldo_pct: ssueldo,
           split_reposicion_pct: parseFloat(cfgMap.split_reposicion_pct) || (1 - ssueldo),

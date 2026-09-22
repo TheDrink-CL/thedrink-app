@@ -69,6 +69,10 @@ export function envaseDesdeReceta(recetaNombre, recetas, costoLegacy = 794.6) {
 // 'IG Pauta' e 'IG Orgánico'. Para ROI/CAC de pauta se cuentan 'IG Pauta' y el
 // legacy 'Instagram' (de la época en que solo existía pauta). Un solo lugar
 // para que Caja y Análisis nunca diverjan.
+// Merma configurada en Ajustes. `parseFloat(x) || 0.08` convertia un 0 legitimo en 8%,
+// y la bodega (cargarMerma, que respeta el 0) y el costeo dejaban de cuadrar.
+export const leerMerma = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0.08 }
+
 export const ORIGENES_IG_ADS = ['Instagram', 'IG Pauta']
 export const esOrigenIGAds = (o) => ORIGENES_IG_ADS.includes(o)
 

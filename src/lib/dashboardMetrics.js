@@ -9,7 +9,7 @@
 // - origen legacy 'Instagram' cuenta como pauta vía esOrigenIGAds
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { calcularCostoReceta, envaseDesdeReceta, esOrigenIGAds } from './calculos'
+import { calcularCostoReceta, envaseDesdeReceta, esOrigenIGAds, leerMerma } from './calculos'
 
 // Parsea 'YYYY-MM-DD' sin desfase de zona horaria
 export function parseFecha(f) {
@@ -77,7 +77,7 @@ export function calcularMetricasDashboard({
     ventas = ventas.filter(v => !v.orden_id || !ordenesExcluidas.has(v.orden_id))
   }
 
-  const merma = parseFloat(config.merma_pct) || 0.08
+  const merma = leerMerma(config.merma_pct)
   const costoEnvaseLegacy = parseFloat(config.costo_envase) || 794.6
 
   // ── KPIs globales ──────────────────────────────────────────────────────────

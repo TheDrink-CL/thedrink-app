@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { formatCLP, calcularSaldoCaja } from '../lib/calculos'
+import { formatCLP, calcularSaldoCaja, leerMerma } from '../lib/calculos'
 import { calcularRentabilidad } from '../lib/rentabilidad'
 import { enriquecerVentasConDelivery } from '../lib/calculos'
 import { calcularRitmo, proyectarCapital } from '../lib/proyecciones'
+import { todas } from '../lib/todas'
 
 // Parsea "YYYY-MM-DD" sin desfase de zona horaria
 function parseFecha(f) {
@@ -163,13 +164,13 @@ export default function CaminoAlBar() {
         { data: cmp }, { data: ins }, { data: recIng },
         { data: cajaArr }, { data: cfgReal }, { data: salidasStock },
       ] = await Promise.all([
-        supabase.from('ventas').select('id, fecha, litros, precio_venta, receta_nombre, orden_id, delivery'),
-        supabase.from('ordenes').select('id, fecha, cliente_nombre, delivery, delivery_cobrado'),
+        todas(supabase.from('ventas').select('id, fecha, litros, precio_venta, receta_nombre, orden_id, delivery')),
+        todas(supabase.from('ordenes').select('id, fecha, cliente_nombre, delivery, delivery_cobrado')),
         supabase.from('clientes').select('id, nombre'),
-        supabase.from('compras').select('precio_total, es_inversion, tipo'),
+        todas(supabase.from('compras').select('precio_total, es_inversion, tipo')),
         supabase.from('insumos').select('nombre, stock_actual, costo_ppp'),
         supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad, unidad'),
-        supabase.from('caja').select('monto, tipo, categoria, fecha'),
+        todas(supabase.from('caja').select('monto, tipo, categoria, fecha')),
         supabase.from('config').select('*'),
         supabase.from('salidas_stock').select('fecha, motivo, costo_valorizado'),
       ])
@@ -189,7 +190,7 @@ export default function CaminoAlBar() {
         margen: parseFloat(cfgMap.bar_objetivo_margen) || 0.65,
         horizonteMeses: parseInt(cfgMap.bar_horizonte_meses) || 18,
       }
-      const merma = parseFloat(cfgMap.merma_pct) || 0.08
+      const merma = leerMerma(cfgMap.merma_pct)
       const costoEnvase = parseFloat(cfgMap.costo_envase) || 794.6
 
       // ── a) CAPITAL ACUMULADO ─────────────────────────────────────────────

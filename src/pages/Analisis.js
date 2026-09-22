@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { formatCLP, calcularCostoReceta, esOrigenIGAds } from '../lib/calculos'
+import { formatCLP, calcularCostoReceta, esOrigenIGAds, leerMerma } from '../lib/calculos'
 import { calcularRentabilidad } from '../lib/rentabilidad'
 import { enriquecerVentasConDelivery } from '../lib/calculos'
 import RankingRecetas from '../components/RankingRecetas'
@@ -766,7 +766,7 @@ function ProyeccionDemanda({ ventas, recetaIngredientes, insumos, config }) {
   const insumosNecesarios = {}
   // Misma merma que usa el costeo y el descuento de bodega. Si el dueño la
   // cambia en Ajustes, las compras sugeridas tienen que moverse con ella.
-  const MERMA = parseFloat(config?.merma_pct) || 0.08
+  const MERMA = leerMerma(config?.merma_pct)
   Object.entries(promedioSemanal).forEach(([receta, litros]) => {
     const ings = (recetaIngredientes || []).filter(i => i.receta_nombre === receta && i.insumo_nombre !== 'ENVASE')
     ings.forEach(ing => {
@@ -1283,7 +1283,7 @@ function AnalisisRecetas({ ventas, ordenes, recetaIngredientes, insumos, cliente
   const [vista, setVista] = React.useState('margen') // margen | rotacion | vip | combos
 
   // ── Costo unitario por receta (PPP + merma + envase) ──────────────────────
-  const merma = parseFloat(config.merma_pct) || 0.08
+  const merma = leerMerma(config.merma_pct)
   const costoEnvase = parseFloat(config.costo_envase) || 794.6
   const costoPorReceta = {}
   const recetasUnicas = [...new Set((recetaIngredientes || []).map(i => i.receta_nombre))]

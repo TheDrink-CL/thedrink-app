@@ -12,7 +12,7 @@
 // Este módulo es puro: no toca la base. Lo usan la página Salidas (para
 // valorizar al registrar), rentabilidad.js (para el P&L), Conteo y Stock.
 
-import { calcularCostoReceta, envaseDesdeReceta } from './calculos'
+import { calcularCostoReceta, envaseDesdeReceta, leerMerma } from './calculos'
 
 // Orden = orden en que se muestran los chips y las líneas del desglose.
 export const MOTIVOS_SALIDA = [
@@ -34,7 +34,7 @@ export const labelMotivo = (id) => MOTIVOS_SALIDA.find(m => m.id === id)?.label 
 //   ctx:    { recetaIngredientes, insumos (con costo_ppp, aplica_merma),
 //             recetas (con envase_formato), merma, costoEnvaseLegacy }
 export function costoSalida(salida, ctx) {
-  const merma = parseFloat(ctx.merma) || 0.08
+  const merma = leerMerma(ctx.merma)
   if (salida.receta_nombre) {
     const litros = parseFloat(salida.litros) || 0
     const ings = (ctx.recetaIngredientes || []).filter(

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatCLP, calcularSaldoCaja, FECHA_CORTE_DELIVERY, esDeliveryAdelantado } from '../lib/calculos'
+import { todas } from '../lib/todas'
 
 // La pestaña "Publicidad" se eliminó (jun 2026): duplicaba el análisis de pauta
 // que ahora vive en Indicadores (ROAS semanal) y Análisis (origen de clientes),
@@ -55,10 +56,10 @@ export default function Caja() {
 
   async function loadData() {
     const [{ data: mov }, { data: vts }, { data: compras }, { data: ordenes }] = await Promise.all([
-      supabase.from('caja').select('*').order('fecha', { ascending: false }),
-      supabase.from('ventas').select('litros, precio_venta'),
-      supabase.from('compras').select('precio_total, es_inversion'),
-      supabase.from('ordenes').select('id, fecha, delivery, delivery_cobrado, delivery_tipo'),
+      todas(supabase.from('caja').select('*').order('fecha', { ascending: false })),
+      todas(supabase.from('ventas').select('litros, precio_venta')),
+      todas(supabase.from('compras').select('precio_total, es_inversion')),
+      todas(supabase.from('ordenes').select('id, fecha, delivery, delivery_cobrado, delivery_tipo')),
     ])
 
     setMovimientos(mov || [])
