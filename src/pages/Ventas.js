@@ -296,17 +296,18 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel, showToast }) {
       litros: v.litros,
       devuelve_envase: v.nota === 'envase devuelto',
     }))
-    if (itemsAnteriores.length > 0) {
-      await reintegrarStock(itemsAnteriores)
-    }
 
-    // Borrar ventas antiguas e insertar nuevas
+    // Borrar ventas antiguas e insertar nuevas. El stock se reintegra DESPUES
+    // del borrado: si el borrado falla, las ventas siguen y el stock tambien.
     const { error: errDelete } = await supabase.from('ventas').delete().eq('orden_id', orden.id)
     if (errDelete) {
       console.error('Error al borrar ventas antiguas:', errDelete)
       showToast('Error al actualizar productos: ' + errDelete.message)
       setSaving(false)
       return
+    }
+    if (itemsAnteriores.length > 0) {
+      await reintegrarStock(itemsAnteriores)
     }
     const { error: errInsert } = await supabase.from('ventas').insert(itemsValidos.map(it => ({
       fecha,
@@ -904,11 +905,11 @@ export default function Ventas() {
     // registrada; si el stock no se ajusta, avisamos pero no bloqueamos.
     const resStock = await descontarStock(itemsValidos)
     const avisoStock = mensajeStock(resStock)
-    if (avisoStock) showToast('Pedido guardado · OJO con el stock: ' + avisoStock)
-
-    showToast(neonAplicado
+    const msgOk = neonAplicado
       ? `Pedido registrado ✓ · NEON aplicado (-${formatCLP(Math.round(descuentoNeonTotal))})`
-      : 'Pedido registrado ✓')
+      : 'Pedido registrado ✓'
+    // Un solo toast: si se mostraban dos, el segundo tapaba el aviso de stock
+    showToast(avisoStock ? `${msgOk} · OJO con el stock: ${avisoStock}` : msgOk)
     setFecha(fechaHoy())
     setHora(horaAhora())
     setCliente('')
@@ -933,24 +934,25 @@ export default function Ventas() {
   }
 
   const handleEliminarOrden = async (orden) => {
-    // Reintegrar stock antes de borrar las ventas (para no perder la info de
-    // qué se había consumido). Esto revierte ingredientes Y envase.
+    // Los items salen de orden.ventas (ya en memoria), asi que el stock se
+    // reintegra DESPUES de borrar las ventas: si el borrado falla, no queda
+    // stock inflado. Esto revierte ingredientes Y envase.
     const itemsAnteriores = (orden.ventas || []).map(v => ({
       receta_nombre: v.receta_nombre,
       litros: v.litros,
       devuelve_envase: v.nota === 'envase devuelto',
     }))
-    let stockFallido = null
-    if (itemsAnteriores.length > 0) {
-      const resStock = await reintegrarStock(itemsAnteriores)
-      if (resStock && !resStock.ok) stockFallido = resStock.fallidos
-    }
     const { error: errVentas } = await supabase.from('ventas').delete().eq('orden_id', orden.id)
     if (errVentas) {
       showToast('Error al borrar los productos del pedido: ' + errVentas.message)
       setConfirmar(null)
       load()
       return
+    }
+    let stockFallido = null
+    if (itemsAnteriores.length > 0) {
+      const resStock = await reintegrarStock(itemsAnteriores)
+      if (resStock && !resStock.ok) stockFallido = resStock.fallidos
     }
     const { error: errOrden } = await supabase.from('ordenes').delete().eq('id', orden.id)
     if (errOrden) {

@@ -226,7 +226,12 @@ function EditCompraModal({ compra, insumos, proveedores, onSave, onCancel }) {
           <label className="form-label">Insumo</label>
           <select className="form-select" value={insumoNombre} onChange={e => handleSelectInsumo(e.target.value)}>
             <option value="">Seleccionar...</option>
-            {insumos.map(i => <option key={i.nombre} value={i.nombre}>{i.nombre}</option>)}
+            {/* Mismo filtro que el formulario de alta (sin Goma: su costo se deriva del
+                azucar). Si la compra que se edita ya era de un insumo fuera de la lista
+                (las compras viejas de Goma), se muestra igual para no perder el valor. */}
+            {insumosQueSeCompran(insumos)
+              .concat(insumos.filter(i => i.nombre === insumoNombre && !insumosQueSeCompran(insumos).includes(i)))
+              .map(i => <option key={i.nombre} value={i.nombre}>{i.nombre}</option>)}
           </select>
         </div>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>

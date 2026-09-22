@@ -36,10 +36,9 @@ function Mensaje({ m, vetado, onEstado, onCopiar }) {
   const enviado = m.estado === 'enviado'
   const omitido = m.estado === 'omitido'
 
-  const abrir = async () => {
-    window.open(link, '_blank')
-    await onEstado(m, 'enviado')
-  }
+  // Abrir WhatsApp no es mandar: el mensaje se marca con «✓ lo mandé» aparte,
+  // si no las cifras de enviados se inflan con los que se abrieron y no salieron.
+  const abrir = () => { window.open(link, '_blank') }
 
   return (
     <div style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.05)', opacity: omitido ? 0.55 : 1 }}>
@@ -97,6 +96,14 @@ function Mensaje({ m, vetado, onEstado, onCopiar }) {
         }}>
           copiar
         </button>
+        {!vetado && !enviado && !omitido && (
+          <button onClick={() => onEstado(m, 'enviado')} style={{
+            background: 'none', border: '1px solid rgba(34,197,94,0.35)', borderRadius: 9,
+            color: 'var(--green)', cursor: 'pointer', fontSize: 12, padding: '7px 10px',
+          }}>
+            ✓ lo mandé
+          </button>
+        )}
         {!enviado && !omitido && (
           <button onClick={() => onEstado(m, 'omitido')} title="No escribirle en esta campaña" style={{
             background: 'none', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 9,
@@ -122,7 +129,7 @@ export default function Campanas() {
   const [campanas, setCampanas] = useState([])
   const [activa, setActiva] = useState(null)
   const [mensajes, setMensajes] = useState([])
-  const [vetados, setVetados] = useState({})   // últimos 8 dígitos del teléfono → true
+  const [vetados, setVetados] = useState({})   // últimos 8 dígitos del teléfono o 'id:<cliente_id>' → true
   const [filtro, setFiltro] = useState('pendiente')
   const [vista, setVista] = useState('campanas') // 'campanas' | 'reactivar'
   const [cargando, setCargando] = useState(true)
@@ -135,9 +142,9 @@ export default function Campanas() {
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(''), 2500) }
 
   async function cargarCampanas() {
-    const [{ data, error: e }, { data: clts }] = await Promise.all([
+    const [{ data, error: e }, { data: clts, error: eV }] = await Promise.all([
       supabase.from('campanas').select('*').order('creada_en', { ascending: false }),
-      supabase.from('clientes').select('telefono, estado_contacto').in('estado_contacto', ['no_contactar', 'excluido']),
+      supabase.from('clientes').select('id, telefono, estado_contacto').in('estado_contacto', ['no_contactar', 'excluido']),
     ])
     if (e) {
       // 42P01 = la tabla no existe: falta correr la migración en el SQL Editor.
@@ -147,8 +154,18 @@ export default function Campanas() {
       setCargando(false)
       return
     }
+    if (eV) {
+      // Sin la lista de vetados no se muestra nada: mejor no escribirle a nadie
+      // que escribirle a alguien que pidió no ser contactado.
+      setError(`No se pudo leer la lista de vetados: ${eV.message}`)
+      setCargando(false)
+      return
+    }
     const v = {}
-    ;(clts || []).forEach(c => { const t = normalizarTelefono(c.telefono); if (t) v[t.slice(-8)] = true })
+    ;(clts || []).forEach(c => {
+      v['id:' + c.id] = true
+      const t = normalizarTelefono(c.telefono); if (t) v[t.slice(-8)] = true
+    })
     setVetados(v)
     setCampanas(data || [])
     const primeraActiva = (data || []).find(c => c.estado === 'activa') || (data || [])[0] || null
@@ -210,7 +227,10 @@ export default function Campanas() {
 
   if (cargando) return <div className="loading">Cargando...</div>
 
-  const esVetado = (m) => { const t = normalizarTelefono(m.telefono); return !!(t && vetados[t.slice(-8)]) }
+  const esVetado = (m) => {
+    if (m.cliente_id && vetados['id:' + m.cliente_id]) return true
+    const t = normalizarTelefono(m.telefono); return !!(t && vetados[t.slice(-8)])
+  }
   const visibles = mensajes.filter(m => filtro === 'todos' || m.estado === filtro)
   const n = (estado) => mensajes.filter(m => m.estado === estado).length
 
