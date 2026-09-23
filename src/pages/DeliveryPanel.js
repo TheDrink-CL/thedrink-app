@@ -251,7 +251,7 @@ function DeliveryCard({ orden, onEstadoChange, onError, saldoFrascos }) {
           background: 'rgba(143,255,240,0.06)', border: '1px solid rgba(143,255,240,0.25)',
           borderRadius: 10, padding: '8px 12px', marginBottom: 10, fontSize: 13, color: '#8ffff0',
         }}>
-          🫙 Pregunta si tiene frascos para devolver
+          Pregunta si tiene frascos para devolver
           <span style={{ color: 'var(--muted)' }}>
             {' · saldo '}{saldoFrascos?.disponible || 0}
             {(saldoFrascos?.disponible || 0) >= FRASCOS_POR_CANJE ? ' (ya le alcanza para un canje)' : ''}

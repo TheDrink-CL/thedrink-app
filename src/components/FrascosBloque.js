@@ -41,7 +41,7 @@ export default function FrascosBloque({ estado, saldo, aceptados, rechazados, se
   if (estado === 'sin_cliente') {
     return (
       <div style={caja}>
-        <div style={titulo}>🫙 Frascos</div>
+        <div style={titulo}>Frascos</div>
         <div style={{ fontSize: 12, color: 'var(--muted)' }}>Elige el cliente desde la lista de sugerencias para ver su saldo y registrar frascos.</div>
       </div>
     )
@@ -49,7 +49,7 @@ export default function FrascosBloque({ estado, saldo, aceptados, rechazados, se
   if (estado === 'sin_migracion') {
     return (
       <div style={caja}>
-        <div style={titulo}>🫙 Frascos</div>
+        <div style={titulo}>Frascos</div>
         <div style={{ fontSize: 12, color: '#f59e0b' }}>Falta correr la migración 20260923_frascos_retornables.sql en Supabase.</div>
       </div>
     )
@@ -64,7 +64,7 @@ export default function FrascosBloque({ estado, saldo, aceptados, rechazados, se
   return (
     <div style={caja}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-        <div style={titulo}>🫙 Frascos</div>
+        <div style={titulo}>Frascos</div>
         <div style={{ fontSize: 13, color: '#8ffff0', fontVariantNumeric: 'tabular-nums' }}>
           {estado === 'cargando' ? 'cargando…' : (
             <>saldo {disponible}{aceptados || canjesEnPedido ? ` → ${total}` : ''}</>

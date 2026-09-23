@@ -51,13 +51,13 @@ export default function FrascosFicha({ clienteId, onToast }) {
   if (estado === 'sin_migracion') {
     return (
       <div style={caja}>
-        <div style={titulo}>🫙 Frascos</div>
+        <div style={titulo}>Frascos</div>
         <div style={{ fontSize: 12, color: '#f59e0b' }}>Falta correr la migración 20260923_frascos_retornables.sql.</div>
       </div>
     )
   }
   if (estado === 'cargando' || !saldo) {
-    return <div style={caja}><div style={titulo}>🫙 Frascos</div><div style={{ fontSize: 12, color: 'var(--muted)' }}>cargando…</div></div>
+    return <div style={caja}><div style={titulo}>Frascos</div><div style={{ fontSize: 12, color: 'var(--muted)' }}>cargando…</div></div>
   }
 
   const cerrar = () => { setModo(null); setAceptados(0); setRechazados(0); setAjuste(0); setNota('') }
@@ -89,7 +89,7 @@ export default function FrascosFicha({ clienteId, onToast }) {
   return (
     <div style={caja}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-        <div style={titulo}>🫙 Frascos</div>
+        <div style={titulo}>Frascos</div>
         <div style={{ fontSize: 20, fontWeight: 900, color: '#8ffff0', fontVariantNumeric: 'tabular-nums' }}>{saldo.saldo}</div>
       </div>
       <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>

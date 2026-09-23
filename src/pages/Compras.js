@@ -759,7 +759,7 @@ export default function Compras() {
                 {esFrasco && (
                   <div style={{ background: 'rgba(0,180,180,0.06)', border: '1px solid rgba(0,180,180,0.2)', borderRadius: 10, padding: '10px 14px', marginBottom: 12 }}>
                     <div style={{ fontSize: 12, color: 'var(--cyan)', fontWeight: 600, marginBottom: 8 }}>
-                      🫙 Formato del frasco
+                      Formato del frasco
                     </div>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button type="button"

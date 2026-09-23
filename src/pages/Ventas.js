@@ -204,7 +204,7 @@ const itemCanje = () => ({ receta_nombre: RECETA_CANJE, litros: 1, precio_venta:
 function MarcaCanje() {
   return (
     <div style={{ fontSize: 11, fontWeight: 700, color: '#ff4fd8', marginBottom: 6, letterSpacing: '0.04em' }}>
-      🫙 Canje de frascos · $0 (saborizado: cobra la diferencia)
+      Canje de frascos · $0 (saborizado: cobra la diferencia)
     </div>
   )
 }
@@ -1090,7 +1090,7 @@ export default function Ventas() {
     if (frascosAceptados) partesFrascos.push(`+${frascosAceptados} frascos`)
     if (canjesFrascos) partesFrascos.push(`canje −${FRASCOS_POR_CANJE}`)
     showToast([
-      msgOk + (hayFrascos && !avisoFrascos && partesFrascos.length ? ' · 🫙 ' + partesFrascos.join(', ') : ''),
+      msgOk + (hayFrascos && !avisoFrascos && partesFrascos.length ? ' · frascos: ' + partesFrascos.join(', ') : ''),
       avisoFrascos ? 'OJO: ' + avisoFrascos : null,
       avisoStock ? 'OJO con el stock: ' + avisoStock : null,
     ].filter(Boolean).join(' · '))
