@@ -14,8 +14,8 @@ import {
 // ─── Sugerencia de cobro de envío (mapa de la carta) ─────────────────────────
 // Aparece al tener monto y km. Dentro del mapa muestra la tarifa de la carta;
 // fuera del borde, Uber − aporte del tramo. «Usar» la copia al campo cobrado.
-function SugerenciaEnvio({ monto, km, costo, cobrado, onUsar, pedidosPrevios = 0 }) {
-  const r = tarifaEnvio(monto, km, costo, pedidosPrevios >= HABITUAL_MIN_PEDIDOS)
+function SugerenciaEnvio({ monto, km, costo, cobrado, onUsar, pedidosPrevios = 0, clienteConocido = true }) {
+  const r = tarifaEnvio(monto, km, costo, pedidosPrevios >= HABITUAL_MIN_PEDIDOS, clienteConocido && pedidosPrevios === 0)
   if (!r) return null
   const coincide = cobrado !== '' && Number(cobrado) === r.tarifa
   const precio = r.tarifa === 0 ? 'gratis' : formatCLP(r.tarifa)
@@ -29,7 +29,7 @@ function SugerenciaEnvio({ monto, km, costo, cobrado, onUsar, pedidosPrevios = 0
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
         <span>
           {r.dentro
-            ? <>Según el mapa: <b>{precio}</b> <span style={{ color: 'var(--muted)' }}>({r.tramo.nombre}, hasta {r.zona.hasta} km)</span></>
+            ? <>{r.promo ? 'Primer pedido: ' : 'Según el mapa: '}<b>{precio}</b> <span style={{ color: 'var(--muted)' }}>({r.promo ? `promo de bienvenida; el mapa diría ${formatCLP(r.zona.tarifa)}` : `${r.tramo.nombre}, hasta ${r.zona.hasta} km`})</span></>
             : <>Fuera del mapa: cobrar <b>{precio}</b> <span style={{ color: 'var(--muted)' }}>
                 (Uber {r.estimado ? '~' : ''}{formatCLP(r.costoUsado)} − aporte {formatCLP(r.aporte)}{r.habitual ? ` de cliente habitual, ${pedidosPrevios} pedidos` : ''}{r.estimado ? ', estimado: confirma con la cotización' : ''})
               </span></>}
@@ -1574,7 +1574,8 @@ export default function Ventas() {
               <input type="number" className="form-input" value={deliveryCobrado} placeholder="ej: 3000"
                 onChange={e => setDeliveryCobrado(e.target.value)} />
               <SugerenciaEnvio monto={totalBruto} km={distanciaKm} costo={deliveryTipo === 'propio' ? null : delivery}
-                cobrado={deliveryCobrado} onUsar={setDeliveryCobrado} pedidosPrevios={pedidosDe(clienteIdSel, cliente)} />
+                cobrado={deliveryCobrado} onUsar={setDeliveryCobrado} pedidosPrevios={pedidosDe(clienteIdSel, cliente)}
+                clienteConocido={!!(clienteIdSel || cliente.trim())} />
             </div>
           )}
 
