@@ -5,6 +5,11 @@ import { formatCLP } from '../lib/calculos'
 import { descargarCSV, BotonExportar } from '../lib/exportar'
 import { tarifaEnvio, HABITUAL_MIN_PEDIDOS } from '../lib/tarifaEnvio'
 import { todas } from '../lib/todas'
+import FrascosBloque from '../components/FrascosBloque'
+import {
+  FRASCOS_POR_CANJE, NOTA_CANJE, RECETA_CANJE, SALDO_VACIO,
+  cargarSaldo, movimientosDeOrden, resumenOrden, validarCanje, guardarFrascosOrden, canalDesdeEntrega,
+} from '../lib/frascos'
 
 // ─── Sugerencia de cobro de envío (mapa de la carta) ─────────────────────────
 // Aparece al tener monto y km. Dentro del mapa muestra la tarifa de la carta;
@@ -187,6 +192,23 @@ const horaAhora = () => {
 
 const itemVacio = () => ({ receta_nombre: '', litros: 1, precio_venta: '' })
 
+// Un ítem vale si tiene receta y un precio escrito, aunque sea 0: el canje de
+// frascos va a $0 (y hay ventas antiguas a $0, INTERNO). Antes el filtro era
+// `precio_venta` truthy y un ítem a $0 desaparecía al guardar o editar.
+const esItemValido = (it) =>
+  !!it.receta_nombre && it.precio_venta !== '' && it.precio_venta != null && !isNaN(parseFloat(it.precio_venta))
+
+const itemCanje = () => ({ receta_nombre: RECETA_CANJE, litros: 1, precio_venta: 0, canje: true })
+
+// Etiqueta en el ítem que es canje de frascos.
+function MarcaCanje() {
+  return (
+    <div style={{ fontSize: 11, fontWeight: 700, color: '#ff4fd8', marginBottom: 6, letterSpacing: '0.04em' }}>
+      🫙 Canje de frascos · $0 (saborizado: cobra la diferencia)
+    </div>
+  )
+}
+
 const ORIGENES = ['IG Orgánico', 'IG Pauta', 'Referido', 'Cliente habitual', 'Evento', 'Otro']
 const MEDIOS_PAGO = [
   { id: 'transferencia', label: '🏦 Transferencia' },
@@ -295,10 +317,36 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel, showToast, pedidosPr
       receta_nombre: v.receta_nombre,
       litros: v.litros,
       precio_venta: v.precio_venta,
-      devuelve_envase: v.nota === 'envase devuelto'
+      devuelve_envase: v.nota === 'envase devuelto',
+      canje: v.nota === NOTA_CANJE,
+      nota: v.nota || null,
     }))
   )
   const [saving, setSaving] = useState(false)
+
+  // Frascos de este pedido. El saldo que se muestra es el de ANTES del pedido
+  // (saldo actual − lo que este pedido ya sumó/restó), para que editar no
+  // cuente dos veces los mismos frascos.
+  const [frascosEstado, setFrascosEstado] = useState(orden.cliente_id ? 'cargando' : 'sin_cliente')
+  const [saldoAntes, setSaldoAntes] = useState(SALDO_VACIO)
+  const [frascosAceptados, setFrascosAceptados] = useState(0)
+  const [frascosRechazados, setFrascosRechazados] = useState(0)
+  useEffect(() => {
+    if (!orden.cliente_id) return
+    let cancelado = false
+    Promise.all([cargarSaldo(orden.cliente_id), movimientosDeOrden(orden.id)]).then(([rs, movs]) => {
+      if (cancelado) return
+      if (rs.sinMigracion) { setFrascosEstado('sin_migracion'); return }
+      const r = resumenOrden(movs)
+      setFrascosAceptados(r.aceptados)
+      setFrascosRechazados(r.rechazados)
+      const sal = rs.saldo
+      setSaldoAntes({ ...sal, disponible: sal.vencido ? 0 : Math.max(0, sal.saldo - r.neto) })
+      setFrascosEstado('ok')
+    })
+    return () => { cancelado = true }
+  }, [orden.cliente_id, orden.id])
+  const canjearFrascos = () => setItems(prev => [...prev, itemCanje()])
 
   const updateItem = (i, campo, valor) => {
     setItems(prev => prev.map((it, idx) => idx !== i ? it : { ...it, [campo]: valor }))
@@ -307,8 +355,19 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel, showToast, pedidosPr
   const agregarItem = () => setItems(prev => [...prev, itemVacio()])
 
   const handleSave = async () => {
-    const itemsValidos = items.filter(it => it.receta_nombre && it.precio_venta)
+    const itemsValidos = items.filter(esItemValido)
     if (itemsValidos.length === 0) return
+    const canjes = itemsValidos.filter(it => it.canje).length
+    if (canjes > 0 || frascosAceptados > 0 || frascosRechazados > 0) {
+      if (!orden.cliente_id) { showToast('Para registrar frascos el pedido tiene que tener un cliente de la lista'); return }
+      if (frascosEstado === 'sin_migracion') { showToast('Falta correr la migración de frascos en Supabase'); return }
+      if (frascosEstado === 'cargando') { showToast('Espera a que cargue el saldo de frascos'); return }
+      const errCanje = validarCanje({ disponible: saldoAntes.disponible, aceptadosHoy: frascosAceptados, canjes })
+      if (errCanje) { showToast(errCanje); return }
+      if (canjes > 0 && !itemsValidos.some(it => !it.canje && parseFloat(it.precio_venta) > 0)) {
+        showToast('El canje va con al menos 1 trago pagado'); return
+      }
+    }
     setSaving(true)
 
     // Actualizar orden
@@ -357,7 +416,7 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel, showToast, pedidosPr
       precio_venta: parseFloat(it.precio_venta) || 0,
       delivery: 0,
       origen: origenVal || null,
-      nota: it.devuelve_envase ? 'envase devuelto' : null,
+      nota: it.canje ? NOTA_CANJE : it.devuelve_envase ? 'envase devuelto' : (it.nota || null),
       orden_id: orden.id,
     })))
     if (errInsert) {
@@ -371,6 +430,17 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel, showToast, pedidosPr
     const resStock = await descontarStock(itemsValidos)
     const avisoStock = mensajeStock(resStock)
     if (avisoStock) showToast('Pedido actualizado · OJO con el stock: ' + avisoStock)
+
+    // Frascos: deja los movimientos del pedido como quedaron en el formulario
+    if (orden.cliente_id && frascosEstado === 'ok') {
+      const rf = await guardarFrascosOrden({
+        ordenId: orden.id, clienteId: orden.cliente_id, fecha,
+        aceptados: frascosAceptados, rechazados: frascosRechazados,
+        canal: canalDesdeEntrega(deliveryTipo), canjes,
+      })
+      if (!rf.ok) showToast('Pedido actualizado, pero no se guardaron los frascos: ' + (rf.error?.message || ''))
+      else if (rf.avisoStock) showToast('Pedido actualizado · OJO con el stock de frascos: ' + rf.avisoStock)
+    }
 
     setSaving(false)
     onSave()
@@ -428,6 +498,7 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel, showToast, pedidosPr
                   style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)', fontSize:18, lineHeight:1, padding:0 }}>×</button>
               )}
             </div>
+            {it.canje && <MarcaCanje />}
             <select className="form-select" value={it.receta_nombre} style={{ marginBottom:8 }}
               onChange={e => updateItem(i, 'receta_nombre', e.target.value)}>
               <option value="">Seleccionar receta...</option>
@@ -445,6 +516,13 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel, showToast, pedidosPr
           style={{ width:'100%', background:'rgba(255,255,255,0.04)', border:'1px dashed var(--border)', borderRadius:10, padding:'8px 0', color:'var(--muted)', cursor:'pointer', fontSize:13, marginBottom:12 }}>
           + Agregar producto
         </button>
+        <div style={{ marginTop:-12, marginBottom:12 }}>
+          <FrascosBloque estado={frascosEstado} saldo={saldoAntes}
+            aceptados={frascosAceptados} rechazados={frascosRechazados}
+            setAceptados={setFrascosAceptados} setRechazados={setFrascosRechazados}
+            canjesEnPedido={items.filter(it => it.canje).length} onCanjear={canjearFrascos}
+            hayPagado={items.some(it => !it.canje && esItemValido(it) && parseFloat(it.precio_venta) > 0)} />
+        </div>
 
         <div className="form-group" style={{ marginBottom:12 }}>
           <label className="form-label">Tipo de entrega</label>
@@ -548,6 +626,21 @@ export default function Ventas() {
   const [enviarADelivery, setEnviarADelivery] = useState(false)
   const [nota, setNota] = useState('')
   const [items, setItems] = useState([itemVacio()])
+
+  // Frascos retornables: saldo del cliente elegido en las sugerencias
+  const [saldoFrascos, setSaldoFrascos] = useState({ estado: 'sin_cliente', saldo: SALDO_VACIO })
+  const [frascosAceptados, setFrascosAceptados] = useState(0)
+  const [frascosRechazados, setFrascosRechazados] = useState(0)
+  useEffect(() => {
+    if (!clienteIdSel) { setSaldoFrascos({ estado: 'sin_cliente', saldo: SALDO_VACIO }); return }
+    let cancelado = false
+    setSaldoFrascos({ estado: 'cargando', saldo: SALDO_VACIO })
+    cargarSaldo(clienteIdSel).then(r => {
+      if (cancelado) return
+      setSaldoFrascos({ estado: r.sinMigracion ? 'sin_migracion' : 'ok', saldo: r.saldo })
+    })
+    return () => { cancelado = true }
+  }, [clienteIdSel])
 
   // Concurso NEON
   const [codigoNeon, setCodigoNeon] = useState('')
@@ -716,6 +809,11 @@ export default function Ventas() {
 
   const agregarItem = () => setItems(prev => [...prev, itemVacio()])
   const quitarItem = (i) => setItems(prev => prev.filter((_, idx) => idx !== i))
+  const canjearFrascos = () => setItems(prev => {
+    // Si hay un ítem en blanco, el canje no queda debajo de él
+    const base = prev.filter(it => it.receta_nombre || it.precio_venta !== '')
+    return [...base, itemCanje()]
+  })
 
   // Pedidos anteriores del cliente (para el aporte de habitual en el envío).
   // Por cliente_id si lo hay; si no, por nombre exacto.
@@ -736,11 +834,25 @@ export default function Ventas() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     console.log('submit fired, items:', items)
-    const itemsValidos = items.filter(it => it.receta_nombre && it.precio_venta)
+    const itemsValidos = items.filter(esItemValido)
     console.log('itemsValidos:', itemsValidos)
     if (itemsValidos.length === 0) {
       showToast('Agrega al menos un producto con receta y precio')
       return
+    }
+
+    // ── Frascos (antes de tocar la base) ─────────────────────────────────────
+    const canjesFrascos = itemsValidos.filter(it => it.canje).length
+    const hayFrascos = canjesFrascos > 0 || frascosAceptados > 0 || frascosRechazados > 0
+    if (hayFrascos) {
+      if (!clienteIdSel) { showToast('Para registrar frascos elige el cliente desde la lista de sugerencias'); return }
+      if (saldoFrascos.estado === 'sin_migracion') { showToast('Falta correr la migración de frascos en Supabase'); return }
+      if (saldoFrascos.estado === 'cargando') { showToast('Espera a que cargue el saldo de frascos'); return }
+      const errCanje = validarCanje({ disponible: saldoFrascos.saldo.disponible, aceptadosHoy: frascosAceptados, canjes: canjesFrascos })
+      if (errCanje) { showToast(errCanje); return }
+      if (canjesFrascos > 0 && !itemsValidos.some(it => !it.canje && parseFloat(it.precio_venta) > 0)) {
+        showToast('El canje va con al menos 1 trago pagado'); return
+      }
     }
 
     // ── Validación del código NEON (antes de tocar la base) ──────────────────
@@ -919,7 +1031,8 @@ export default function Ventas() {
       const precioFinal = Math.round(precioBase * factorNeon)
       if (neonAplicado) descuentoNeonTotal += (precioBase - precioFinal) * (parseFloat(it.litros) || 1)
       const notas = []
-      if (neonAplicado) notas.push('NEON -15%')
+      if (it.canje) notas.push(NOTA_CANJE)
+      if (neonAplicado && precioBase > 0) notas.push('NEON -15%')
       return {
         fecha,
         receta_nombre: it.receta_nombre,
@@ -956,12 +1069,31 @@ export default function Ventas() {
     // Descuento de stock por ingredientes utilizados. La venta ya quedo
     // registrada; si el stock no se ajusta, avisamos pero no bloqueamos.
     const resStock = await descontarStock(itemsValidos)
-    const avisoStock = mensajeStock(resStock)
+    let avisoStock = mensajeStock(resStock)
+
+    // Frascos devueltos / canje. La venta ya quedó; si esto falla, se avisa.
+    let avisoFrascos = null
+    if (hayFrascos) {
+      const rf = await guardarFrascosOrden({
+        ordenId: orden.id, clienteId: clienteId || clienteIdSel, fecha,
+        aceptados: frascosAceptados, rechazados: frascosRechazados,
+        canal: canalDesdeEntrega(deliveryTipo), canjes: canjesFrascos,
+      })
+      if (!rf.ok) avisoFrascos = 'no se guardaron los frascos (' + (rf.error?.message || 'error') + '), regístralos editando el pedido'
+      else if (rf.avisoStock) avisoStock = [avisoStock, rf.avisoStock].filter(Boolean).join(' · ')
+    }
     const msgOk = neonAplicado
       ? `Pedido registrado ✓ · NEON aplicado (-${formatCLP(Math.round(descuentoNeonTotal))})`
       : 'Pedido registrado ✓'
     // Un solo toast: si se mostraban dos, el segundo tapaba el aviso de stock
-    showToast(avisoStock ? `${msgOk} · OJO con el stock: ${avisoStock}` : msgOk)
+    const partesFrascos = []
+    if (frascosAceptados) partesFrascos.push(`+${frascosAceptados} frascos`)
+    if (canjesFrascos) partesFrascos.push(`canje −${FRASCOS_POR_CANJE}`)
+    showToast([
+      msgOk + (hayFrascos && !avisoFrascos && partesFrascos.length ? ' · 🫙 ' + partesFrascos.join(', ') : ''),
+      avisoFrascos ? 'OJO: ' + avisoFrascos : null,
+      avisoStock ? 'OJO con el stock: ' + avisoStock : null,
+    ].filter(Boolean).join(' · '))
     setFecha(fechaHoy())
     setHora(horaAhora())
     setCliente('')
@@ -979,6 +1111,8 @@ export default function Ventas() {
     setEnviarADelivery(false)
     setNota('')
     setItems([itemVacio()])
+    setFrascosAceptados(0)
+    setFrascosRechazados(0)
     setCodigoNeon('')
     setNeonEstado(null)
     load()
@@ -1006,6 +1140,11 @@ export default function Ventas() {
       const resStock = await reintegrarStock(itemsAnteriores)
       if (resStock && !resStock.ok) stockFallido = resStock.fallidos
     }
+    // Frascos del pedido: se borran devolviendo el stock ANTES de borrar la
+    // orden (la FK en cascada los borraría sin tocar el stock). Sin la
+    // migración corrida no hay nada que borrar.
+    const rf = await guardarFrascosOrden({ ordenId: orden.id, clienteId: null })
+    if (!rf.ok) stockFallido = [...(stockFallido || []), 'frascos devueltos']
     const { error: errOrden } = await supabase.from('ordenes').delete().eq('id', orden.id)
     if (errOrden) {
       showToast('Error al borrar el pedido: ' + errOrden.message)
@@ -1284,6 +1423,7 @@ export default function Ventas() {
                       style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)', fontSize:18, lineHeight:1, padding:0 }}>×</button>
                   )}
                 </div>
+                {it.canje && <MarcaCanje />}
                 <select className="form-select" value={it.receta_nombre} style={{ marginBottom:8 }}
                   onChange={e => updateItem(i, 'receta_nombre', e.target.value)}>
                   <option value="">Seleccionar receta...</option>
@@ -1296,7 +1436,7 @@ export default function Ventas() {
                     step="0.5" min="0.5"
                     onChange={e => updateItem(i, 'litros', e.target.value)} />
                 </div>
-                {it.receta_nombre && it.precio_venta && (
+                {it.receta_nombre && it.precio_venta !== '' && (
                   <div style={{ marginTop:6, fontSize:13, color:'var(--green)', fontWeight:700, textAlign:'right' }}>
                     {formatCLP((parseFloat(it.precio_venta) || 0) * (parseFloat(it.litros)||1))}
                   </div>
@@ -1307,6 +1447,11 @@ export default function Ventas() {
               style={{ width:'100%', background:'rgba(255,255,255,0.04)', border:'1px dashed var(--border)', borderRadius:10, padding:'10px 0', color:'var(--muted)', cursor:'pointer', fontSize:13 }}>
               + Agregar producto
             </button>
+            <FrascosBloque estado={saldoFrascos.estado} saldo={saldoFrascos.saldo}
+              aceptados={frascosAceptados} rechazados={frascosRechazados}
+              setAceptados={setFrascosAceptados} setRechazados={setFrascosRechazados}
+              canjesEnPedido={items.filter(it => it.canje).length} onCanjear={canjearFrascos}
+              hayPagado={items.some(it => !it.canje && esItemValido(it) && parseFloat(it.precio_venta) > 0)} />
           </div>
 
           {totalBruto > 0 && (

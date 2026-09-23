@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatCLP } from '../lib/calculos'
+import FrascosFicha from '../components/FrascosFicha'
 
 const ORIGENES = ['IG Orgánico', 'IG Pauta', 'Referido', 'Cliente habitual', 'Evento', 'Otro']
 
@@ -131,7 +132,7 @@ function esPedidoDe(orden, cliente) {
 }
 
 // ─── Modal perfil completo de cliente ────────────────────────────────────────
-function PerfilModal({ cliente, ordenes, onEditar, onCerrar, onTagSaved }) {
+function PerfilModal({ cliente, ordenes, onEditar, onCerrar, onTagSaved, onToast }) {
   // Pedidos del cliente, ordenados del más reciente al más antiguo
   const pedidos = ordenes
     .filter(o => esPedidoDe(o, cliente))
@@ -262,6 +263,9 @@ function PerfilModal({ cliente, ordenes, onEditar, onCerrar, onTagSaved }) {
             </span>
           </div>
         </div>
+
+        {/* Frascos retornables */}
+        {cliente.id && <FrascosFicha clienteId={cliente.id} onToast={onToast} />}
 
         {/* Tag editable */}
         <div style={{ marginBottom: 12 }}>
@@ -460,6 +464,7 @@ export default function Clientes() {
           onEditar={() => setEditando(perfil)}
           onCerrar={() => setPerfil(null)}
           onTagSaved={() => { showToast('Etiqueta guardada ✓'); loadData() }}
+          onToast={showToast}
         />
       )}
 

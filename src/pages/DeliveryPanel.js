@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
+import { cargarSaldos, FRASCOS_POR_CANJE } from '../lib/frascos'
 import { formatCLP } from '../lib/calculos'
 
 // ─── Timer de espera ─────────────────────────────────────────────────────────
@@ -91,7 +92,7 @@ function llamarCliente(telefono) {
   window.open(`tel:${telefono}`, '_self')
 }
 
-function DeliveryCard({ orden, onEstadoChange, onError }) {
+function DeliveryCard({ orden, onEstadoChange, onError, saldoFrascos }) {
   const [cambiando, setCambiando] = useState(false)
   const cfg = estadoConfig[orden.estado_delivery || 'pendiente']
 
@@ -244,6 +245,23 @@ function DeliveryCard({ orden, onEstadoChange, onError }) {
         </div>
       )}
 
+      {/* Frascos: en las entregas con auto se pregunta y se traen de vuelta */}
+      {orden.delivery_tipo === 'propio' && orden.cliente_id && (
+        <div style={{
+          background: 'rgba(143,255,240,0.06)', border: '1px solid rgba(143,255,240,0.25)',
+          borderRadius: 10, padding: '8px 12px', marginBottom: 10, fontSize: 13, color: '#8ffff0',
+        }}>
+          🫙 Pregunta si tiene frascos para devolver
+          <span style={{ color: 'var(--muted)' }}>
+            {' · saldo '}{saldoFrascos?.disponible || 0}
+            {(saldoFrascos?.disponible || 0) >= FRASCOS_POR_CANJE ? ' (ya le alcanza para un canje)' : ''}
+          </span>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>
+            Con tapa y enteros. Anota cuántos aceptaste y cuántos rechazaste.
+          </div>
+        </div>
+      )}
+
       {/* Productos y envases */}
       <div style={{
         display: 'flex',
@@ -381,6 +399,7 @@ export default function DeliveryPanel({ onLogout }) {
   const [verHistorial, setVerHistorial] = useState(false)
   const [archivando, setArchivando] = useState(false)
   const [toast, setToast] = useState('')
+  const [saldosFrascos, setSaldosFrascos] = useState({})
 
   const showToast = (msg) => {
     setToast(msg)
@@ -412,6 +431,8 @@ export default function DeliveryPanel({ onLogout }) {
 
     const ventasActivos = await cargarVentas((activos || []).map(o => o.id))
     setOrdenes((activos || []).map(o => ({ ...o, ventas: ventasActivos[o.id] || [] })))
+    // Saldo de frascos solo de los que salen en auto (los demás no devuelven)
+    setSaldosFrascos(await cargarSaldos((activos || []).filter(o => o.delivery_tipo === 'propio').map(o => o.cliente_id)))
     setLoading(false)
   }, [])
 
@@ -644,6 +665,7 @@ export default function DeliveryPanel({ onLogout }) {
               orden={o}
               onEstadoChange={() => { load(); showToast('Estado actualizado ✓') }}
               onError={showToast}
+              saldoFrascos={saldosFrascos[o.cliente_id]}
             />
           ))
         )}

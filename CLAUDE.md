@@ -182,6 +182,31 @@ escrito a partir de las fichas de WhatsApp y las órdenes.
   No usa `estado_contacto` para marcar envíos: eso es de la máquina de estados de
   Reactivar (1 compra → toques → frío) y no se mezcla.
 
+## Frascos retornables («Frascos de vuelta», 23-sep-2026)
+
+6 frascos aceptados = 1 Mojito clásico o un 0.0, máximo 1 canje por pedido y
+con al menos 1 trago pagado. Saldo vigente 6 meses desde la última devolución.
+
+- Tabla `frascos_movimientos` + vista `frascos_saldo` (security_invoker),
+  migración `20260923_frascos_retornables.sql`. Saldo = suma de `aceptados`
+  (+n devolución, −6 canje, ± ajuste). Los rechazados se guardan, no suman.
+- Lógica en `src/lib/frascos.js` (con tests); UI en `FrascosBloque` (pedido
+  nuevo y editar), `FrascosFicha` (ficha del cliente: devolución sin pedido y
+  ajuste) y un aviso en `DeliveryPanel` para pedidos «propio».
+- **Stock:** solo la devolución suma `Frascos 1lt`, desde el cliente vía
+  `ajustar_stock`. El canje es una venta a $0 con nota `canje frascos` y
+  descuenta su frasco por el camino normal. El ajuste no mueve stock.
+- Al borrar un pedido, `guardarFrascosOrden({ ordenId, clienteId: null })` va
+  ANTES del delete de `ordenes`: la FK en cascada borraría las filas sin
+  devolver el stock.
+- Un ítem a $0 es válido (`esItemValido` en Ventas.js). Antes el filtro era
+  `precio_venta` truthy y los ítems a $0 se perdían al guardar/editar.
+- La marca antigua `nota = 'envase devuelto'` (checkbox con −$1.000, sacado el
+  30-jun) sigue funcionando en inventario para las 11 ventas viejas; no suma
+  saldo. No reutilizarla.
+- Fusionar clientes: repuntar también `frascos_movimientos.cliente_id` (la FK
+  no tiene cascada a propósito).
+
 ## Referencias
 
 - `BLINDAJE-pasos.md` — runbook de despliegue del blindaje (orden seguro).
