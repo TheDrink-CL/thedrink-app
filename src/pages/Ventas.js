@@ -3,6 +3,46 @@ import { supabase } from '../lib/supabase'
 import { descontarStock, reintegrarStock, mensajeStock } from '../lib/inventario'
 import { formatCLP } from '../lib/calculos'
 import { descargarCSV, BotonExportar } from '../lib/exportar'
+import { tarifaEnvio } from '../lib/tarifaEnvio'
+
+// ─── Sugerencia de cobro de envío (mapa de la carta) ─────────────────────────
+// Aparece al tener monto y km. Dentro del mapa muestra la tarifa de la carta;
+// fuera del borde, Uber − aporte del tramo. «Usar» la copia al campo cobrado.
+function SugerenciaEnvio({ monto, km, costo, cobrado, onUsar }) {
+  const r = tarifaEnvio(monto, km, costo)
+  if (!r) return null
+  const coincide = cobrado !== '' && Number(cobrado) === r.tarifa
+  const precio = r.tarifa === 0 ? 'gratis' : formatCLP(r.tarifa)
+  return (
+    <div style={{
+      fontSize: 12, lineHeight: 1.5, marginTop: 6, padding: '8px 10px', borderRadius: 9,
+      background: r.dentro ? 'rgba(34,197,94,0.08)' : 'rgba(245,158,11,0.10)',
+      border: `1px solid ${r.dentro ? 'rgba(34,197,94,0.3)' : 'rgba(245,158,11,0.35)'}`,
+      color: 'var(--text)',
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+        <span>
+          {r.dentro
+            ? <>Según el mapa: <b>{precio}</b> <span style={{ color: 'var(--muted)' }}>({r.tramo.nombre}, hasta {r.zona.hasta} km)</span></>
+            : <>Fuera del mapa: cobrar <b>{precio}</b> <span style={{ color: 'var(--muted)' }}>
+                (Uber {r.estimado ? '~' : ''}{formatCLP(r.costoUsado)} − aporte {formatCLP(r.aporte)}{r.estimado ? ', estimado: confirma con la cotización' : ''})
+              </span></>}
+        </span>
+        {!coincide && (
+          <button type="button" onClick={() => onUsar(String(r.tarifa))} style={{
+            background: 'none', border: '1px solid rgba(255,255,255,0.18)', borderRadius: 7,
+            color: 'var(--text)', cursor: 'pointer', fontSize: 11, padding: '3px 9px', flexShrink: 0,
+          }}>usar</button>
+        )}
+      </div>
+      {r.siguiente && (
+        <div style={{ color: 'var(--muted)', marginTop: 3 }}>
+          Con {formatCLP(r.siguiente.falta)} más en tragos el envío queda en {r.siguiente.tarifa === 0 ? 'gratis' : formatCLP(r.siguiente.tarifa)}.
+        </div>
+      )}
+    </div>
+  )
+}
 
 // ─── Modal ticket de pedido ──────────────────────────────────────────────────
 function TicketModal({ orden, onCerrar }) {
@@ -444,6 +484,8 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel, showToast }) {
             <label className="form-label">Cobrado al cliente por delivery</label>
             <input type="number" className="form-input" value={deliveryCobrado} placeholder="ej: 3000"
               onChange={e => setDeliveryCobrado(e.target.value)} />
+            <SugerenciaEnvio monto={total} km={distanciaKm} costo={deliveryTipo === 'propio' ? null : delivery}
+              cobrado={deliveryCobrado} onUsar={setDeliveryCobrado} />
           </div>
         )}
 
@@ -1375,6 +1417,8 @@ export default function Ventas() {
               <label className="form-label">Cobrado al cliente por delivery</label>
               <input type="number" className="form-input" value={deliveryCobrado} placeholder="ej: 3000"
                 onChange={e => setDeliveryCobrado(e.target.value)} />
+              <SugerenciaEnvio monto={totalBruto} km={distanciaKm} costo={deliveryTipo === 'propio' ? null : delivery}
+                cobrado={deliveryCobrado} onUsar={setDeliveryCobrado} />
             </div>
           )}
 
