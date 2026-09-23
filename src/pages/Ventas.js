@@ -3,13 +3,14 @@ import { supabase } from '../lib/supabase'
 import { descontarStock, reintegrarStock, mensajeStock } from '../lib/inventario'
 import { formatCLP } from '../lib/calculos'
 import { descargarCSV, BotonExportar } from '../lib/exportar'
-import { tarifaEnvio } from '../lib/tarifaEnvio'
+import { tarifaEnvio, HABITUAL_MIN_PEDIDOS } from '../lib/tarifaEnvio'
+import { todas } from '../lib/todas'
 
 // ─── Sugerencia de cobro de envío (mapa de la carta) ─────────────────────────
 // Aparece al tener monto y km. Dentro del mapa muestra la tarifa de la carta;
 // fuera del borde, Uber − aporte del tramo. «Usar» la copia al campo cobrado.
-function SugerenciaEnvio({ monto, km, costo, cobrado, onUsar }) {
-  const r = tarifaEnvio(monto, km, costo)
+function SugerenciaEnvio({ monto, km, costo, cobrado, onUsar, pedidosPrevios = 0 }) {
+  const r = tarifaEnvio(monto, km, costo, pedidosPrevios >= HABITUAL_MIN_PEDIDOS)
   if (!r) return null
   const coincide = cobrado !== '' && Number(cobrado) === r.tarifa
   const precio = r.tarifa === 0 ? 'gratis' : formatCLP(r.tarifa)
@@ -25,7 +26,7 @@ function SugerenciaEnvio({ monto, km, costo, cobrado, onUsar }) {
           {r.dentro
             ? <>Según el mapa: <b>{precio}</b> <span style={{ color: 'var(--muted)' }}>({r.tramo.nombre}, hasta {r.zona.hasta} km)</span></>
             : <>Fuera del mapa: cobrar <b>{precio}</b> <span style={{ color: 'var(--muted)' }}>
-                (Uber {r.estimado ? '~' : ''}{formatCLP(r.costoUsado)} − aporte {formatCLP(r.aporte)}{r.estimado ? ', estimado: confirma con la cotización' : ''})
+                (Uber {r.estimado ? '~' : ''}{formatCLP(r.costoUsado)} − aporte {formatCLP(r.aporte)}{r.habitual ? ` de cliente habitual, ${pedidosPrevios} pedidos` : ''}{r.estimado ? ', estimado: confirma con la cotización' : ''})
               </span></>}
         </span>
         {!coincide && (
@@ -277,7 +278,7 @@ function ConfirmModal({ mensaje, onConfirm, onCancel }) {
   )
 }
 
-function EditOrdenModal({ orden, recetas, onSave, onCancel, showToast }) {
+function EditOrdenModal({ orden, recetas, onSave, onCancel, showToast, pedidosPrevios = 0 }) {
   const [fecha, setFecha] = useState(orden.fecha)
   const [hora, setHora] = useState(orden.hora || '')
   const [cliente, setCliente] = useState(orden.cliente_nombre || '')
@@ -485,7 +486,7 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel, showToast }) {
             <input type="number" className="form-input" value={deliveryCobrado} placeholder="ej: 3000"
               onChange={e => setDeliveryCobrado(e.target.value)} />
             <SugerenciaEnvio monto={total} km={distanciaKm} costo={deliveryTipo === 'propio' ? null : delivery}
-              cobrado={deliveryCobrado} onUsar={setDeliveryCobrado} />
+              cobrado={deliveryCobrado} onUsar={setDeliveryCobrado} pedidosPrevios={pedidosPrevios} />
           </div>
         )}
 
@@ -601,8 +602,8 @@ export default function Ventas() {
   async function load() {
     const [{ data: r }, { data: o }, { data: vts }] = await Promise.all([
       supabase.from('recetas').select('nombre, precio_venta').order('nombre'),
-      supabase.from('ordenes').select('*').order('fecha', { ascending: false }),
-      supabase.from('ventas').select('*').order('fecha', { ascending: false }),
+      todas(supabase.from('ordenes').select('*').order('fecha', { ascending: false })),
+      todas(supabase.from('ventas').select('*').order('fecha', { ascending: false })),
     ])
 
     // Ventas con orden asociada
@@ -715,6 +716,15 @@ export default function Ventas() {
 
   const agregarItem = () => setItems(prev => [...prev, itemVacio()])
   const quitarItem = (i) => setItems(prev => prev.filter((_, idx) => idx !== i))
+
+  // Pedidos anteriores del cliente (para el aporte de habitual en el envío).
+  // Por cliente_id si lo hay; si no, por nombre exacto.
+  const pedidosDe = (clienteId, nombre, excluirId) => {
+    const n = (nombre || '').trim().toLowerCase()
+    if (!clienteId && !n) return 0
+    return ordenes.filter(o => o._tipo !== 'huerfana' && o.id !== excluirId &&
+      (clienteId ? o.cliente_id === clienteId : (o.cliente_nombre || '').trim().toLowerCase() === n)).length
+  }
 
   const totalBruto = items.reduce((s, it) => {
     const base = parseFloat(it.precio_venta) || 0
@@ -1120,6 +1130,7 @@ export default function Ventas() {
         <EditOrdenModal
           orden={editando}
           recetas={recetas}
+          pedidosPrevios={pedidosDe(editando.cliente_id, editando.cliente_nombre, editando.id)}
           onSave={() => { setEditando(null); showToast('Pedido actualizado ✓'); load() }}
           onCancel={() => setEditando(null)}
           showToast={showToast}
@@ -1418,7 +1429,7 @@ export default function Ventas() {
               <input type="number" className="form-input" value={deliveryCobrado} placeholder="ej: 3000"
                 onChange={e => setDeliveryCobrado(e.target.value)} />
               <SugerenciaEnvio monto={totalBruto} km={distanciaKm} costo={deliveryTipo === 'propio' ? null : delivery}
-                cobrado={deliveryCobrado} onUsar={setDeliveryCobrado} />
+                cobrado={deliveryCobrado} onUsar={setDeliveryCobrado} pedidosPrevios={pedidosDe(clienteIdSel, cliente)} />
             </div>
           )}
 
