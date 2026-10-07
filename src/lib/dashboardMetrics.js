@@ -10,6 +10,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { calcularCostoReceta, envaseDesdeReceta, esOrigenIGAds, leerMerma } from './calculos'
+import { clavesDeCliente } from './metricas'
 
 // Parsea 'YYYY-MM-DD' sin desfase de zona horaria
 export function parseFecha(f) {
@@ -115,20 +116,24 @@ export function calcularMetricasDashboard({
   })
 
   // ── Clientes: primera orden, nuevos vs recurrentes, recompra ──────────────
-  const primeraOrden = {}   // cliente_id -> { fecha, origen }
+  // Cliente = ficha o nombre (lib/metricas.js), igual que Inicio: antes acá
+  // solo contaban las órdenes con ficha y los números no calzaban.
+  const claveDe = clavesDeCliente(ordenes)
+  const primeraOrden = {}   // clave cliente -> { fecha, origen }
   const ordenesPorCliente = {}
-  const ordenesValidas = ordenes.filter(o => o.cliente_id && o.fecha)
+  const ordenesValidas = ordenes.filter(o => claveDe(o) && o.fecha)
   ordenesValidas.forEach(o => {
-    ordenesPorCliente[o.cliente_id] = (ordenesPorCliente[o.cliente_id] || 0) + 1
-    if (!primeraOrden[o.cliente_id] || o.fecha < primeraOrden[o.cliente_id].fecha) {
-      primeraOrden[o.cliente_id] = { fecha: o.fecha, origen: o.origen }
+    const k = claveDe(o)
+    ordenesPorCliente[k] = (ordenesPorCliente[k] || 0) + 1
+    if (!primeraOrden[k] || o.fecha < primeraOrden[k].fecha) {
+      primeraOrden[k] = { fecha: o.fecha, origen: o.origen }
     }
   })
   ordenesValidas.forEach(o => {
     const key = lunesDe(o.fecha)
     if (!key) return
     const w = getSemana(key)
-    if (primeraOrden[o.cliente_id].fecha === o.fecha) w.ordenesNuevas++
+    if (primeraOrden[claveDe(o)].fecha === o.fecha) w.ordenesNuevas++
     else w.ordenesRecurrentes++
   })
   Object.values(primeraOrden).forEach(p => {

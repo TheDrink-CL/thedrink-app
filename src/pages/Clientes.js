@@ -433,6 +433,8 @@ export default function Clientes() {
 
   // KPIs globales
   const totalClientes = clientes.length
+  // Fichas ≠ clientes: Panel cuenta clientes con al menos un pedido (lib/metricas).
+  const conPedidos = clientes.filter(c => statsCliente(c).pedidos > 0).length
   const conTelefono = clientes.filter(c => c.telefono).length
   const vips = clientes.filter(c => statsCliente(c).pedidos >= 3).length
   const topGastador = clientesFiltrados[0]
@@ -476,8 +478,9 @@ export default function Clientes() {
       {/* KPIs globales */}
       <div className="kpi-grid" style={{ marginBottom: 12 }}>
         <div className="kpi-card">
-          <div className="kpi-label">Total clientes</div>
+          <div className="kpi-label">Fichas</div>
           <div className="kpi-value cyan">{totalClientes}</div>
+          <div className="kpi-sub">{conPedidos} con pedidos</div>
         </div>
         <div className="kpi-card">
           <div className="kpi-label">VIP (3+ pedidos)</div>

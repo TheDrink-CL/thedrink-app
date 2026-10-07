@@ -166,6 +166,8 @@ export default function App() {
   const [menuMas, setMenuMas] = useState(false)
   // Comanda que se va a cerrar como venta: se abre Ventas con el pedido cargado.
   const [ventaDesdeComanda, setVentaDesdeComanda] = useState(null)
+  // Pedido a abrir en edición al llegar a Ventas (Inicio → «Completar»).
+  const [editarOrdenId, setEditarOrdenId] = useState(null)
   const [desbloqueado, setDesbloqueado] = useState(isPinUnlocked())
   const [deliveryDesbloqueado, setDeliveryDesbloqueado] = useState(isDeliveryUnlocked())
   // Sesion de Supabase Auth. null = todavia verificando; false = sin sesion;
@@ -229,10 +231,13 @@ export default function App() {
 
   return (
     <div>
-      {tab === 'dashboard'    && <Dashboard />}
+      {tab === 'dashboard'    && <Dashboard onIr={setTab}
+        onRegistrarVenta={(c) => { setVentaDesdeComanda(c); setTab('ventas') }}
+        onEditarOrden={(id) => { setEditarOrdenId(id); setTab('ventas') }} />}
       {tab === 'indicadores'  && <Indicadores />}
       {tab === 'campanas'     && <Campanas />}
-      {tab === 'ventas'       && <Ventas desdeComanda={ventaDesdeComanda} onComandaCargada={() => setVentaDesdeComanda(null)} />}
+      {tab === 'ventas'       && <Ventas desdeComanda={ventaDesdeComanda} onComandaCargada={() => setVentaDesdeComanda(null)}
+        editarOrdenId={editarOrdenId} onEditarAbierto={() => setEditarOrdenId(null)} />}
       {tab === 'compras'      && <Compras />}
       {tab === 'caja'         && <Caja />}
       {tab === 'analisis'     && <Analisis />}

@@ -391,7 +391,7 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel, showToast, pedidosPr
       nota: nota || null,
       delivery: parseFloat(delivery) || 0,
       delivery_cobrado: parseFloat(deliveryCobrado) || 0,
-      delivery_tipo: (parseFloat(delivery) > 0 || deliveryTipo === 'retiro' || deliveryTipo === 'propio') ? (deliveryTipo || null) : null,
+      delivery_tipo: deliveryTipo || null, // aunque falte el costo: así Inicio sabe que el pedido está sin cerrar
       distancia_km: (deliveryTipo && deliveryTipo !== 'retiro' && distanciaKm !== '') ? parseFloat(distanciaKm) : null,
     }).eq('id', orden.id)
     if (errOrden) {
@@ -607,7 +607,7 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel, showToast, pedidosPr
   )
 }
 
-export default function Ventas({ desdeComanda = null, onComandaCargada } = {}) {
+export default function Ventas({ desdeComanda = null, onComandaCargada, editarOrdenId = null, onEditarAbierto } = {}) {
   const [recetas, setRecetas] = useState([])
   const [ordenes, setOrdenes] = useState([])
   const [toast, setToast] = useState('')
@@ -815,6 +815,14 @@ export default function Ventas({ desdeComanda = null, onComandaCargada } = {}) {
     if (onComandaCargada) onComandaCargada()
     window.scrollTo(0, 0)
   }, [desdeComanda])
+
+  // Inicio → «Completar»: abre ese pedido en edición apenas cargan los pedidos.
+  useEffect(() => {
+    if (!editarOrdenId || !ordenes.length) return
+    const o = ordenes.find(x => x.id === editarOrdenId)
+    if (o) setEditando(o)
+    if (onEditarAbierto) onEditarAbierto()
+  }, [editarOrdenId, ordenes])
 
   // Ítems que llegaron de una comanda sin precio: el de la receta, cuando cargan.
   useEffect(() => {
@@ -1105,7 +1113,7 @@ export default function Ventas({ desdeComanda = null, onComandaCargada } = {}) {
       nota: nota || null,
       delivery: parseFloat(delivery) || 0,
       delivery_cobrado: parseFloat(deliveryCobrado) || 0,
-      delivery_tipo: (parseFloat(delivery) > 0 || deliveryTipo === 'retiro' || deliveryTipo === 'propio') ? (deliveryTipo || null) : null,
+      delivery_tipo: deliveryTipo || null, // aunque falte el costo: así Inicio sabe que el pedido está sin cerrar
       distancia_km: (deliveryTipo && deliveryTipo !== 'retiro' && distanciaKm !== '') ? parseFloat(distanciaKm) : null,
       estado_delivery: enviarADelivery ? 'pendiente' : null,
     }).select().single()

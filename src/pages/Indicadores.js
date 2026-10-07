@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatCLP, formatPct } from '../lib/calculos'
 import { calcularMetricasDashboard, resumenParaIA, CANAL_META, labelSemana } from '../lib/dashboardMetrics'
+import { todas } from '../lib/todas'
+import ResumenFinanciero from '../components/ResumenFinanciero'
 
 const SEMAFORO_COLOR = {
   verde: 'var(--green)',
@@ -389,8 +391,9 @@ export default function Indicadores() {
     async function load() {
       try {
         const [vts, ords, cja, cmp, rec, recIng, ins, cfg, clts] = await Promise.all([
-          supabase.from('ventas').select('fecha, receta_nombre, litros, precio_venta, ingreso_total, origen, orden_id'),
-          supabase.from('ordenes').select('id, fecha, cliente_id, origen'),
+          // todas(): sin paginar, PostgREST corta en 1.000 filas.
+          todas(supabase.from('ventas').select('fecha, receta_nombre, litros, precio_venta, ingreso_total, origen, orden_id')),
+          todas(supabase.from('ordenes').select('id, fecha, cliente_id, cliente_nombre, origen')),
           supabase.from('caja').select('fecha, tipo, categoria, monto'),
           supabase.from('compras').select('fecha, tipo, precio_total, es_inversion'),
           supabase.from('recetas').select('nombre, precio_venta, envase_formato'),
@@ -425,7 +428,7 @@ export default function Indicadores() {
 
   return (
     <div className="page">
-      <div className="page-title">Indicadores</div>
+      <div className="page-title">Panel</div>
 
       {/* Fila de KPIs */}
       <div className="kpi-grid" style={{ marginBottom: 12 }}>
@@ -477,6 +480,9 @@ export default function Indicadores() {
       <PorDiaSemana m={m} />
       <DonaOrigen m={m} />
       <MargenRecetas m={m} />
+
+      {/* Lo financiero que antes estaba en Inicio */}
+      <ResumenFinanciero />
 
       <div style={{ fontSize: 10, color: 'var(--muted)', textAlign: 'center', padding: '8px 0 16px' }}>
         Todos los indicadores se calculan de forma determinista desde Supabase (lib/dashboardMetrics.js).
