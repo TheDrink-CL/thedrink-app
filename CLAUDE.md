@@ -199,6 +199,26 @@ escrito a partir de las fichas de WhatsApp y las órdenes.
   No usa `estado_contacto` para marcar envíos: eso es de la máquina de estados de
   Reactivar (1 compra → toques → frío) y no se mezcla.
 
+## Navegación y pantallas (rediseño del 6-oct-2026)
+
+Salió de una revisión de experiencia (diseño + "gerente de operaciones") y de
+lo que Rodrigo corrigió con cómo trabaja de verdad.
+
+- **Barra:** Inicio · Venta · Bodega · Caja · Panel · Más. Caja se queda en la
+  barra (decisión de Rodrigo).
+- **Inicio = operación del día** (`pages/Dashboard.js`): sin cerrar (comandas
+  sin venta, envíos por app sin costo), hoy y la semana, qué comprar,
+  transferencias. Lo financiero está en **Panel** (`components/ResumenFinanciero.js`).
+- **Bodega** (`pages/Bodega.js`): Stock, Compras, Conteo y Salidas.
+- **Dos puertas para un pedido, a propósito:** comanda + TV en hora punta (la
+  TV se usa mucho), Ventas directo con poca venta. `lib/comandasCierre.js` las
+  une: la venta cierra la comanda del mismo cliente, y «Registrar venta» en
+  Comandas abre Ventas con el pedido cargado (no hay modal aparte).
+- **Una métrica = una función** (`lib/metricas.js`): cliente = ficha o nombre,
+  monto con `ingreso_total`, semana lunes a domingo. No recalcular en una
+  pantalla nueva.
+- Caja: `CATEGORIA_RETIRO` ('Retiro dueño') baja la caja pero no es gasto.
+
 ## Frascos retornables («Frascos de vuelta», 23-sep-2026)
 
 6 frascos aceptados = 1 Mojito clásico o un 0.0, máximo 1 canje por pedido y

@@ -786,6 +786,39 @@ export default function Ventas({ desdeComanda = null, onComandaCargada, editarOr
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2800) }
 
+  // Borrador del pedido en curso: cambiar de pestaña desmonta Ventas y antes se
+  // perdía todo lo escrito (y el pedido quedaba "para después"). Vive en la
+  // sesión del navegador; se borra al guardar o al vaciar el formulario.
+  const BORRADOR = 'thedrink_venta_borrador'
+  useEffect(() => {
+    if (desdeComanda) return
+    let b = null
+    try { b = JSON.parse(sessionStorage.getItem(BORRADOR) || 'null') } catch (e) { b = null }
+    if (!b) return
+    setFecha(b.fecha || fechaHoy()); setHora(b.hora || horaAhora())
+    setCliente(b.cliente || ''); setClienteIdSel(b.clienteIdSel || null)
+    setClienteTelefono(b.clienteTelefono || ''); setClienteDireccion(b.clienteDireccion || '')
+    setOrigen(b.origen || ''); setMedioPago(b.medioPago || 'transferencia')
+    setDelivery(b.delivery || ''); setDeliveryCobrado(b.deliveryCobrado || ''); setDeliveryTipo(b.deliveryTipo || '')
+    setDistanciaKm(b.distanciaKm || ''); setEnviarADelivery(!!b.enviarADelivery); setNota(b.nota || '')
+    if (Array.isArray(b.items) && b.items.length) setItems(b.items)
+    setCodigoNeon(b.codigoNeon || '')
+    setFrascosAceptados(b.frascosAceptados || 0); setFrascosRechazados(b.frascosRechazados || 0)
+  }, [])
+  useEffect(() => {
+    const hayAlgo = cliente.trim() || clienteTelefono.trim() || nota.trim() || items.some(it => it.receta_nombre)
+    try {
+      if (!hayAlgo) { sessionStorage.removeItem(BORRADOR); return }
+      sessionStorage.setItem(BORRADOR, JSON.stringify({
+        fecha, hora, cliente, clienteIdSel, clienteTelefono, clienteDireccion, origen, medioPago,
+        delivery, deliveryCobrado, deliveryTipo, distanciaKm, enviarADelivery, nota, items,
+        codigoNeon, frascosAceptados, frascosRechazados,
+      }))
+    } catch (e) { /* sin sessionStorage (modo privado): sin borrador */ }
+  }, [fecha, hora, cliente, clienteIdSel, clienteTelefono, clienteDireccion, origen, medioPago,
+      delivery, deliveryCobrado, deliveryTipo, distanciaKm, enviarADelivery, nota, items,
+      codigoNeon, frascosAceptados, frascosRechazados])
+
   // «Registrar venta» desde Comandas: el pedido llega cargado a este mismo
   // formulario (frascos, NEON, envío sugerido, origen), en vez de a un modal
   // aparte que no tenía nada de eso.
