@@ -2,6 +2,13 @@ import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatCLP } from '../lib/calculos'
 import { insumosEnBodega, fuenteDeCompra } from '../lib/inventario'
+import MovimientosInsumo from '../components/MovimientosInsumo'
+
+// Diferencia que no es merma: ≥ 20 % del teórico y ≥ $2.000. Casi siempre es
+// algo sin registrar (venta, compra, comanda). Red Bull Blue 25 → 12 y ron
+// 1.547 → 150 ml, el 6-oct, se guardaron sin ningún aviso.
+const esDiferenciaGrande = (p) => !!p && Math.abs(p.diffValor) >= 2000 &&
+  (p.teorico === 0 || Math.abs(p.diff) / Math.abs(p.teorico) >= 0.2)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Conteo de inventario — "el stock es dinero"
@@ -33,6 +40,8 @@ export default function Conteo() {
   const [tab, setTab] = useState('contar') // 'contar' | 'historial'
   const [insumos, setInsumos] = useState([])
   const [conteo, setConteo] = useState({})      // { nombre: valorReal(string) }
+  const [viendo, setViendo] = useState(null)     // ficha de movimientos abierta
+  const [grandesVistas, setGrandesVistas] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState('')
@@ -52,7 +61,7 @@ export default function Conteo() {
   async function loadInsumos() {
     setLoading(true)
     const [{ data }, { data: ultimo }, { data: sal }] = await Promise.all([
-      supabase.from('insumos').select('nombre, unidad, stock_actual, costo_ppp, rinde_insumo, rinde_factor').order('nombre'),
+      supabase.from('insumos').select('*').order('nombre'), // '*': incluye `activo` (temporada) si existe
       supabase.from('conteos_inventario').select('fecha, created_at').order('created_at', { ascending: false }).limit(1),
       supabase.from('salidas_stock').select('created_at, costo_valorizado'),
     ])
@@ -119,9 +128,12 @@ export default function Conteo() {
     .filter(x => x.p !== null)
   const previewAjuste = previewLineas.reduce((s, x) => s + x.p.diffValor, 0)
   const previewContados = previewLineas.length
+  const grandes = previewLineas.filter(x => esDiferenciaGrande(x.p))
 
   async function handleGuardar() {
     if (previewContados === 0) { showToast('Conta al menos un insumo'); return }
+    // Con diferencias grandes, el primer toque solo avisa.
+    if (grandes.length && !grandesVistas) { setGrandesVistas(true); return }
     setSaving(true)
 
     // Construir lineas solo de los insumos efectivamente contados
@@ -214,6 +226,9 @@ export default function Conteo() {
   return (
     <div className="page">
       {toast && <div className="toast">{toast}</div>}
+      {viendo && (
+        <MovimientosInsumo insumo={viendo} insumos={insumos} onCerrar={() => setViendo(null)} />
+      )}
       <div className="page-title">Conteo de inventario</div>
 
       <div className="toggle-row" style={{ marginBottom: 14 }}>
@@ -299,7 +314,7 @@ export default function Conteo() {
               const p = lineaPreview(ins)
               const fuente = fuenteDe(ins)
               return (
-                <div className="list-item" key={ins.nombre} style={{ gap: 10, alignItems: 'center' }}>
+                <div className="list-item" key={ins.nombre} style={{ gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="list-item-name" style={{ fontSize: 14 }}>{ins.nombre}</div>
                     <div className="list-item-sub">
@@ -327,8 +342,17 @@ export default function Conteo() {
                       style={{ width: 84, textAlign: 'right' }}
                       placeholder={fmtNum(teoricoDe(ins))}
                       value={conteo[ins.nombre] ?? ''}
-                      onChange={e => setConteo(c => ({ ...c, [ins.nombre]: e.target.value }))} />
+                      onChange={e => { setGrandesVistas(false); setConteo(c => ({ ...c, [ins.nombre]: e.target.value })) }} />
                   </div>
+                  {esDiferenciaGrande(p) && (
+                    <div style={{ flexBasis: '100%', fontSize: 12, color: '#f59e0b', lineHeight: 1.5 }}>
+                      Diferencia grande: ¿hay ventas, compras o comandas sin cargar?{' '}
+                      <button type="button" onClick={() => setViendo(ins)}
+                        style={{ background: 'none', border: 'none', color: 'var(--cyan)', cursor: 'pointer', padding: 0, fontSize: 12, fontWeight: 700 }}>
+                        Ver qué lo movió
+                      </button>
+                    </div>
+                  )}
                 </div>
               )
             })}
@@ -342,8 +366,10 @@ export default function Conteo() {
             maxWidth: 640, margin: '0 auto',
           }}>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                {previewContados} contado{previewContados === 1 ? '' : 's'} · ajuste estimado
+              <div style={{ fontSize: 11, color: grandesVistas && grandes.length ? '#f59e0b' : 'var(--muted)' }}>
+                {grandesVistas && grandes.length
+                  ? `${grandes.length} diferencia${grandes.length === 1 ? '' : 's'} grande${grandes.length === 1 ? '' : 's'}: revisa antes de guardar`
+                  : `${previewContados} contado${previewContados === 1 ? '' : 's'} · ajuste estimado`}
               </div>
               <div style={{ fontSize: 18, fontWeight: 800, color: previewAjuste < 0 ? 'var(--pink)' : previewAjuste > 0 ? 'var(--green)' : 'var(--text)' }}>
                 {previewContados === 0 ? '—' : `${previewAjuste >= 0 ? '+' : '-'}${formatCLP(Math.abs(previewAjuste))}`}
@@ -351,7 +377,7 @@ export default function Conteo() {
             </div>
             <button className="btn btn-primary" style={{ flexShrink: 0, width: 'auto', padding: '10px 20px' }}
               disabled={saving || previewContados === 0} onClick={handleGuardar}>
-              {saving ? 'Guardando...' : 'Guardar conteo'}
+              {saving ? 'Guardando...' : (grandesVistas && grandes.length) ? 'Guardar igual' : 'Guardar conteo'}
             </button>
           </div>
         </>

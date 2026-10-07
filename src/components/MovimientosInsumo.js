@@ -122,9 +122,11 @@ export default function MovimientosInsumo({ insumo, insumos, onEditar, onFueraDe
           Si el número está mal, corrígelo contando en <b>Conteo</b>: queda registro y la cuenta vuelve a partir de ahí.
           Editarlo a mano no deja rastro.
         </div>
-        <button className="btn btn-secondary btn-sm" style={{ width: '100%', marginTop: 10 }} onClick={onEditar}>
-          Editar stock o alerta mínima
-        </button>
+        {onEditar && (
+          <button className="btn btn-secondary btn-sm" style={{ width: '100%', marginTop: 10 }} onClick={onEditar}>
+            Editar stock o alerta mínima
+          </button>
+        )}
         {onFueraDeTemporada && (
           <button className="btn btn-secondary btn-sm" style={{ width: '100%', marginTop: 8, color: 'var(--muted)' }} onClick={onFueraDeTemporada}>
             Fuera de temporada (esconder hasta que se vuelva a comprar)

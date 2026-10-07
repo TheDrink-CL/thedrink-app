@@ -107,7 +107,7 @@ export default function Salidas() {
   async function load() {
     const [{ data: rec }, { data: ins }, { data: recIng }, { data: cfg }, { data: sal }] = await Promise.all([
       supabase.from('recetas').select('nombre, envase_formato, es_prototipo').order('nombre'),
-      supabase.from('insumos').select('nombre, unidad, stock_actual, costo_ppp, aplica_merma, rinde_insumo, rinde_factor').order('nombre'),
+      supabase.from('insumos').select('*').order('nombre'), // '*': incluye `activo` (temporada) si existe
       supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad'),
       supabase.from('config').select('clave, valor'),
       supabase.from('salidas_stock').select('*')
