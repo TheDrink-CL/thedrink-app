@@ -108,6 +108,12 @@ Un solo dueño por movimiento. Migración `20260919_stock_atomico.sql`.
   nombre. Goma no se compra (`insumosQueSeCompran` la saca del
   formulario): una compra propia le pisaría el PPP derivado.
 - Conteo y edición manual en Stock: pisan el valor, a propósito.
+- No hay log de movimientos en la base. La ficha de cada insumo en Stock
+  (`src/lib/movimientos.js`, con tests) lo reconstruye desde el último
+  conteo con las mismas reglas de arriba y marca compras duplicadas o con
+  precio raro, ventas cargadas tarde y comandas pendientes. **Si cambias
+  cómo se mueve el stock, cambia también esa reconstrucción**, o la ficha
+  va a mostrar diferencias que no existen.
 
 **La base tiene objetos que no nacieron en el repo.** Antes de agregar en el
 cliente algo que "la base debería hacer", mirar `pg_trigger` (query en la
@@ -159,6 +165,12 @@ decodifica en `ImportarPedido` y materializa los prototipos como recetas.
 **La gramática del código vive en dos lugares**: acá y en el HTML del LAB
 (`Páginas web/app pedidos/deploy/v1/index.html`). Si cambias una, cambia la
 otra en el mismo movimiento o los pedidos se rechazan en silencio.
+
+Lo mismo con la **carta web** (`Páginas web/Carta/deploy/<versión>/index.html`,
+`pedidoTexto()` y `RECETAS`): manda «▸ 1x Mojito Sabores · Piña» y
+`src/lib/cartaPedido.js` lo traduce a la receta con reglas exactas (ALIAS y
+CON_SABOR). Un trago nuevo o renombrado en la carta llega a Importar WA sin
+receta hasta que se agregue ahí.
 
 ## Campañas de WhatsApp (pestaña «Campañas»)
 

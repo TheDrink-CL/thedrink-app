@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { estimarTiempoDelivery, ventanaCountdownMin } from '../lib/comandasTiming'
 import { parsearMensajeLab, construirBuild, buildLegible } from '../lib/labCodigos'
 import { cargarMoldes, asegurarReceta } from '../lib/labPrototipos'
+import { parsearMensajeCarta } from '../lib/cartaPedido'
 
 // ─── Normalización y similitud ───────────────────────────────────────────────
 function norm(str = '') {
@@ -307,8 +308,29 @@ export default function ImportarPedido() {
     // no se adivina por similitud: se decodifican. El match difuso puede
     // pegarle a una receta equivocada y descontar los insumos que no son.
     const lab = parsearMensajeLab(textoChat)
+    // La carta web también manda un formato fijo («▸ 1x Mojito Sabores · Piña»):
+    // se traduce con reglas exactas, no por similitud.
+    const carta = lab ? null : parsearMensajeCarta(textoChat, recetas)
     let resultado
-    if (lab) {
+    if (carta) {
+      const contexto = parsearChat(textoChat, [])  // rescata dirección y teléfono
+      resultado = {
+        direccion: contexto.direccion,
+        telefono: contexto.telefono,
+        items: carta.items.map(i => ({
+          key: Date.now() + Math.random(),
+          cantidad: i.cantidad,
+          textoOriginal: i.etiqueta,
+          receta_nombre: i.receta_nombre,
+          precio_venta: i.precio_venta,
+          nota: '',
+        })),
+      }
+      // Despacho, pase de bienvenida, promo y código: lo que el bar tiene que
+      // ver antes de cobrar. No pisa una nota que ya se haya escrito.
+      if (carta.notas.length) setNota(n => n || carta.notas.join(' · '))
+      setLabDespacho(null)
+    } else if (lab) {
       const moldes = await cargarMoldes(lab.items.map(i => i.spec))
       const contexto = parsearChat(textoChat, [])  // rescata dirección y teléfono
       resultado = {
