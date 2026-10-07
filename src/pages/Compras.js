@@ -436,7 +436,7 @@ function HistoricoPPP({ compras, insumos }) {
   )
 }
 
-export default function Compras() {
+export default function Compras({ prefill = null, onPrefillUsado } = {}) {
   const [insumos, setInsumos] = useState([])
   const [compras, setCompras] = useState([])
   const [proveedores, setProveedores] = useState([])
@@ -501,6 +501,20 @@ export default function Compras() {
   }
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2500) }
+
+  // Desde Caja («Es un insumo → Compras»): el monto y la descripción llegan
+  // cargados; falta elegir el insumo y la cantidad.
+  useEffect(() => {
+    if (!prefill) return
+    setTab('registrar')
+    setForm(f => ({
+      ...f,
+      fecha: prefill.fecha || f.fecha,
+      precio_total: prefill.monto || '',
+      nota: prefill.descripcion || '',
+    }))
+    if (onPrefillUsado) onPrefillUsado()
+  }, [prefill])
 
   const handleSelectInsumo = (nombre) => {
     const ins = insumos.find(i => i.nombre === nombre)

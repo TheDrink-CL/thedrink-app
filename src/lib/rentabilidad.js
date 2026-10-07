@@ -5,7 +5,7 @@
 // Análisis mezclaba todas las compras no-inversión: ahora ambos usan esto.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { calcularCostoReceta, leerMerma } from './calculos'
+import { calcularCostoReceta, leerMerma, CATEGORIA_RETIRO } from './calculos'
 import { agruparSalidasPorMotivo } from './salidas'
 
 // Tarifa de costo de oportunidad del operador. Si no hay horas registradas o
@@ -79,9 +79,10 @@ export function calcularRentabilidad({
   const mermasEstimadas = cogs > 0 ? cogs - cogs / (1 + merma) : 0
 
   // Otros gastos variables: el resto de salidas de caja que no son insumos
-  // ni publicidad (suscripciones, equipamiento menor, otros gastos).
+  // ni publicidad (suscripciones, equipamiento menor, otros gastos). El retiro
+  // del dueño no es gasto: baja la caja, no el margen.
   const otrosGastos = gastosCaja
-    .filter(m => m.categoria !== 'Publicidad' && m.categoria !== 'Insumos')
+    .filter(m => m.categoria !== 'Publicidad' && m.categoria !== 'Insumos' && m.categoria !== CATEGORIA_RETIRO)
     .reduce((s, m) => s + m.monto, 0)
 
   // Producto sin venta: lo que salió de bodega y nadie pagó (marketing, canjes,

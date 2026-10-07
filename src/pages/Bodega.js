@@ -16,7 +16,7 @@ const SECCIONES = [
   { id: 'salidas', label: 'Salidas' },
 ]
 
-export default function Bodega({ seccion, onSeccion }) {
+export default function Bodega({ seccion, onSeccion, compraPrefill, onPrefillUsado }) {
   const [propia, setPropia] = useState('stock')
   const actual = seccion || propia
   const ir = (id) => { setPropia(id); if (onSeccion) onSeccion(id) }
@@ -32,7 +32,7 @@ export default function Bodega({ seccion, onSeccion }) {
         </div>
       </div>
       {actual === 'stock' && <Stock />}
-      {actual === 'compras' && <Compras />}
+      {actual === 'compras' && <Compras prefill={compraPrefill} onPrefillUsado={onPrefillUsado} />}
       {actual === 'conteo' && <Conteo />}
       {actual === 'salidas' && <Salidas />}
     </div>

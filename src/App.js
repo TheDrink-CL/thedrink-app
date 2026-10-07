@@ -147,6 +147,8 @@ export default function App() {
   const [editarOrdenId, setEditarOrdenId] = useState(null)
   // Sección abierta dentro de Bodega (stock, compras, conteo, salidas).
   const [bodegaSeccion, setBodegaSeccion] = useState('stock')
+  // Gasto de Caja que en realidad es un insumo: llega prellenado a Compras.
+  const [compraPrefill, setCompraPrefill] = useState(null)
   const [desbloqueado, setDesbloqueado] = useState(isPinUnlocked())
   const [deliveryDesbloqueado, setDeliveryDesbloqueado] = useState(isDeliveryUnlocked())
   // Sesion de Supabase Auth. null = todavia verificando; false = sin sesion;
@@ -224,8 +226,9 @@ export default function App() {
       {tab === 'campanas'     && <Campanas />}
       {tab === 'ventas'       && <Ventas desdeComanda={ventaDesdeComanda} onComandaCargada={() => setVentaDesdeComanda(null)}
         editarOrdenId={editarOrdenId} onEditarAbierto={() => setEditarOrdenId(null)} />}
-      {tab === 'bodega'       && <Bodega seccion={bodegaSeccion} onSeccion={setBodegaSeccion} />}
-      {tab === 'caja'         && <Caja />}
+      {tab === 'bodega'       && <Bodega seccion={bodegaSeccion} onSeccion={setBodegaSeccion}
+        compraPrefill={compraPrefill} onPrefillUsado={() => setCompraPrefill(null)} />}
+      {tab === 'caja'         && <Caja onRegistrarCompra={(p) => { setCompraPrefill(p); ir('compras') }} />}
       {tab === 'analisis'     && <Analisis />}
       {tab === 'proyectos'    && <Proyectos />}
       {tab === 'cuentas'      && <Cuentas />}

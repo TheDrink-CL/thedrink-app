@@ -154,6 +154,11 @@ export const FECHA_CORTE_DELIVERY = '2026-07-01'
 // Recibe las filas crudas de Supabase, sin enriquecer:
 //   ventas  { litros, precio_venta }        ordenes { fecha, delivery, delivery_cobrado }
 //   compras { precio_total, es_inversion }  caja    { tipo, categoria, monto }
+// Retiro del dueño: plata que sale de la caja (baja el saldo) pero no es un
+// gasto del negocio. Antes se cargaba como "Personal" u "Otro gasto" y se comía
+// el margen operativo (el "Retiro Ro" de $73.000).
+export const CATEGORIA_RETIRO = 'Retiro dueño'
+
 export function calcularSaldoCaja({ ventas = [], ordenes = [], compras = [], caja = [] }) {
   const n = (x) => parseFloat(x) || 0
   const totalVentas = (ventas || []).reduce((s, v) => s + n(v.litros) * n(v.precio_venta), 0)
