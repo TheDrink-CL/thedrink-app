@@ -55,6 +55,15 @@ test('venta de antes del conteo cargada después: aviso fuerte de doble descuent
   expect(r.filas[0].avisos[0]).toMatch(/dos veces/)
 })
 
+test('venta guardada como "salió antes del conteo" no descuenta lo contado', () => {
+  const r = reconstruirMovimientos({
+    nombre: 'Redbull blue', stockApp: 30, conteo, meta, ingredientes,
+    ventas: [{ id: 1, fecha: '2026-09-18', receta_nombre: 'Berry Bomb', litros: 1, nota: 'salió antes del conteo', created_at: '2026-10-06T15:00:00Z' }],
+  })
+  expect(r.filas).toEqual([])
+  expect(r.diferencia).toBe(0)
+})
+
 test('ron: merma, salidas, compra duplicada y precio raro', () => {
   const compras = [
     { id: 250, fecha: '2026-09-01', insumo_nombre: 'Ron Bacardí', cantidad: 1000, precio_total: 14500, created_at: '2026-09-01T12:00:00Z' },

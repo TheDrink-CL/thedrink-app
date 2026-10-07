@@ -108,6 +108,11 @@ Un solo dueño por movimiento. Migración `20260919_stock_atomico.sql`.
   nombre. Goma no se compra (`insumosQueSeCompran` la saca del
   formulario): una compra propia le pisaría el PPP derivado.
 - Conteo y edición manual en Stock: pisan el valor, a propósito.
+- **Ventas y conteos** (`inventario.js`): lo que un conteo ya midió no se
+  vuelve a mover. Una venta que salió antes de un conteo y se carga después
+  se guarda con la nota `salió antes del conteo` sin descontar lo contado
+  (Ventas pregunta), y borrar o editar un pedido cuyo descuento un conteo ya
+  absorbió no devuelve esos insumos (`insumosAbsorbidosPorConteo`).
 - No hay log de movimientos en la base. La ficha de cada insumo en Stock
   (`src/lib/movimientos.js`, con tests) lo reconstruye desde el último
   conteo con las mismas reglas de arriba y marca compras duplicadas o con

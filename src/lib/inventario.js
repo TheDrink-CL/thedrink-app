@@ -150,12 +150,14 @@ const esRpcAusente = (error) =>
 
 // `insumosMap` (de cargarInsumosMeta) es opcional: si no viene, se carga acá.
 // Los movimientos se enrutan primero (Azúcar → Goma); lo que llega a la base
-// ya nombra solo insumos que están en bodega.
-export async function aplicarMovimientosStock(movsPedidos, insumosMap = null) {
+// ya nombra solo insumos que están en bodega. `excluir` (Set de nombres) deja
+// fuera los insumos que un conteo ya absorbió: ver «Ventas y conteos» abajo.
+export async function aplicarMovimientosStock(movsPedidos, insumosMap = null, excluir = null) {
   const meta = insumosMap || await cargarInsumosMeta()
-  const movs = enrutarMovimientos(movsPedidos, meta)
-  const nombresInsumos = Object.keys(movs).filter(n => movs[n] !== 0)
+  const enrutados = enrutarMovimientos(movsPedidos, meta)
+  const nombresInsumos = Object.keys(enrutados).filter(n => enrutados[n] !== 0 && !(excluir && excluir.has(n)))
   if (nombresInsumos.length === 0) return { ...RES_VACIO }
+  const movs = Object.fromEntries(nombresInsumos.map(n => [n, enrutados[n]]))
   const payload = {}
   nombresInsumos.forEach(n => { payload[n] = movs[n] })
 
@@ -262,25 +264,84 @@ export async function cargarInsumosMeta() {
 }
 
 // Descuenta ingredientes del stock al registrar una venta (api pública).
-export async function descontarStock(itemsValidos) {
+// `excluir`: insumos que no se tocan (ver «Ventas y conteos»).
+export async function descontarStock(itemsValidos, { excluir = null } = {}) {
   const [ingredientes, insumosMap, merma] = await Promise.all([
     cargarIngredientes(itemsValidos),
     cargarInsumosMeta(),
     cargarMerma(),
   ])
   const movs = calcularMovimientosStock(itemsValidos, ingredientes, -1, insumosMap, merma)
-  return aplicarMovimientosStock(movs, insumosMap)
+  return aplicarMovimientosStock(movs, insumosMap, excluir)
 }
 
 // Reintegra stock cuando se borra o edita una venta (lo opuesto a descontar).
-export async function reintegrarStock(itemsAnteriores) {
+export async function reintegrarStock(itemsAnteriores, { excluir = null } = {}) {
   const [ingredientes, insumosMap, merma] = await Promise.all([
     cargarIngredientes(itemsAnteriores),
     cargarInsumosMeta(),
     cargarMerma(),
   ])
   const movs = calcularMovimientosStock(itemsAnteriores, ingredientes, +1, insumosMap, merma)
-  return aplicarMovimientosStock(movs, insumosMap)
+  return aplicarMovimientosStock(movs, insumosMap, excluir)
+}
+
+// ─── Ventas y conteos ────────────────────────────────────────────────────────
+// Un conteo pisa el stock con lo que hay de verdad: lo que salió antes de
+// contar ya está "adentro" del número contado. Por eso:
+//
+//   · Una venta que salió ANTES de un conteo y se carga DESPUÉS no debe
+//     descontar los insumos que ese conteo midió: se descontarían dos veces.
+//     La fecha sola no alcanza (un pedido del mismo día puede haber salido
+//     antes o después de contar), así que Ventas le pregunta a quien registra
+//     y, si ya había salido, la guarda con la nota NOTA_ANTES_CONTEO y sin
+//     tocar esos insumos.
+//   · Borrar o editar un pedido cuyo descuento un conteo ya absorbió tampoco
+//     debe devolver (ni volver a descontar) esos insumos: el conteo ya dice lo
+//     que hay. Hasta el 6-oct se devolvía todo y aparecía stock fantasma.
+//
+// El corte es el momento en que el pedido movió el stock: cuando se registró
+// (`created_at` de sus ventas), o el momento de la venta si se guardó con
+// NOTA_ANTES_CONTEO (nunca descontó lo que ya estaba contado).
+export const NOTA_ANTES_CONTEO = 'salió antes del conteo'
+
+export const tieneNotaAntesConteo = (nota) => (nota || '').includes(NOTA_ANTES_CONTEO)
+
+// Fecha + hora del pedido (hora local) como Date. Sin hora, el final del día:
+// el caso dudoso se pregunta en vez de suponer.
+export function momentoVenta(fecha, hora) {
+  return new Date(`${fecha}T${hora && /^\d{2}:\d{2}/.test(hora) ? hora.slice(0, 5) : '23:59'}:00`)
+}
+
+// Insumos contados después de `desde` (ISO) y el último conteo de ellos:
+// { nombres: Set, ultimo: ISO | null }.
+export async function insumosContadosDespues(desde) {
+  const { data } = await supabase.from('conteo_lineas')
+    .select('insumo_nombre, created_at').gt('created_at', desde)
+  const filas = data || []
+  return {
+    nombres: new Set(filas.map(f => f.insumo_nombre)),
+    ultimo: filas.reduce((m, f) => (!m || f.created_at > m ? f.created_at : m), null),
+  }
+}
+
+// Insumos que mueven estos ítems (enrutados: el azúcar figura como goma).
+export async function insumosDeItems(items) {
+  const [ingredientes, insumosMap] = await Promise.all([cargarIngredientes(items), cargarInsumosMeta()])
+  const movs = enrutarMovimientos(calcularMovimientosStock(items, ingredientes, -1, insumosMap), insumosMap)
+  return new Set(Object.keys(movs).filter(n => movs[n] !== 0))
+}
+
+// Qué insumos de un pedido ya guardado absorbió un conteo posterior.
+// `orden`: { fecha, hora, ventas: [{ created_at, nota }] }.
+export async function insumosAbsorbidosPorConteo(orden) {
+  const ventas = orden.ventas || []
+  if (!ventas.length) return new Set()
+  const corte = ventas.some(v => tieneNotaAntesConteo(v.nota))
+    ? momentoVenta(orden.fecha, orden.hora).toISOString()
+    : ventas.reduce((m, v) => (!m || (v.created_at && v.created_at < m) ? v.created_at : m), null)
+  if (!corte) return new Set()
+  return (await insumosContadosDespues(corte)).nombres
 }
 
 // Arma el aviso para el operador a partir del resultado de aplicarMovimientosStock.

@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { descontarStock, reintegrarStock, mensajeStock } from '../lib/inventario'
+import {
+  descontarStock, reintegrarStock, mensajeStock,
+  NOTA_ANTES_CONTEO, tieneNotaAntesConteo, momentoVenta, insumosContadosDespues, insumosDeItems, insumosAbsorbidosPorConteo,
+} from '../lib/inventario'
 import { formatCLP } from '../lib/calculos'
 import { descargarCSV, BotonExportar } from '../lib/exportar'
 import { tarifaEnvio, HABITUAL_MIN_PEDIDOS, PROMO_PRIMER_PEDIDO_DESDE } from '../lib/tarifaEnvio'
@@ -404,6 +407,12 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel, showToast, pedidosPr
       litros: v.litros,
       devuelve_envase: v.nota === 'envase devuelto',
     }))
+    // Lo que un conteo posterior ya absorbió no se devuelve ni se vuelve a
+    // descontar: el conteo dice lo que hay (lib/inventario.js, «Ventas y conteos»).
+    const absorbidos = await insumosAbsorbidosPorConteo(orden)
+    const marcarConteo = (n) => (absorbidos.size && n !== 'envase devuelto' && !tieneNotaAntesConteo(n))
+      ? [n, NOTA_ANTES_CONTEO].filter(Boolean).join(' · ')
+      : (n || null)
 
     // Borrar ventas antiguas e insertar nuevas. El stock se reintegra DESPUES
     // del borrado: si el borrado falla, las ventas siguen y el stock tambien.
@@ -415,7 +424,7 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel, showToast, pedidosPr
       return
     }
     if (itemsAnteriores.length > 0) {
-      await reintegrarStock(itemsAnteriores)
+      await reintegrarStock(itemsAnteriores, { excluir: absorbidos })
     }
     const { error: errInsert } = await supabase.from('ventas').insert(itemsValidos.map(it => ({
       fecha,
@@ -424,7 +433,7 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel, showToast, pedidosPr
       precio_venta: parseFloat(it.precio_venta) || 0,
       delivery: 0,
       origen: origenVal || null,
-      nota: it.canje ? NOTA_CANJE : it.devuelve_envase ? 'envase devuelto' : (it.nota || null),
+      nota: marcarConteo(it.canje ? NOTA_CANJE : it.devuelve_envase ? 'envase devuelto' : (it.nota || null)),
       orden_id: orden.id,
     })))
     if (errInsert) {
@@ -435,7 +444,7 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel, showToast, pedidosPr
     }
 
     // Descontar stock por los nuevos ítems
-    const resStock = await descontarStock(itemsValidos)
+    const resStock = await descontarStock(itemsValidos, { excluir: absorbidos })
     const avisoStock = mensajeStock(resStock)
     if (avisoStock) showToast('Pedido actualizado · OJO con el stock: ' + avisoStock)
 
@@ -642,6 +651,11 @@ export default function Ventas({ desdeComanda = null, onComandaCargada } = {}) {
   const [comandaForzada, setComandaForzada] = useState(null)
   const [comandasDescartadas, setComandasDescartadas] = useState([])
 
+  // Pregunta "¿ya había salido cuando contaste?" (handleSubmit la espera).
+  const [preguntaConteo, setPreguntaConteo] = useState(null)
+  const preguntarConteo = (datos) => new Promise(resolve => setPreguntaConteo({ ...datos, resolve }))
+  const responderConteo = (r) => { preguntaConteo.resolve(r); setPreguntaConteo(null) }
+
   // Frascos retornables: saldo del cliente elegido en las sugerencias
   const [saldoFrascos, setSaldoFrascos] = useState({ estado: 'sin_cliente', saldo: SALDO_VACIO })
   const [frascosAceptados, setFrascosAceptados] = useState(0)
@@ -770,6 +784,12 @@ export default function Ventas({ desdeComanda = null, onComandaCargada } = {}) {
   useEffect(() => {
     if (!desdeComanda) return
     const c = desdeComanda
+    // La venta es del momento del pedido, no de cuando se cierra la comanda:
+    // una comanda de hace días se registra con su fecha (y si hubo un conteo
+    // entremedio, se pregunta al guardar).
+    const creada = new Date(c.created_at)
+    setFecha(`${creada.getFullYear()}-${String(creada.getMonth() + 1).padStart(2, '0')}-${String(creada.getDate()).padStart(2, '0')}`)
+    setHora(`${String(creada.getHours()).padStart(2, '0')}:${String(creada.getMinutes()).padStart(2, '0')}`)
     setCliente(c.cliente_nombre || '')
     setClienteTelefono(c.cliente_telefono || '')
     setClienteDireccion(c.cliente_direccion || '')
@@ -966,7 +986,23 @@ export default function Ventas({ desdeComanda = null, onComandaCargada } = {}) {
       neonAplicado = { codigo: v.codigo, telefono: tel }
     }
 
+    // ── ¿Salió antes de un conteo? (antes de tocar la base) ──────────────────
+    // Si algún insumo de este pedido se contó DESPUÉS de la fecha y hora del
+    // pedido, el conteo puede haberlo absorbido ya. Solo quien registra sabe
+    // si el pedido había salido cuando se contó: se pregunta.
+    let excluirStock = null
     setLoading(true)
+    const contados = await insumosContadosDespues(momentoVenta(fecha, hora).toISOString())
+    if (contados.nombres.size) {
+      const afectados = [...(await insumosDeItems(itemsValidos))].filter(n => contados.nombres.has(n))
+      if (afectados.length) {
+        setLoading(false)
+        const r = await preguntarConteo({ ultimo: contados.ultimo, insumos: afectados })
+        if (r === 'cancelar') return
+        if (r === 'salio') excluirStock = new Set(afectados)
+        setLoading(true)
+      }
+    }
 
     // Buscar o crear cliente en tabla maestro
     let clienteId = null
@@ -1106,6 +1142,7 @@ export default function Ventas({ desdeComanda = null, onComandaCargada } = {}) {
       const notas = []
       if (it.canje) notas.push(NOTA_CANJE)
       if (neonAplicado && precioBase > 0) notas.push('NEON -15%')
+      if (excluirStock) notas.push(NOTA_ANTES_CONTEO)
       return {
         fecha,
         receta_nombre: it.receta_nombre,
@@ -1141,7 +1178,8 @@ export default function Ventas({ desdeComanda = null, onComandaCargada } = {}) {
 
     // Descuento de stock por ingredientes utilizados. La venta ya quedo
     // registrada; si el stock no se ajusta, avisamos pero no bloqueamos.
-    const resStock = await descontarStock(itemsValidos)
+    // Si salió antes de un conteo, lo contado no se descuenta otra vez.
+    const resStock = await descontarStock(itemsValidos, { excluir: excluirStock })
     let avisoStock = mensajeStock(resStock)
 
     // Frascos devueltos / canje. La venta ya quedó; si esto falla, se avisa.
@@ -1221,7 +1259,9 @@ export default function Ventas({ desdeComanda = null, onComandaCargada } = {}) {
     }
     let stockFallido = null
     if (itemsAnteriores.length > 0) {
-      const resStock = await reintegrarStock(itemsAnteriores)
+      // Lo que un conteo posterior ya absorbió no se devuelve (stock fantasma).
+      const absorbidos = await insumosAbsorbidosPorConteo(orden)
+      const resStock = await reintegrarStock(itemsAnteriores, { excluir: absorbidos })
       if (resStock && !resStock.ok) stockFallido = resStock.fallidos
     }
     // Frascos del pedido: se borran devolviendo el stock ANTES de borrar la
@@ -1362,6 +1402,31 @@ export default function Ventas({ desdeComanda = null, onComandaCargada } = {}) {
 
       {ticket && (
         <TicketModal orden={ticket} onCerrar={() => setTicket(null)} />
+      )}
+
+      {preguntaConteo && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.8)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:300, padding:20 }}>
+          <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:14, padding:20, maxWidth:420, width:'100%' }}>
+            <div style={{ fontWeight:800, fontSize:16, color:'var(--text-strong)', marginBottom:8 }}>
+              ¿Este pedido ya había salido cuando contaste?
+            </div>
+            <div style={{ fontSize:13, color:'var(--text)', lineHeight:1.6, marginBottom:6 }}>
+              El pedido es del {fecha.split('-').reverse().join('-')}{hora ? ` a las ${hora.slice(0, 5)}` : ''}, y después
+              contaste {preguntaConteo.insumos.join(', ')} ({new Date(preguntaConteo.ultimo).toLocaleString('es-CL', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })}).
+            </div>
+            <div style={{ fontSize:12, color:'var(--muted)', lineHeight:1.6, marginBottom:16 }}>
+              Si ya había salido, lo que contaste ya no lo tenía: se registra sin volver a descontar esos insumos.
+              Si salió después de contar, se descuenta normal.
+            </div>
+            <button className="btn btn-primary" style={{ width:'100%', marginBottom:8 }} onClick={() => responderConteo('salio')}>
+              Sí, ya había salido
+            </button>
+            <button className="btn btn-secondary" style={{ width:'100%', marginBottom:8 }} onClick={() => responderConteo('despues')}>
+              No, salió después de contar
+            </button>
+            <button className="btn btn-secondary btn-sm" style={{ width:'100%' }} onClick={() => responderConteo('cancelar')}>Volver</button>
+          </div>
+        </div>
       )}
 
       {/* Acceso rapido importador WhatsApp */}

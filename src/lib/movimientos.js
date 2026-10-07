@@ -21,7 +21,7 @@
 import { supabase } from './supabase'
 import {
   calcularMovimientosStock, enrutarMovimientos, armarIngredientesPorReceta,
-  cargarInsumosMeta, cargarMerma,
+  cargarInsumosMeta, cargarMerma, tieneNotaAntesConteo,
 } from './inventario'
 import { INSUMO_FRASCO } from './frascos'
 
@@ -109,6 +109,9 @@ export function reconstruirMovimientos({
   })
 
   ventas.filter(despues).forEach(v => {
+    // Guardada como "salió antes del conteo": no descontó lo que este conteo
+    // ya había medido (inventario.js, «Ventas y conteos»).
+    if (tieneNotaAntesConteo(v.nota) && v.fecha && v.fecha <= fechaConteo) return
     const delta = deltaDe([v], -1, nombre, ctx)
     if (!delta) return
     const avisos = []
