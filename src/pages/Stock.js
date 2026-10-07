@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { insumosEnBodega, fuenteDeCompra } from '../lib/inventario'
 import { leerMerma } from '../lib/calculos'
+import MovimientosInsumo from '../components/MovimientosInsumo'
 
 function EditModal({ insumo, onSave, onCancel }) {
   const [stockActual, setStockActual] = useState(insumo.stock_actual ?? '')
@@ -48,6 +49,7 @@ export default function Stock() {
   const [consumoDiario, setConsumoDiario] = useState({})
   const [loading, setLoading] = useState(true)
   const [editando, setEditando] = useState(null)
+  const [viendo, setViendo] = useState(null) // ficha de movimientos
   const [toast, setToast] = useState('')
   const [diasProyeccion, setDiasProyeccion] = useState(14)
   const [tabStock, setTabStock] = useState('estado') // 'estado' | 'comprar'
@@ -153,6 +155,14 @@ export default function Stock() {
   return (
     <div className="page">
       {toast && <div className="toast">{toast}</div>}
+      {viendo && (
+        <MovimientosInsumo
+          insumo={viendo}
+          insumos={insumos}
+          onEditar={() => { setEditando(viendo); setViendo(null) }}
+          onCerrar={() => setViendo(null)}
+        />
+      )}
       {editando && (
         <EditModal
           insumo={editando}
@@ -300,7 +310,7 @@ export default function Stock() {
       )}
 
       {tabStock === 'estado' && <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.6 }}>
-        Toca cualquier insumo para actualizar el stock o configurar el nivel de alerta.
+        Toca un insumo para ver qué lo movió desde el último conteo (y desde ahí corregirlo o cambiar su alerta).
         El stock se actualiza automáticamente al registrar una compra, una venta o una salida sin venta.
       </div>}
 
@@ -317,7 +327,7 @@ export default function Stock() {
 
           return (
             <div key={ins.nombre}
-              onClick={() => setEditando(ins)}
+              onClick={() => setViendo(ins)}
               style={{
                 cursor: 'pointer',
                 display: 'flex', alignItems: 'flex-start', gap: 10,

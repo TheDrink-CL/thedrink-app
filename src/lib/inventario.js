@@ -66,7 +66,7 @@ export const fuenteDeCompra = (ins, insumos) => {
 
 // { nombre: delta } → lo mismo, con los insumos que rinden otro sumados en su
 // destino y multiplicados por el factor.
-function enrutarMovimientos(movs, insumosMap) {
+export function enrutarMovimientos(movs, insumosMap) {
   const out = {}
   Object.entries(movs).forEach(([nombre, delta]) => {
     const meta = insumosMap[nombre.toLowerCase()]
@@ -220,6 +220,14 @@ export async function cargarIngredientes(itemsValidos) {
       .select('nombre, envase_formato')
       .in('nombre', nombresRecetas),
   ])
+  return armarIngredientesPorReceta(ings, recetasMeta)
+}
+
+// { receta_nombre: [ingredientes] } a partir de las filas de
+// `receta_ingredientes` y de `recetas` (nombre, envase_formato), con el
+// frasco inyectado. Puro: lo usan las ventas y la reconstrucción de
+// movimientos (lib/movimientos.js), que tiene que descontar idéntico.
+export function armarIngredientesPorReceta(ings, recetasMeta) {
   const porReceta = {}
   ;(ings || []).forEach(i => {
     if (!porReceta[i.receta_nombre]) porReceta[i.receta_nombre] = []
