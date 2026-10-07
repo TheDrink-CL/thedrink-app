@@ -5,6 +5,7 @@ import { formatCLP } from '../lib/calculos'
 import { descargarCSV, BotonExportar } from '../lib/exportar'
 import { tarifaEnvio, HABITUAL_MIN_PEDIDOS, PROMO_PRIMER_PEDIDO_DESDE } from '../lib/tarifaEnvio'
 import { todas } from '../lib/todas'
+import { comandasDelPedido, cerrarComanda, cargarComandasAbiertas, haceCuanto } from '../lib/comandasCierre'
 import FrascosBloque from '../components/FrascosBloque'
 import {
   FRASCOS_POR_CANJE, NOTA_CANJE, RECETA_CANJE, SALDO_VACIO,
@@ -597,7 +598,7 @@ function EditOrdenModal({ orden, recetas, onSave, onCancel, showToast, pedidosPr
   )
 }
 
-export default function Ventas() {
+export default function Ventas({ desdeComanda = null, onComandaCargada } = {}) {
   const [recetas, setRecetas] = useState([])
   const [ordenes, setOrdenes] = useState([])
   const [toast, setToast] = useState('')
@@ -633,6 +634,13 @@ export default function Ventas() {
   const [enviarADelivery, setEnviarADelivery] = useState(false)
   const [nota, setNota] = useState('')
   const [items, setItems] = useState([itemVacio()])
+
+  // Comandas abiertas: si este pedido entró como comanda, la venta la cierra
+  // (lib/comandasCierre.js). `comandaForzada` es la que se abrió desde
+  // Comandas con «Registrar venta»; si no, se busca por cliente.
+  const [comandasAbiertas, setComandasAbiertas] = useState([])
+  const [comandaForzada, setComandaForzada] = useState(null)
+  const [comandasDescartadas, setComandasDescartadas] = useState([])
 
   // Frascos retornables: saldo del cliente elegido en las sugerencias
   const [saldoFrascos, setSaldoFrascos] = useState({ estado: 'sin_cliente', saldo: SALDO_VACIO })
@@ -700,11 +708,13 @@ export default function Ventas() {
   useEffect(() => { load() }, [])
 
   async function load() {
-    const [{ data: r }, { data: o }, { data: vts }] = await Promise.all([
+    const [{ data: r }, { data: o }, { data: vts }, abiertas] = await Promise.all([
       supabase.from('recetas').select('nombre, precio_venta').order('nombre'),
       todas(supabase.from('ordenes').select('*').order('fecha', { ascending: false })),
       todas(supabase.from('ventas').select('*').order('fecha', { ascending: false })),
+      cargarComandasAbiertas(),
     ])
+    setComandasAbiertas(abiertas)
 
     // Ventas con orden asociada
     const ventasPorOrden = {}
@@ -753,6 +763,46 @@ export default function Ventas() {
   }
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 2800) }
+
+  // «Registrar venta» desde Comandas: el pedido llega cargado a este mismo
+  // formulario (frascos, NEON, envío sugerido, origen), en vez de a un modal
+  // aparte que no tenía nada de eso.
+  useEffect(() => {
+    if (!desdeComanda) return
+    const c = desdeComanda
+    setCliente(c.cliente_nombre || '')
+    setClienteTelefono(c.cliente_telefono || '')
+    setClienteDireccion(c.cliente_direccion || '')
+    setClienteIdSel(c.cliente_id || null)
+    setEnviarADelivery(!!c.cliente_direccion)
+    const notasItems = (c.items || []).filter(it => it.nota).map(it => `${it.receta_nombre || it.nombre}: ${it.nota}`)
+    setNota([c.nota, ...notasItems].filter(Boolean).join(' · '))
+    const desdeItems = (c.items || []).map(it => ({
+      receta_nombre: it.receta_nombre || '',
+      litros: it.cantidad || 1,
+      // El precio que se le dijo al cliente (carta, LAB) manda sobre el de la receta.
+      precio_venta: it.precio_venta ?? '',
+    }))
+    setItems(desdeItems.length ? desdeItems : [itemVacio()])
+    setComandaForzada(c)
+    setComandasDescartadas([])
+    if (onComandaCargada) onComandaCargada()
+    window.scrollTo(0, 0)
+  }, [desdeComanda])
+
+  // Ítems que llegaron de una comanda sin precio: el de la receta, cuando cargan.
+  useEffect(() => {
+    if (!recetas.length) return
+    if (!items.some(it => it.receta_nombre && it.precio_venta === '')) return
+    setItems(prev => prev.map(it => (it.receta_nombre && it.precio_venta === '')
+      ? { ...it, precio_venta: getPrecioSugerido(it.receta_nombre) } : it))
+  }, [recetas, items])
+
+  // La comanda que esta venta va a cerrar, si hay una.
+  const comandaVinculada = comandaForzada || comandasDelPedido(
+    comandasAbiertas.filter(c => !comandasDescartadas.includes(c.id)),
+    { clienteId: clienteIdSel, telefono: clienteTelefono, nombre: cliente, recetas: items.map(it => it.receta_nombre) },
+  )[0] || null
 
   // Busca clientes desde la tabla clientes (maestro)
   const [clientesMaestro, setClientesMaestro] = useState([])
@@ -1105,9 +1155,17 @@ export default function Ventas() {
       if (!rf.ok) avisoFrascos = 'no se guardaron los frascos (' + (rf.error?.message || 'error') + '), regístralos editando el pedido'
       else if (rf.avisoStock) avisoStock = [avisoStock, rf.avisoStock].filter(Boolean).join(' · ')
     }
-    const msgOk = neonAplicado
+    // La comanda de este pedido, si la había, se cierra con la venta.
+    let msgComanda = null
+    let avisoComanda = null
+    if (comandaVinculada) {
+      const rc = await cerrarComanda(comandaVinculada, orden.id)
+      if (rc.ok) msgComanda = `comanda #${comandaVinculada.id} cerrada`
+      else avisoComanda = `no se pudo cerrar la comanda #${comandaVinculada.id} (${rc.error?.message || 'error'}), archívala en Comandas`
+    }
+    const msgOk = (neonAplicado
       ? `Pedido registrado ✓ · NEON aplicado (-${formatCLP(Math.round(descuentoNeonTotal))})`
-      : 'Pedido registrado ✓'
+      : 'Pedido registrado ✓') + (msgComanda ? ' · ' + msgComanda : '')
     // Un solo toast: si se mostraban dos, el segundo tapaba el aviso de stock
     const partesFrascos = []
     if (frascosAceptados) partesFrascos.push(`+${frascosAceptados} frascos`)
@@ -1115,6 +1173,7 @@ export default function Ventas() {
     showToast([
       msgOk + (hayFrascos && !avisoFrascos && partesFrascos.length ? ' · frascos: ' + partesFrascos.join(', ') : ''),
       avisoFrascos ? 'OJO: ' + avisoFrascos : null,
+      avisoComanda ? 'OJO: ' + avisoComanda : null,
       avisoStock ? 'OJO con el stock: ' + avisoStock : null,
     ].filter(Boolean).join(' · '))
     setFecha(fechaHoy())
@@ -1138,6 +1197,8 @@ export default function Ventas() {
     setFrascosRechazados(0)
     setCodigoNeon('')
     setNeonEstado(null)
+    setComandaForzada(null)
+    setComandasDescartadas([])
     load()
     setLoading(false)
   }
@@ -1640,6 +1701,28 @@ export default function Ventas() {
               </div>
             )}
           </div>
+
+          {comandaVinculada && (
+            <div style={{
+              border: '1px solid rgba(0,180,180,0.35)', background: 'rgba(0,180,180,0.07)',
+              borderRadius: 10, padding: '10px 12px', marginBottom: 12, fontSize: 13, lineHeight: 1.5,
+            }}>
+              <div style={{ fontWeight: 700, color: 'var(--cyan)' }}>
+                Comanda #{comandaVinculada.id} · {comandaVinculada.cliente_nombre || 'sin nombre'} · {haceCuanto(comandaVinculada.created_at)}
+              </div>
+              <div style={{ color: 'var(--muted)', fontSize: 12 }}>
+                {(comandaVinculada.items || []).map(it => `${it.cantidad || 1}× ${it.receta_nombre || it.nombre}`).join(', ')}
+              </div>
+              <div style={{ fontSize: 12, marginTop: 4 }}>Al confirmar, esta comanda se cierra con la venta.</div>
+              <button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: 8 }}
+                onClick={() => {
+                  setComandasDescartadas(d => [...d, comandaVinculada.id])
+                  setComandaForzada(null)
+                }}>
+                No es este pedido
+              </button>
+            </div>
+          )}
 
           <button type="submit" className="btn btn-primary" disabled={loading}>
             {loading ? 'Guardando...' : 'Confirmar pedido'}

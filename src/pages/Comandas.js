@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { ventanaCountdownMin } from '../lib/comandasTiming'
+import { estadoAlTerminar } from '../lib/comandasCierre'
 import { construirEsVip } from '../lib/clientesVip'
 
 // ─── Cronómetro consciente de hora objetivo ─────────────────────────────────
@@ -357,7 +358,10 @@ export default function Comandas() {
   }, [])
 
   const marcarListo = async (id) => {
-    await supabase.from('comandas').update({ estado: 'listo' }).eq('id', id)
+    // Si la venta ya se registró, LISTO la termina: se archiva en vez de quedar
+    // como "elaborada, pendiente de registrar" en Comandas.
+    const comanda = comandas.find(c => c.id === id)
+    await supabase.from('comandas').update({ estado: estadoAlTerminar(comanda) }).eq('id', id)
     // No filtramos localmente — el realtime lo actualiza solo
   }
 

@@ -217,7 +217,8 @@ export async function cargarMovimientos(insumo, insumos) {
     nombre === INSUMO_FRASCO
       ? supabase.from('frascos_movimientos').select('fecha, tipo, aceptados, created_at').gt('created_at', desde)
       : Promise.resolve({ data: [] }),
-    supabase.from('comandas').select('id, created_at, items').eq('estado', 'pendiente'),
+    // Abiertas: preparándose o ya preparadas, pero sin venta todavía.
+    supabase.from('comandas').select('id, created_at, items').in('estado', ['pendiente', 'listo']).is('venta_orden_id', null),
     supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad'),
     supabase.from('recetas').select('nombre, envase_formato'),
     cargarInsumosMeta(),

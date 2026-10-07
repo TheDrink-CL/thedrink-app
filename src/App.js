@@ -164,6 +164,8 @@ const isImportarRoute = () => {
 export default function App() {
   const [tab, setTab] = useState('dashboard')
   const [menuMas, setMenuMas] = useState(false)
+  // Comanda que se va a cerrar como venta: se abre Ventas con el pedido cargado.
+  const [ventaDesdeComanda, setVentaDesdeComanda] = useState(null)
   const [desbloqueado, setDesbloqueado] = useState(isPinUnlocked())
   const [deliveryDesbloqueado, setDeliveryDesbloqueado] = useState(isDeliveryUnlocked())
   // Sesion de Supabase Auth. null = todavia verificando; false = sin sesion;
@@ -230,7 +232,7 @@ export default function App() {
       {tab === 'dashboard'    && <Dashboard />}
       {tab === 'indicadores'  && <Indicadores />}
       {tab === 'campanas'     && <Campanas />}
-      {tab === 'ventas'       && <Ventas />}
+      {tab === 'ventas'       && <Ventas desdeComanda={ventaDesdeComanda} onComandaCargada={() => setVentaDesdeComanda(null)} />}
       {tab === 'compras'      && <Compras />}
       {tab === 'caja'         && <Caja />}
       {tab === 'analisis'     && <Analisis />}
@@ -244,7 +246,7 @@ export default function App() {
       {tab === 'opiniones'    && <Opiniones />}
       {tab === 'mi-dinero'    && <MiDinero />}
       {tab === 'importar-pedido' && <ImportarPedido />}
-      {tab === 'comandas-pendientes' && <ComandasPendientes />}
+      {tab === 'comandas-pendientes' && <ComandasPendientes onRegistrarVenta={(c) => { setVentaDesdeComanda(c); setTab('ventas') }} />}
 
       {menuMas && (
         <>
