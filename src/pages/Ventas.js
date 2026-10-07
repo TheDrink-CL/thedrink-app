@@ -618,7 +618,9 @@ export default function Ventas({ desdeComanda = null, onComandaCargada, editarOr
 
   // Filtros del historial
   const [filtroCliente, setFiltroCliente] = useState('')
-  const [filtroPeriodo, setFiltroPeriodo] = useState('todo') // 'todo' | '7d' | '30d' | '90d'
+  // Por defecto solo hoy y ayer: cargar los 300+ pedidos (con teléfonos)
+  // debajo del formulario era lento en el celular. Buscar recorre todo.
+  const [filtroPeriodo, setFiltroPeriodo] = useState('reciente') // 'reciente' | '7d' | '30d' | 'todo'
   const [filtroReceta, setFiltroReceta] = useState('')
   const [perfilCliente, setPerfilCliente] = useState(null) // nombre del cliente seleccionado para ver perfil
 
@@ -1825,10 +1827,10 @@ export default function Ventas({ desdeComanda = null, onComandaCargada, editarOr
           {/* Filtro período */}
           <div className="toggle-row">
             {[
-              { key: 'todo', label: 'Todo' },
+              { key: 'reciente', label: 'Hoy y ayer' },
               { key: '7d',   label: '7 días' },
               { key: '30d',  label: '30 días' },
-              { key: '90d',  label: '90 días' },
+              { key: 'todo', label: 'Todo' },
             ].map(p => (
               <button key={p.key}
                 className={`toggle-btn ${filtroPeriodo === p.key ? 'active-entrada' : ''}`}
@@ -1845,9 +1847,10 @@ export default function Ventas({ desdeComanda = null, onComandaCargada, editarOr
         // Aplicar filtros
         const hoy = new Date()
         const ordenesFiltradas = ordenes.filter(o => {
-          if (filtroPeriodo !== 'todo') {
-            const dias = filtroPeriodo === '7d' ? 7 : filtroPeriodo === '30d' ? 30 : 90
-            const corte = new Date(hoy); corte.setDate(hoy.getDate() - dias)
+          // Con búsqueda se busca en todo el historial, no solo en el período.
+          if (filtroPeriodo !== 'todo' && !filtroCliente.trim()) {
+            const dias = filtroPeriodo === 'reciente' ? 1 : filtroPeriodo === '7d' ? 7 : 30
+            const corte = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() - dias) // a medianoche
             const [y, m, d] = o.fecha.split('-').map(Number)
             if (new Date(y, m-1, d) < corte) return false
           }
