@@ -25,7 +25,7 @@ const TIPO = {
   devolucion: { label: 'Devolución', color: 'var(--green)' },
 }
 
-export default function MovimientosInsumo({ insumo, insumos, onEditar, onCerrar }) {
+export default function MovimientosInsumo({ insumo, insumos, onEditar, onFueraDeTemporada, onCerrar }) {
   const [res, setRes] = useState(null)
   const [error, setError] = useState('')
 
@@ -125,6 +125,11 @@ export default function MovimientosInsumo({ insumo, insumos, onEditar, onCerrar 
         <button className="btn btn-secondary btn-sm" style={{ width: '100%', marginTop: 10 }} onClick={onEditar}>
           Editar stock o alerta mínima
         </button>
+        {onFueraDeTemporada && (
+          <button className="btn btn-secondary btn-sm" style={{ width: '100%', marginTop: 8, color: 'var(--muted)' }} onClick={onFueraDeTemporada}>
+            Fuera de temporada (esconder hasta que se vuelva a comprar)
+          </button>
+        )}
       </div>
     </div>
   )

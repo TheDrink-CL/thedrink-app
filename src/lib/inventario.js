@@ -45,8 +45,34 @@ export async function cargarMerma() {
 // enruta acá a la goma, para que no quede stock escondido en un insumo que
 // nadie mira.
 
-// Los que sí están en bodega: todo menos los que rinden otro.
-export const insumosEnBodega = (insumos) => (insumos || []).filter(i => !i.rinde_insumo)
+// Los que sí están en bodega: todo menos los que rinden otro y los que están
+// fuera de temporada.
+export const insumosEnBodega = (insumos) => (insumos || []).filter(i => !i.rinde_insumo && insumoActivo(i))
+
+// ─── Temporada y alertas ─────────────────────────────────────────────────────
+// `insumos.activo` (migración 20261006): false = fuera de temporada (pipeño,
+// helado de piña: solo septiembre). Sin la columna, todo cuenta como activo.
+export const insumoActivo = (i) => i?.activo !== false
+
+// Alerta de stock solo si el insumo está activo y tiene un mínimo de verdad
+// (> 0). Con mínimo 0 no hay nada que avisar: Agua tónica 0/0 o Limón sutil
+// 0/0 salían "críticos" y, con 24 alertas a la vez, nadie miraba ninguna.
+export const enAlertaDeStock = (i) =>
+  insumoActivo(i) && i.stock_actual != null && Number(i.stock_minimo) > 0 &&
+  Number(i.stock_actual) <= Number(i.stock_minimo)
+
+// Un negativo no es una alerta de compra, es información: la app descontó más
+// de lo que sabía que había (falta registrar una compra o contar). Se muestra
+// aparte, con link a la ficha de movimientos; no se esconde (stock fantasma).
+export const stockNegativo = (i) => insumoActivo(i) && Number(i.stock_actual) < 0
+
+// Recetas que usan algún insumo fuera de temporada (el terremoto, cuando el
+// pipeño está inactivo): salen del selector de pedidos nuevos.
+export function recetasFueraDeTemporada(recetaIngredientes, insumos) {
+  const inactivos = new Set((insumos || []).filter(i => !insumoActivo(i)).map(i => i.nombre))
+  if (!inactivos.size) return new Set()
+  return new Set((recetaIngredientes || []).filter(r => inactivos.has(r.insumo_nombre)).map(r => r.receta_nombre))
+}
 
 // Los que se compran: todo menos los que se obtienen de otro. La goma no se
 // compra, se compra azúcar; una compra de goma le pisaría el PPP derivado.

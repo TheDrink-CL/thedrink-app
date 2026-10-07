@@ -587,6 +587,11 @@ export default function Compras() {
       tipo: 'insumo',
     })
     if (!error) {
+      // Comprar un insumo fuera de temporada (pipeño en septiembre) lo trae
+      // de vuelta a Stock, Conteo y Salidas.
+      if (insumoSel && insumoSel.activo === false) {
+        await supabase.from('insumos').update({ activo: true }).eq('nombre', insumoSel.nombre)
+      }
       // La compra SUMA al inventario y recalcula el PPP desde la base (trigger
       // `compras_stock_ppp_trg`). No sumar acá: sería la segunda vez.
       const toastMsg = esCitrico && limonEnKg

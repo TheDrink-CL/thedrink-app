@@ -86,3 +86,17 @@ test('guardado como "salió antes del conteo": el corte es el momento de la vent
   }
   expect((await insumosAbsorbidosPorConteo(orden)).has('Ron Bacardí')).toBe(true)
 })
+
+// ─── Temporada y alertas ────────────────────────────────────────────────────
+test('alerta solo con mínimo > 0 y si está activo; negativo aparte', () => {
+  const { enAlertaDeStock, stockNegativo, insumosEnBodega, recetasFueraDeTemporada } = require('./inventario')
+  expect(enAlertaDeStock({ stock_actual: 0, stock_minimo: 0 })).toBe(false)          // Agua tónica 0/0
+  expect(enAlertaDeStock({ stock_actual: 4, stock_minimo: 24 })).toBe(true)          // Redbull yellow
+  expect(enAlertaDeStock({ stock_actual: 4, stock_minimo: 24, activo: false })).toBe(false)
+  expect(stockNegativo({ stock_actual: -842, activo: false })).toBe(false)            // pipeño fuera de temporada
+  expect(stockNegativo({ stock_actual: -6216 })).toBe(true)                           // hielo
+  const insumos = [{ nombre: 'Pipeño', activo: false }, { nombre: 'Ron Bacardí' }, { nombre: 'Azúcar', rinde_insumo: 'Goma' }]
+  expect(insumosEnBodega(insumos).map(i => i.nombre)).toEqual(['Ron Bacardí'])
+  const ri = [{ receta_nombre: 'Terremoto (normal)', insumo_nombre: 'Pipeño' }, { receta_nombre: 'Mojito', insumo_nombre: 'Ron Bacardí' }]
+  expect([...recetasFueraDeTemporada(ri, insumos)]).toEqual(['Terremoto (normal)'])
+})

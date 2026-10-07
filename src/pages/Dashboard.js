@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { calcularCostoReceta, formatCLP, formatPct, esOrigenIGAds, leerMerma } from '../lib/calculos'
 import { calcularRentabilidad } from '../lib/rentabilidad'
 import { resumenMotivos } from '../lib/salidas'
-import { fuenteDeCompra } from '../lib/inventario'
+import { fuenteDeCompra, enAlertaDeStock } from '../lib/inventario'
 import { enriquecerVentasConDelivery, calcularSaldoCaja } from '../lib/calculos'
 import CaminoAlBar from './CaminoAlBar'
 import SaludNegocio from './SaludNegocio'
@@ -364,7 +364,8 @@ export default function Dashboard() {
         todas(supabase.from('ventas').select('*').order('fecha', { ascending: false })),
         todas(supabase.from('caja').select('*')),
         todas(supabase.from('compras').select('precio_total, es_inversion, tipo')),
-        supabase.from('insumos').select('nombre, stock_actual, stock_minimo, unidad, costo_ppp, rinde_insumo, rinde_factor'),
+        // '*' y no columnas sueltas: `activo` (temporada) puede no existir todavía.
+        supabase.from('insumos').select('*'),
         todas(supabase.from('ordenes').select('id, fecha, medio_pago, cliente_nombre, cliente_id, delivery, delivery_cobrado')),
         supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre, cantidad, unidad'),
         supabase.from('insumos').select('nombre, costo_ppp'),
@@ -566,7 +567,7 @@ export default function Dashboard() {
       // Cada alerta lleva qué se compra para reponerla: la goma baja se
       // repone comprando azúcar (insumos.rinde_insumo), y la alerta lo dice.
       const alertas = (ins || [])
-        .filter(i => i.stock_actual != null && i.stock_minimo != null && i.stock_actual <= i.stock_minimo)
+        .filter(enAlertaDeStock)
         .map(i => ({ ...i, fuente: fuenteDeCompra(i, ins) }))
       setAlertasStock(alertas)
 

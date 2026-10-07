@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import {
   descontarStock, reintegrarStock, mensajeStock,
-  NOTA_ANTES_CONTEO, tieneNotaAntesConteo, momentoVenta, insumosContadosDespues, insumosDeItems, insumosAbsorbidosPorConteo,
+  NOTA_ANTES_CONTEO, tieneNotaAntesConteo, recetasFueraDeTemporada, momentoVenta, insumosContadosDespues, insumosDeItems, insumosAbsorbidosPorConteo,
 } from '../lib/inventario'
 import { formatCLP } from '../lib/calculos'
 import { descargarCSV, BotonExportar } from '../lib/exportar'
@@ -650,6 +650,9 @@ export default function Ventas({ desdeComanda = null, onComandaCargada } = {}) {
   const [comandasAbiertas, setComandasAbiertas] = useState([])
   const [comandaForzada, setComandaForzada] = useState(null)
   const [comandasDescartadas, setComandasDescartadas] = useState([])
+  // Recetas con un insumo fuera de temporada (terremoto sin pipeño): no se
+  // ofrecen en el selector de pedidos nuevos.
+  const [fueraTemporada, setFueraTemporada] = useState(new Set())
 
   // Pregunta "¿ya había salido cuando contaste?" (handleSubmit la espera).
   const [preguntaConteo, setPreguntaConteo] = useState(null)
@@ -722,13 +725,16 @@ export default function Ventas({ desdeComanda = null, onComandaCargada } = {}) {
   useEffect(() => { load() }, [])
 
   async function load() {
-    const [{ data: r }, { data: o }, { data: vts }, abiertas] = await Promise.all([
+    const [{ data: r }, { data: o }, { data: vts }, abiertas, { data: ri }, { data: ins }] = await Promise.all([
       supabase.from('recetas').select('nombre, precio_venta').order('nombre'),
       todas(supabase.from('ordenes').select('*').order('fecha', { ascending: false })),
       todas(supabase.from('ventas').select('*').order('fecha', { ascending: false })),
       cargarComandasAbiertas(),
+      supabase.from('receta_ingredientes').select('receta_nombre, insumo_nombre'),
+      supabase.from('insumos').select('*'),
     ])
     setComandasAbiertas(abiertas)
+    setFueraTemporada(recetasFueraDeTemporada(ri, ins))
 
     // Ventas con orden asociada
     const ventasPorOrden = {}
@@ -1576,7 +1582,8 @@ export default function Ventas({ desdeComanda = null, onComandaCargada } = {}) {
                 <select className="form-select" value={it.receta_nombre} style={{ marginBottom:8 }}
                   onChange={e => updateItem(i, 'receta_nombre', e.target.value)}>
                   <option value="">Seleccionar receta...</option>
-                  {recetas.map(r => <option key={r.nombre} value={r.nombre}>{r.nombre}</option>)}
+                  {recetas.filter(r => !fueraTemporada.has(r.nombre) || r.nombre === it.receta_nombre)
+                    .map(r => <option key={r.nombre} value={r.nombre}>{r.nombre}</option>)}
                 </select>
                 <div style={{ display:'flex', gap:8, marginBottom:6 }}>
                   <input type="number" className="form-input" value={it.precio_venta} placeholder="Precio ($)" style={{ flex:1 }}

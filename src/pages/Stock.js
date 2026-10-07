@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { insumosEnBodega, fuenteDeCompra } from '../lib/inventario'
+import { insumosEnBodega, fuenteDeCompra, insumoActivo, stockNegativo } from '../lib/inventario'
 import { leerMerma } from '../lib/calculos'
 import MovimientosInsumo from '../components/MovimientosInsumo'
 
@@ -129,17 +129,37 @@ export default function Stock() {
     loadData()
   }
 
+  // Fuera de temporada (insumos.activo, migración 20261006): se esconde de la
+  // lista y se reactiva desde abajo. Sin la migración, avisa qué falta.
+  const cambiarTemporada = async (ins, activo) => {
+    const { error } = await supabase.from('insumos').update({ activo }).eq('nombre', ins.nombre)
+    if (error) {
+      showToast(/activo/.test(error.message || '')
+        ? 'Falta correr la migración 20261006_insumos_temporada.sql en Supabase'
+        : 'No se pudo cambiar: ' + error.message)
+      return
+    }
+    setViendo(null)
+    showToast(activo ? `${ins.nombre} vuelve a Stock` : `${ins.nombre} queda fuera de temporada`)
+    loadData()
+  }
+
+  // Alerta solo con mínimo > 0: con mínimo 0 no hay nada que avisar (Agua
+  // tónica 0/0 salía "crítico"). El negativo va aparte: es un registro que
+  // falta, no una compra que hacer.
   const getEstado = (ins) => {
     const actual = ins.stock_actual ?? null
-    const minimo = ins.stock_minimo ?? null
+    const minimo = Number(ins.stock_minimo) || 0
     if (actual === null) return 'sin_datos'
-    if (minimo !== null && actual <= minimo) return 'critico'
-    if (minimo !== null && actual <= minimo * 1.5) return 'bajo'
+    if (stockNegativo(ins)) return 'negativo'
+    if (minimo <= 0) return 'ok'
+    if (actual <= minimo) return 'critico'
+    if (actual <= minimo * 1.5) return 'bajo'
     return 'ok'
   }
 
-  const estadoColor = { ok: 'var(--green)', bajo: '#f59e0b', critico: 'var(--pink)', sin_datos: 'var(--muted)' }
-  const estadoLabel = { ok: 'OK', bajo: 'Bajo', critico: 'Crítico', sin_datos: '—' }
+  const estadoColor = { ok: 'var(--green)', bajo: '#f59e0b', critico: 'var(--pink)', negativo: '#a78bfa', sin_datos: 'var(--muted)' }
+  const estadoLabel = { ok: 'OK', bajo: 'Bajo', critico: 'Crítico', negativo: 'Negativo', sin_datos: '—' }
 
   if (loading) return <div className="loading">Cargando...</div>
 
@@ -151,6 +171,8 @@ export default function Stock() {
 
   const criticos = enBodega.filter(i => getEstado(i) === 'critico')
   const bajos = enBodega.filter(i => getEstado(i) === 'bajo')
+  const negativos = enBodega.filter(i => getEstado(i) === 'negativo')
+  const fueraDeTemporada = insumos.filter(i => !i.rinde_insumo && !insumoActivo(i))
 
   return (
     <div className="page">
@@ -160,6 +182,7 @@ export default function Stock() {
           insumo={viendo}
           insumos={insumos}
           onEditar={() => { setEditando(viendo); setViendo(null) }}
+          onFueraDeTemporada={() => cambiarTemporada(viendo, false)}
           onCerrar={() => setViendo(null)}
         />
       )}
@@ -309,6 +332,22 @@ export default function Stock() {
         </div>
       )}
 
+      {tabStock === 'estado' && negativos.length > 0 && (
+        <div className="card" style={{ marginBottom: 12, border: '1px solid rgba(167,139,250,0.4)' }}>
+          <div className="card-title" style={{ color: '#a78bfa' }}>En negativo</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6, lineHeight: 1.5 }}>
+            La app descontó más de lo que sabía que había: falta registrar una compra o contar.
+            Tócalo para ver qué lo movió.
+          </div>
+          {negativos.map(i => (
+            <div className="list-item" key={i.nombre} onClick={() => setViendo(i)} style={{ cursor: 'pointer' }}>
+              <div className="list-item-name">{i.nombre}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#a78bfa' }}>{Math.round(i.stock_actual)} {i.unidad}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {tabStock === 'estado' && <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.6 }}>
         Toca un insumo para ver qué lo movió desde el último conteo (y desde ahí corregirlo o cambiar su alerta).
         El stock se actualiza automáticamente al registrar una compra, una venta o una salida sin venta.
@@ -380,6 +419,25 @@ export default function Stock() {
       {tabStock === 'estado' && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, lineHeight: 1.6, padding: '0 4px' }}>
         Los días (~Xd) son una estimación basada en el consumo real de los últimos 14 días.
       </div>}
+
+      {tabStock === 'estado' && fueraDeTemporada.length > 0 && (
+        <div className="card" style={{ marginTop: 14, opacity: 0.85 }}>
+          <div className="card-title">Fuera de temporada</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6, lineHeight: 1.5 }}>
+            No aparecen en Conteo, Salidas ni alertas, y sus recetas salen del selector de pedidos.
+            Registrar una compra los reactiva.
+          </div>
+          {fueraDeTemporada.map(i => (
+            <div className="list-item" key={i.nombre}>
+              <div>
+                <div className="list-item-name">{i.nombre}</div>
+                <div className="list-item-sub">{Math.round(i.stock_actual || 0)} {i.unidad}</div>
+              </div>
+              <button className="btn btn-secondary btn-sm" onClick={() => cambiarTemporada(i, true)}>Reactivar</button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
