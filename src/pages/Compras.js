@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { insumosEnBodega, insumosQueSeCompran } from '../lib/inventario'
+import { insumosQueSeCompran } from '../lib/inventario'
 import { formatCLP } from '../lib/calculos'
 import { avisosDeCompra } from '../lib/compraAvisos'
 
@@ -273,45 +273,6 @@ function EditCompraModal({ compra, insumos, proveedores, onSave, onCancel }) {
   )
 }
 
-function EditStockModal({ insumo, onSave, onCancel }) {
-  const [stockActual, setStockActual] = useState(insumo.stock_actual ?? '')
-  const [stockMinimo, setStockMinimo] = useState(insumo.stock_minimo ?? '')
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: 24
-    }}>
-      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24, maxWidth: 320, width: '100%' }}>
-        <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text-strong)', marginBottom: 16 }}>{insumo.nombre}</div>
-        <div className="form-group">
-          <label className="form-label">Stock actual ({insumo.unidad})</label>
-          <input type="number" step="any" className="form-input" value={stockActual}
-            placeholder="ej: 3000"
-            onChange={e => setStockActual(e.target.value)} />
-        </div>
-        <div className="form-group">
-          <label className="form-label">Alerta mínimo ({insumo.unidad})</label>
-          <input type="number" step="any" className="form-input" value={stockMinimo}
-            placeholder="ej: 500"
-            onChange={e => setStockMinimo(e.target.value)} />
-          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-            El dashboard te avisará cuando baje de este nivel
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={onCancel}>Cancelar</button>
-          <button className="btn btn-primary btn-sm" style={{ flex: 1 }}
-            onClick={() => onSave(insumo.nombre, parseFloat(stockActual) || 0, parseFloat(stockMinimo) || 0)}>
-            Guardar
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ─── Histórico PPP por insumo ──────────────────────────────────────
-// Calcula la curva del costo unitario en el tiempo desde la tabla compras
 function HistoricoPPP({ compras, insumos }) {
   const [insumoSel, setInsumoSel] = useState(null)
 
@@ -496,7 +457,6 @@ export default function Compras() {
   const [loading, setLoading] = useState(false)
   const [tab, setTab] = useState('registrar')
   const [confirmar, setConfirmar] = useState(null)
-  const [editandoStock, setEditandoStock] = useState(null)
   const [editandoCompra, setEditandoCompra] = useState(null)
   const [editandoProveedor, setEditandoProveedor] = useState(null) // null | 'nuevo' | proveedor
   const [confirmarProveedor, setConfirmarProveedor] = useState(null)
@@ -651,28 +611,11 @@ export default function Compras() {
     loadData()
   }
 
-  const handleSaveStock = async (nombre, stockActual, stockMinimo) => {
-    const { error } = await supabase.from('insumos').update({ stock_actual: stockActual, stock_minimo: stockMinimo }).eq('nombre', nombre)
-    setEditandoStock(null)
-    if (error) { showToast(`No se pudo actualizar el stock: ${error.message}`); return }
-    showToast('Stock actualizado')
-    loadData()
-  }
-
   const costoPorUnidad = form.cantidad && form.precio_total
     ? esCitrico && limonEnKg && limonMlCalculado
       ? (parseFloat(form.precio_total) / limonMlCalculado).toFixed(2)
       : (parseFloat(form.precio_total) / parseFloat(form.cantidad)).toFixed(2)
     : null
-
-  const getEstadoStock = (ins) => {
-    if (ins.stock_actual == null) return 'sin_datos'
-    if (ins.stock_minimo != null && ins.stock_actual <= ins.stock_minimo) return 'critico'
-    if (ins.stock_minimo != null && ins.stock_actual <= ins.stock_minimo * 1.5) return 'bajo'
-    return 'ok'
-  }
-  const estadoColor = { ok: 'var(--green)', bajo: '#f59e0b', critico: 'var(--pink)', sin_datos: 'var(--muted)' }
-  const estadoLabel = { ok: 'OK', bajo: 'Bajo', critico: 'Crítico', sin_datos: '—' }
 
   return (
     <div className="page">
@@ -697,13 +640,6 @@ export default function Compras() {
             setForm(f => ({ ...f, insumo_nombre: nombreNuevo, unidad: creado?.unidad || 'ml', cantidad: '', precio_total: '' }))
           }}
           onCancel={() => setCreandoInsumo(false)}
-        />
-      )}
-      {editandoStock && (
-        <EditStockModal
-          insumo={editandoStock}
-          onSave={handleSaveStock}
-          onCancel={() => setEditandoStock(null)}
         />
       )}
       {editandoCompra && (
@@ -741,7 +677,6 @@ export default function Compras() {
         <button className={`toggle-btn ${tab === 'ppp' ? 'active-entrada' : ''}`} onClick={() => setTab('ppp')}>PPP</button>
         <button className={`toggle-btn ${tab === 'historico' ? 'active-entrada' : ''}`} onClick={() => setTab('historico')}>Histórico</button>
         <button className={`toggle-btn ${tab === 'proveedores' ? 'active-entrada' : ''}`} onClick={() => setTab('proveedores')}>Proveedores</button>
-        <button className={`toggle-btn ${tab === 'stock' ? 'active-entrada' : ''}`} onClick={() => setTab('stock')}>Stock</button>
       </div>
 
       {tab === 'registrar' && (
@@ -1104,59 +1039,6 @@ export default function Compras() {
         </>
       )}
 
-      {tab === 'stock' && (
-        <>
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.6 }}>
-            Toca un insumo para actualizar su stock o configurar la alerta mínima.
-            Las compras suman automáticamente al stock; el azúcar entra directo como goma.
-          </div>
-
-          {/* Banner corrección limón */}
-          {insumos.find(i => i.nombre === 'Jugo limón') && (() => {
-            const limon = insumos.find(i => i.nombre === 'Jugo limón')
-            return (
-              <div style={{ background: 'rgba(196,0,90,0.07)', border: '1px solid rgba(196,0,90,0.25)', borderRadius: 10, padding: '10px 14px', marginBottom: 12 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--pink)', marginBottom: 4 }}>🍋 Jugo limón — verificar stock</div>
-                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8, lineHeight: 1.5 }}>
-                  Stock actual: <strong style={{ color: 'var(--text)' }}>{limon.stock_actual != null ? `${limon.stock_actual} ml` : 'sin datos'}</strong>
-                  {' '}· Las compras en kg se convierten a ml automáticamente (120ml/kg).
-                </div>
-                <button
-                  onClick={() => setEditandoStock(limon)}
-                  style={{ background: 'rgba(196,0,90,0.15)', border: '1px solid rgba(196,0,90,0.35)', borderRadius: 8, padding: '5px 14px', color: 'var(--pink)', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
-                  Corregir stock
-                </button>
-              </div>
-            )
-          })()}
-
-          {/* Solo lo que está en bodega: el azúcar entra como goma (rinde_insumo). */}
-          <div className="card">
-            {insumosEnBodega(insumos).map(ins => {
-              const estado = getEstadoStock(ins)
-              return (
-                <div className="list-item" key={ins.nombre}
-                  onClick={() => setEditandoStock(ins)}
-                  style={{ cursor: 'pointer' }}>
-                  <div style={{ flex: 1 }}>
-                    <div className="list-item-name">{ins.nombre}</div>
-                    <div className="list-item-sub">
-                      {ins.stock_actual != null ? `${ins.stock_actual} ${ins.unidad}` : `Sin datos · ${ins.unidad}`}
-                      {ins.stock_minimo != null && ` · Mín: ${ins.stock_minimo}`}
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: estadoColor[estado], textTransform: 'uppercase' }}>
-                      {estadoLabel[estado]}
-                    </div>
-                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: estadoColor[estado] }} />
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </>
-      )}
     </div>
   )
 }

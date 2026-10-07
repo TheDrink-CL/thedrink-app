@@ -1,15 +1,12 @@
 import React, { useState, useEffect } from 'react'
 import Dashboard from './pages/Dashboard'
 import Ventas from './pages/Ventas'
-import Compras from './pages/Compras'
+import Bodega from './pages/Bodega'
 import Caja from './pages/Caja'
 import Analisis from './pages/Analisis'
 import Proyectos from './pages/Proyectos'
 import Cuentas from './pages/Cuentas'
 import Catalogo from './pages/Catalogo'
-import Stock from './pages/Stock'
-import Conteo from './pages/Conteo'
-import Salidas from './pages/Salidas'
 import Clientes from './pages/Clientes'
 import Opiniones, { useOpinionesCount } from './pages/Opiniones'
 import MiDinero from './pages/MiDinero'
@@ -36,10 +33,10 @@ const TABS_MAIN = [
       <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
     </svg>
   )},
-  { id: 'compras', label: 'Compra', icon: (
+  { id: 'bodega', label: 'Bodega', icon: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/>
-      <line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/>
+      <path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/>
+      <path d="M3 8l9 5 9-5"/><line x1="12" y1="13" x2="12" y2="21"/>
     </svg>
   )},
   { id: 'caja', label: 'Caja', icon: (
@@ -98,26 +95,6 @@ const TABS_MAS = [
       <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
     </svg>
   )},
-  { id: 'stock', label: 'Stock', icon: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M20 7H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/>
-      <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
-    </svg>
-  )},
-  { id: 'conteo', label: 'Conteo', icon: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <rect x="3" y="3" width="18" height="18" rx="2"/>
-      <path d="M9 8h6"/><path d="M9 12h6"/><path d="M9 16h4"/>
-    </svg>
-  )},
-  { id: 'salidas', label: 'Salidas', icon: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M21 8v13H3V8"/>
-      <path d="M1 3h22v5H1z"/>
-      <path d="M10 12h4"/>
-      <path d="M16 17l3 3 3-3"/><path d="M19 14v6"/>
-    </svg>
-  )},
   { id: 'opiniones', label: 'Opiniones', icon: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <circle cx="12" cy="12" r="9"/>
@@ -168,6 +145,8 @@ export default function App() {
   const [ventaDesdeComanda, setVentaDesdeComanda] = useState(null)
   // Pedido a abrir en edición al llegar a Ventas (Inicio → «Completar»).
   const [editarOrdenId, setEditarOrdenId] = useState(null)
+  // Sección abierta dentro de Bodega (stock, compras, conteo, salidas).
+  const [bodegaSeccion, setBodegaSeccion] = useState('stock')
   const [desbloqueado, setDesbloqueado] = useState(isPinUnlocked())
   const [deliveryDesbloqueado, setDeliveryDesbloqueado] = useState(isDeliveryUnlocked())
   // Sesion de Supabase Auth. null = todavia verificando; false = sin sesion;
@@ -224,29 +203,33 @@ export default function App() {
   //   return <PinLock onUnlock={() => setDesbloqueado(true)} />
   // }
 
+  // Ir a una pantalla por nombre: las de inventario abren Bodega en esa sección.
+  const SECCIONES_BODEGA = ['stock', 'compras', 'conteo', 'salidas']
+  const ir = (id) => {
+    if (SECCIONES_BODEGA.includes(id)) { setBodegaSeccion(id); setTab('bodega') }
+    else setTab(id)
+  }
+
   const handleNavClick = (id) => {
-    setTab(id)
+    ir(id)
     setMenuMas(false)
   }
 
   return (
     <div>
-      {tab === 'dashboard'    && <Dashboard onIr={setTab}
+      {tab === 'dashboard'    && <Dashboard onIr={ir}
         onRegistrarVenta={(c) => { setVentaDesdeComanda(c); setTab('ventas') }}
         onEditarOrden={(id) => { setEditarOrdenId(id); setTab('ventas') }} />}
       {tab === 'indicadores'  && <Indicadores />}
       {tab === 'campanas'     && <Campanas />}
       {tab === 'ventas'       && <Ventas desdeComanda={ventaDesdeComanda} onComandaCargada={() => setVentaDesdeComanda(null)}
         editarOrdenId={editarOrdenId} onEditarAbierto={() => setEditarOrdenId(null)} />}
-      {tab === 'compras'      && <Compras />}
+      {tab === 'bodega'       && <Bodega seccion={bodegaSeccion} onSeccion={setBodegaSeccion} />}
       {tab === 'caja'         && <Caja />}
       {tab === 'analisis'     && <Analisis />}
       {tab === 'proyectos'    && <Proyectos />}
       {tab === 'cuentas'      && <Cuentas />}
       {tab === 'catalogo'     && <Catalogo />}
-      {tab === 'stock'        && <Stock />}
-      {tab === 'conteo'       && <Conteo />}
-      {tab === 'salidas'      && <Salidas />}
       {tab === 'clientes'     && <Clientes />}
       {tab === 'opiniones'    && <Opiniones />}
       {tab === 'mi-dinero'    && <MiDinero />}
@@ -288,16 +271,6 @@ export default function App() {
             </div>
 
             <div style={{ borderTop:'1px solid var(--border)', margin:'6px 0' }} />
-
-            <button onClick={() => window.open('/delivery', '_blank')}
-              style={{
-                display:'flex', alignItems:'center', gap:12, width:'100%',
-                background:'none', border:'none', borderRadius:10, padding:'10px 14px',
-                color:'var(--muted)', cursor:'pointer', fontSize:14, fontWeight:400
-              }}>
-              <span style={{ fontSize:16 }}>{"🏍️"}</span>
-              Panel Delivery
-            </button>
 
             <button onClick={() => window.open('/tv', '_blank')}
               style={{
