@@ -24,6 +24,7 @@ import {
   cargarInsumosMeta, cargarMerma, tieneNotaAntesConteo,
 } from './inventario'
 import { INSUMO_FRASCO } from './frascos'
+import { avisosDeCompra, fmtPrecio } from './compraAvisos'
 
 const BOLSAS = 'Bolsas plásticas'
 const TZ = 'America/Santiago'
@@ -35,43 +36,13 @@ export const fechaLocal = (ts) => new Date(ts).toLocaleDateString('sv-SE', { tim
 const diasEntre = (desde, hasta) =>
   Math.round((Date.parse(hasta + 'T00:00:00Z') - Date.parse(desde + 'T00:00:00Z')) / 86400000)
 
-const mediana = (xs) => {
-  const s = [...xs].sort((a, b) => a - b)
-  const m = Math.floor(s.length / 2)
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
-}
-
 // Cuánto mueve una venta o una salida a `nombre`, ya enrutado (azúcar → goma).
 function deltaDe(items, signo, nombre, ctx) {
   const movs = calcularMovimientosStock(items, ctx.ingredientes, signo, ctx.meta, ctx.merma)
   return enrutarMovimientos(movs, ctx.meta)[nombre] || 0
 }
 
-// Avisos de una compra mirando todas las compras del mismo insumo.
-function avisosCompra(c, todas) {
-  const avisos = []
-  const gemela = todas.find(o => o.id !== c.id && o.insumo_nombre === c.insumo_nombre &&
-    o.fecha === c.fecha && Number(o.cantidad) === Number(c.cantidad))
-  if (gemela) avisos.push(`¿duplicada? hay otra compra igual el mismo día (#${gemela.id})`)
-  const unit = (x) => Number(x.precio_total) / Number(x.cantidad)
-  const otras = todas
-    .filter(o => o.id !== c.id && o.insumo_nombre === c.insumo_nombre && Number(o.cantidad) > 0 && Number(o.precio_total) > 0)
-    .map(unit)
-  if (otras.length >= 2 && Number(c.cantidad) > 0 && Number(c.precio_total) > 0) {
-    const ref = mediana(otras)
-    const r = unit(c) / ref
-    if (r < 0.6 || r > 1.67) {
-      avisos.push(`precio raro: $${fmt(unit(c))} por unidad, lo habitual es ~$${fmt(ref)}. Revisa la cantidad o el precio`)
-    }
-  }
-  return avisos
-}
-
-const fmt = (n) => {
-  const a = Math.abs(n)
-  const d = a >= 100 ? 0 : a >= 10 ? 1 : 2
-  return Number(n.toFixed(d)).toLocaleString('es-CL')
-}
+const fmt = fmtPrecio
 
 // Reconstrucción pura. Recibe todo ya cargado y devuelve:
 //   { sinConteo, inicio: { ts, fecha, cantidad }, filas, calculado, app,
@@ -100,7 +71,7 @@ export function reconstruirMovimientos({
     const rinde = m?.rinde_insumo === nombre
     if (!directo && !rinde) return
     const factor = rinde ? (m.rinde_factor || 1) : 1
-    const avisos = avisosCompra(c, historicas)
+    const avisos = avisosDeCompra(c, historicas)
     filas.push({
       ts: c.created_at, fecha: c.fecha, tipo: 'compra',
       detalle: rinde ? `Compra de ${c.insumo_nombre.toLowerCase()} (${fmt(Number(c.cantidad))} × ${factor})` : 'Compra',

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { insumosEnBodega, insumosQueSeCompran } from '../lib/inventario'
 import { formatCLP } from '../lib/calculos'
+import { avisosDeCompra } from '../lib/compraAvisos'
 
 function ConfirmModal({ mensaje, onConfirm, onCancel }) {
   return (
@@ -547,9 +548,22 @@ export default function Compras() {
     if (nombre !== 'Jugo limón' && nombre !== 'Jugo naranja') setLimonEnKg(false)
   }
 
+  // Avisos en vivo: compra duplicada o precio que no calza con las anteriores
+  // (lib/compraAvisos.js, la misma regla que la ficha de movimientos). Con
+  // aviso, el primer toque solo lo muestra; el segundo registra igual.
+  const cantidadPreview = esCitrico && limonEnKg && limonMlCalculado ? limonMlCalculado : parseFloat(form.cantidad)
+  const avisosNueva = form.insumo_nombre && cantidadPreview > 0 && parseFloat(form.precio_total) > 0
+    ? avisosDeCompra(
+        { fecha: form.fecha, insumo_nombre: form.insumo_nombre, cantidad: cantidadPreview, precio_total: parseFloat(form.precio_total) },
+        compras.filter(c => c.tipo !== 'activo_fijo'))
+    : []
+  const [avisosVistos, setAvisosVistos] = useState(false)
+  useEffect(() => { setAvisosVistos(false) }, [form.insumo_nombre, form.cantidad, form.precio_total, form.fecha])
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!form.insumo_nombre || !form.cantidad || !form.precio_total) return
+    if (avisosNueva.length && !avisosVistos) { setAvisosVistos(true); return }
     setLoading(true); setErrorForm('')
 
     // Para limón/naranja ingresado en kg: guardamos la cantidad convertida a ml
@@ -889,9 +903,18 @@ export default function Compras() {
                     placeholder="ej: oferta, comentario..."
                     onChange={e => setForm(f => ({ ...f, nota: e.target.value }))} />
                 </div>
+                {avisosNueva.length > 0 && (
+                  <div style={{
+                    borderLeft: '3px solid #f59e0b', background: 'rgba(245,158,11,0.08)', borderRadius: 6,
+                    padding: '8px 10px', marginBottom: 10, fontSize: 12, lineHeight: 1.5, color: 'var(--text)',
+                  }}>
+                    {avisosNueva.map((a, i) => <div key={i}>⚠ {a.charAt(0).toUpperCase() + a.slice(1)}</div>)}
+                    {avisosVistos && <div style={{ color: 'var(--muted)', marginTop: 4 }}>Si está bien, toca «Registrar igual».</div>}
+                  </div>
+                )}
                 {errorForm && <div style={{ color: 'var(--pink)', fontSize: 13, marginBottom: 10 }}>{errorForm}</div>}
                 <button type="submit" className="btn btn-primary" disabled={loading}>
-                  {loading ? 'Guardando...' : 'Registrar compra'}
+                  {loading ? 'Guardando...' : (avisosNueva.length && avisosVistos) ? 'Registrar igual' : 'Registrar compra'}
                 </button>
               </div>
             </form>
