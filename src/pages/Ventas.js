@@ -6,7 +6,7 @@ import {
 } from '../lib/inventario'
 import { formatCLP } from '../lib/calculos'
 import { descargarCSV, BotonExportar } from '../lib/exportar'
-import { tarifaEnvio, HABITUAL_MIN_PEDIDOS, PROMO_PRIMER_PEDIDO_DESDE } from '../lib/tarifaEnvio'
+import { tarifaEnvio, HABITUAL_MIN_PEDIDOS } from '../lib/tarifaEnvio'
 import { todas } from '../lib/todas'
 import { comandasDelPedido, cerrarComanda, cargarComandasAbiertas, haceCuanto } from '../lib/comandasCierre'
 import FrascosBloque from '../components/FrascosBloque'
@@ -18,10 +18,8 @@ import {
 // ─── Sugerencia de cobro de envío (mapa de la carta) ─────────────────────────
 // Aparece al tener monto y km. Dentro del mapa muestra la tarifa de la carta;
 // fuera del borde, Uber − aporte del tramo. «Usar» la copia al campo cobrado.
-function SugerenciaEnvio({ monto, km, costo, cobrado, onUsar, pedidosPrevios = 0, clienteConocido = true, numeroYaPidio = null }) {
-  const r = tarifaEnvio(monto, km, costo, pedidosPrevios >= HABITUAL_MIN_PEDIDOS, clienteConocido && pedidosPrevios === 0 && !numeroYaPidio)
-  // Por nombre parece nuevo, pero su número ya pidió: se avisa por qué no va la promo.
-  const avisoNumero = r && r.dentro && numeroYaPidio && pedidosPrevios === 0 && r.tramo.desde >= PROMO_PRIMER_PEDIDO_DESDE && r.tarifa > 0
+function SugerenciaEnvio({ monto, km, costo, cobrado, onUsar, pedidosPrevios = 0 }) {
+  const r = tarifaEnvio(monto, km, costo, pedidosPrevios >= HABITUAL_MIN_PEDIDOS)
   if (!r) return null
   const coincide = cobrado !== '' && Number(cobrado) === r.tarifa
   const precio = r.tarifa === 0 ? 'gratis' : formatCLP(r.tarifa)
@@ -35,7 +33,7 @@ function SugerenciaEnvio({ monto, km, costo, cobrado, onUsar, pedidosPrevios = 0
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
         <span>
           {r.dentro
-            ? <>{r.promo ? 'Primer pedido: ' : 'Según el mapa: '}<b>{precio}</b> <span style={{ color: 'var(--muted)' }}>({r.promo ? `promo de bienvenida; el mapa diría ${formatCLP(r.zona.tarifa)}` : `${r.tramo.nombre}, hasta ${r.zona.hasta} km`})</span></>
+            ? <>Según el mapa: <b>{precio}</b> <span style={{ color: 'var(--muted)' }}>({r.tramo.nombre}, hasta {r.zona.hasta} km)</span></>
             : <>Fuera del mapa: cobrar <b>{precio}</b> <span style={{ color: 'var(--muted)' }}>
                 (Uber {r.estimado ? '~' : ''}{formatCLP(r.costoUsado)} − aporte {formatCLP(r.aporte)}{r.habitual ? ` de cliente habitual, ${pedidosPrevios} pedidos` : ''}{r.estimado ? ', estimado: confirma con la cotización' : ''})
               </span></>}
@@ -50,11 +48,6 @@ function SugerenciaEnvio({ monto, km, costo, cobrado, onUsar, pedidosPrevios = 0
       {r.siguiente && (
         <div style={{ color: 'var(--muted)', marginTop: 3 }}>
           Con {formatCLP(r.siguiente.falta)} más en tragos el envío queda en {r.siguiente.tarifa === 0 ? 'gratis' : formatCLP(r.siguiente.tarifa)}.
-        </div>
-      )}
-      {avisoNumero && (
-        <div style={{ color: '#f59e0b', marginTop: 3 }}>
-          Sin envío de bienvenida: este número ya pidió {numeroYaPidio.n === 1 ? '1 vez' : `${numeroYaPidio.n} veces`}{numeroYaPidio.nombre ? ` (a nombre de ${numeroYaPidio.nombre})` : ''}. Es 1 por número de WhatsApp.
         </div>
       )}
     </div>
@@ -950,22 +943,6 @@ export default function Ventas({ desdeComanda = null, onComandaCargada, editarOr
       (clienteId ? o.cliente_id === clienteId : (o.cliente_nombre || '').trim().toLowerCase() === n)).length
   }
 
-  // La promo de bienvenida es «1 por número de WhatsApp» (así lo dice la
-  // carta v5.1). pedidosDe no basta: si alguien que ya pidió escribe con otro
-  // nombre, o desde el WhatsApp de alguien de su casa que ya compró, por
-  // nombre parece nuevo. Por eso se miran también los pedidos de ese número,
-  // en la orden o en la ficha del cliente.
-  const pedidosDelNumero = (tel) => {
-    const u8 = ultimos8Tel(tel)
-    if (!u8) return null
-    const telDeFicha = {}
-    clientesMaestro.forEach(c => { telDeFicha[c.id] = ultimos8Tel(c.telefono) })
-    const previas = ordenes.filter(o => o._tipo !== 'huerfana' &&
-      (ultimos8Tel(o.cliente_telefono) === u8 || (o.cliente_id && telDeFicha[o.cliente_id] === u8)))
-    if (previas.length === 0) return null
-    return { n: previas.length, nombre: previas[previas.length - 1].cliente_nombre || '' }
-  }
-
   const totalBruto = items.reduce((s, it) => {
     const base = parseFloat(it.precio_venta) || 0
     return s + base * (parseFloat(it.litros) || 1)
@@ -1773,8 +1750,7 @@ export default function Ventas({ desdeComanda = null, onComandaCargada, editarOr
               <input type="number" className="form-input" value={deliveryCobrado} placeholder="ej: 3000"
                 onChange={e => setDeliveryCobrado(e.target.value)} />
               <SugerenciaEnvio monto={totalBruto} km={distanciaKm} costo={deliveryTipo === 'propio' ? null : delivery}
-                cobrado={deliveryCobrado} onUsar={setDeliveryCobrado} pedidosPrevios={pedidosDe(clienteIdSel, cliente)}
-                clienteConocido={!!(clienteIdSel || cliente.trim())} numeroYaPidio={pedidosDelNumero(clienteTelefono)} />
+                cobrado={deliveryCobrado} onUsar={setDeliveryCobrado} pedidosPrevios={pedidosDe(clienteIdSel, cliente)} />
             </div>
           )}
 

@@ -14,15 +14,15 @@
 // de Rodrigo del 22/9/2026 (casos Vicho, Molly, Angélica).
 export const HABITUAL_MIN_PEDIDOS = 3
 
-// Promo de bienvenida (decisión de Rodrigo, 23/9/2026, opción A): «Primer
-// pedido: envío gratis desde 2 tragos». Dentro del mapa y desde el tramo de
-// $18.000; fuera del borde sigue la cotización. Prueba de 6 semanas: medir
-// % de primeros pedidos con 2+ tragos (base 56%) y clientes nuevos/mes (~16).
-export const PROMO_PRIMER_PEDIDO_DESDE = 18000
+// Carta v5.3 (31/10/2026, volvió el auto): cada tramo tiene una zona gratis y
+// un anillo con tarifa fija por fuera. 1 trago: gratis 6 km, $3.000 hasta 10;
+// 2+ tragos: gratis 13, $4.000 hasta 18. Dos tramos, no tres: el de 3+ solo
+// sumaba 2 km gratis y en abril-agosto ningún despacho cayó ahí. Gratis
+// a toda hora; si el auto no puede, se manda por Uber/DiDi y lo absorbe el
+// bar. Reemplaza a la promo de bienvenida del 23/9, que se retiró.
 export const TRAMOS_ENVIO = [
-  { desde: 27000, nombre: '3+ tragos · $27.000+', aporte: 3000, aporteHabitual: 6000, zonas: [{ hasta: 8, tarifa: 0 }, { hasta: 15, tarifa: 3000 }] },
-  { desde: 18000, nombre: '2 tragos · $18.000+', aporte: 1500, aporteHabitual: 3000, zonas: [{ hasta: 6, tarifa: 3000 }, { hasta: 13, tarifa: 4000 }] },
-  { desde: 0, nombre: '1 trago · menos de $18.000', aporte: 0, aporteHabitual: 1500, zonas: [{ hasta: 4, tarifa: 3000 }, { hasta: 8, tarifa: 4000 }] },
+  { desde: 18000, nombre: '2+ tragos · $18.000+', aporte: 1500, aporteHabitual: 3000, zonas: [{ hasta: 13, tarifa: 0 }, { hasta: 18, tarifa: 4000 }] },
+  { desde: 0, nombre: '1 trago · menos de $18.000', aporte: 0, aporteHabitual: 1500, zonas: [{ hasta: 6, tarifa: 0 }, { hasta: 10, tarifa: 3000 }] },
 ]
 
 // Costo Uber estimado por km de ruta: ajuste sobre 65 viajes desde julio 2026
@@ -40,16 +40,13 @@ export const tramoDe = (monto) => TRAMOS_ENVIO.find(t => monto >= t.desde)
 //   a 500, y nunca menos que la tarifa del borde.
 // - siguiente: cuánto le falta al cliente para el tramo que sigue y qué envío
 //   tendría ahí (para ofrecerlo en el mensaje: «si sumas un trago…»).
-export function tarifaEnvio(monto, km, costoUber, habitual = false, primerPedido = false) {
+export function tarifaEnvio(monto, km, costoUber, habitual = false) {
   const m = Number(monto), d = Number(km)
   if (!(m > 0) || !(d > 0)) return null
   const tramo = tramoDe(m)
   const calc = (t) => {
     const zona = t.zonas.find(z => d <= z.hasta)
-    if (zona) {
-      if (primerPedido && t.desde >= PROMO_PRIMER_PEDIDO_DESDE && zona.tarifa > 0) return { dentro: true, zona, tarifa: 0, promo: true }
-      return { dentro: true, zona, tarifa: zona.tarifa }
-    }
+    if (zona) return { dentro: true, zona, tarifa: zona.tarifa }
     const real = Number(costoUber) > 0
     const costo = real ? Number(costoUber) : uberEstimado(d)
     const borde = t.zonas[t.zonas.length - 1].tarifa
