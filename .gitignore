@@ -3,3 +3,8 @@ build/
 .env
 .env.local
 .DS_Store
+
+# Recetario impreso y respaldos (no van al repo)
+recetario.html
+out/
+.claude/launch.json

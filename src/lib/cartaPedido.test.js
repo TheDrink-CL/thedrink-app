@@ -1,15 +1,15 @@
 // Mensajes de la carta web → ítems con su receta exacta.
 import { esMensajeCarta, parsearMensajeCarta, recetaDeCarta } from './cartaPedido'
 
-// Nombres tal como están en la base (selector de Ventas, 6-oct-2026).
+// Nombres tal como están en la base (receta_ingredientes, 2-nov-2026).
 const recetas = [
-  'Berry Bomb', 'Berry Bomb 0.0', 'Berry Frost (1lt)', 'Blue Colada', 'Daikiri frambuesa',
-  'Daikiri frutilla', 'Daikiri mango', 'Daikiri maracuya', 'Frozen mojito (1lt)', 'Frutilla Colada',
-  'Gin Tonic', 'Mango Colada', 'Mango Sour', 'Maracuyá Sour', 'Margarita', 'Margarita Blue',
+  '0.0 Berry Bomb', '0.0 Berry Frost', '0.0 Mojito Frozen', '0.0 Violetto tonic', 'Berry Bomb',
+  'Colada Blue', 'Colada Frutilla', 'Colada Mango', 'Colada Piña', 'Daikiri frambuesa',
+  'Daikiri frutilla', 'Daikiri mango', 'Daikiri maracuya', 'Gin Tonic', 'Margarita', 'Margarita Blue',
   'Margarita Frutilla', 'Margarita Mango', 'Margarita Maracuyá', 'Mojito', 'Mojito Arándano',
   'Mojito Coco Blue', 'Mojito coco-frambuesa', 'Mojito frambuesa', 'Mojito frutilla', 'Mojito Jager',
-  'Mojito Jager Maracuyá', 'Mojito mango', 'Mojito maracuya', 'Mojito piña', 'Piña Colada',
-  'Pisco sour', 'Sour Peruano', 'Tropical Gin', 'Violetto tonic',
+  'Mojito Jager Maracuyá', 'Mojito mango', 'Mojito maracuya', 'Mojito piña', 'Sour Chileno',
+  'Sour Mango', 'Sour Maracuyá', 'Sour Peruano', 'Tropical Gin',
 ].map(nombre => ({ nombre, precio_venta: 9000 }))
 
 const MENSAJE = `Hola The Drink, vengo de la carta — quiero pedir:
@@ -65,18 +65,19 @@ test.each([
   ['Mojito Coco Frambuesa', 'Mojito coco-frambuesa'],
   ['Mojito Jäger', 'Mojito Jager'],
   ['Mojito Jäger Maracuyá', 'Mojito Jager Maracuyá'],
-  ['Colada · Piña', 'Piña Colada'],
-  ['Colada · Blue', 'Blue Colada'],
+  ['Colada · Piña', 'Colada Piña'],
+  ['Colada · Blue', 'Colada Blue'],
   ['Daikiri Sabores · Maracuyá', 'Daikiri maracuya'],
   ['Margarita Clásica', 'Margarita'],
   ['Margarita Sabores · Blue (curaçao)', 'Margarita Blue'],
-  ['Pisco Sour', 'Pisco sour'],
+  ['Pisco Sour', 'Sour Chileno'],
   ['Pisco Sour Peruano', 'Sour Peruano'],
-  ['Maracuyá Sour', 'Maracuyá Sour'],
-  ['Mojito Frozen 0.0', 'Frozen mojito (1lt)'],
-  ['Berry Frost 0.0', 'Berry Frost (1lt)'],
-  ['Violetto Tonic 0.0', 'Violetto tonic'],
-  ['Berry Bomb 0.0', 'Berry Bomb 0.0'],
+  ['Mango Sour', 'Sour Mango'],
+  ['Maracuyá Sour', 'Sour Maracuyá'],
+  ['Mojito Frozen 0.0', '0.0 Mojito Frozen'],
+  ['Berry Frost 0.0', '0.0 Berry Frost'],
+  ['Violetto Tonic 0.0', '0.0 Violetto tonic'],
+  ['Berry Bomb 0.0', '0.0 Berry Bomb'],
 ])('%s → %s', (carta, receta) => {
   expect(recetaDeCarta(carta, recetas)?.nombre).toBe(receta)
 })

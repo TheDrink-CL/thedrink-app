@@ -56,23 +56,24 @@ export const BASE_POR_CODIGO = {
 
 // `refConFruta` / `refSinFruta`: receta existente que se usa de molde.
 // `slotFruta`: cuánta pulpa lleva el molde (para reemplazarla por la pedida).
-// `gomaPorFruta`: excepciones reales de la carta (la piña es dulce y lleva
-// menos goma; la maracuyá y el arándano son ácidos y llevan más).
+// `gomaPorFruta`: excepciones de goma según la fruta. Desde el recetario del
+// 2-nov la colada y el daikiri llevan goma 90 con cualquier pulpa, así que
+// solo la margarita conserva excepciones.
 export const ESQUELETOS = {
   MOJ: {
     nombre: 'Mojito', refConFruta: 'Mojito maracuya', refSinFruta: 'Mojito',
     addons: ['CC', 'CZ', 'JG', 'MT', 'LX', 'NJ'],
   },
   COL: {
-    nombre: 'Colada', refConFruta: 'Mango Colada',
-    gomaPorFruta: { PIN: 90 }, addons: ['CZ', 'LX', 'NJ'],
+    nombre: 'Colada', refConFruta: 'Colada Mango',
+    addons: ['CZ', 'LX', 'NJ'],
   },
   DAI: {
     nombre: 'Daikiri', refConFruta: 'Daikiri frambuesa',
-    gomaPorFruta: { MAR: 120, ARA: 120 }, addons: ['JG', 'CZ', 'LX', 'NJ'],
+    addons: ['JG', 'CZ', 'LX', 'NJ'],
   },
   SOU: {
-    nombre: 'Sour', refConFruta: 'Mango Sour', refSinFruta: 'Pisco sour',
+    nombre: 'Sour', refConFruta: 'Sour Mango', refSinFruta: 'Sour Chileno',
     refSinFrutaAlt: { PT: 'Sour Peruano' }, addons: ['AG', 'LX', 'NJ'],
   },
   ENE: {
@@ -97,7 +98,7 @@ export const ESQUELETOS = {
     addons: ['CZ', 'JG', 'LX', 'NJ'],
   },
   FZM: {
-    nombre: 'Frozen Mojito', refSinFruta: 'Frozen mojito (1lt)',
+    nombre: 'Frozen Mojito', refSinFruta: '0.0 Mojito Frozen',
     // `Frozen mojito maracuya (1lt)` es un molde, no un trago de la carta: va
     // con `es_prototipo` y vive en la pestaña "Prototipos LAB". Existe porque
     // el LAB ofrece el frozen mojito con fruta desde siempre y acá no había
@@ -108,14 +109,14 @@ export const ESQUELETOS = {
     addons: ['CC', 'JG', 'LX', 'NJ'],
   },
   FRS: {
-    nombre: 'Frost', refConFruta: 'Berry Frost (1lt)', addons: ['JG', 'LX', 'NJ'],
+    nombre: 'Frost', refConFruta: '0.0 Berry Frost', addons: ['JG', 'LX', 'NJ'],
   },
   TON: {
     nombre: 'Gin Tónica', refSinFruta: 'Gin Tonic',
     addons: ['LI', 'PP', 'GM', 'HI', 'PM', 'RR', 'AR', 'AE', 'CO', 'CL', 'CN', 'PJ'],
   },
   VIO: {
-    nombre: 'Violetto Tonic', refSinFruta: 'Violetto tonic',
+    nombre: 'Violetto Tonic', refSinFruta: '0.0 Violetto tonic',
     addons: ['LX', 'NJ'],
   },
 }
@@ -123,7 +124,7 @@ export const ESQUELETOS = {
 // Un añadido suma su insumo y reajusta el resto del build. El reajuste depende
 // del esqueleto: un mojito con coco baja gas e hielo; una colada con curazao
 // baja el ron y la pulpa. Sale de las recetas Mojito Coco Blue, Mojito
-// coco-frambuesa y Blue Colada, que ya existen en la carta.
+// coco-frambuesa y Colada Blue, que ya existen en la carta.
 // `FRUTA` es un alias que apunta a la pulpa elegida.
 // Energéticas: van incluidas, 1 por trago. El token del código dice cuál, y de
 // eso depende qué lata se descuenta del stock. Agregar una variedad es sumarla
@@ -222,18 +223,18 @@ export const GEMELOS = {
   'RON-MOJ-ARA-1L': 'Mojito Arándano',
   'RON-MOJ-FRA-1L+CC': 'Mojito coco-frambuesa',
   'RON-MOJ-NAT-1L+CC+CZ': 'Mojito Coco Blue',
-  'RON-COL-PIN-1L': 'Piña Colada',
-  'RON-COL-MAN-1L': 'Mango Colada',
-  'RON-COL-FRU-1L': 'Frutilla Colada',
-  'RON-COL-PIN-1L+CZ': 'Blue Colada',
+  'RON-COL-PIN-1L': 'Colada Piña',
+  'RON-COL-MAN-1L': 'Colada Mango',
+  'RON-COL-FRU-1L': 'Colada Frutilla',
+  'RON-COL-PIN-1L+CZ': 'Colada Blue',
   'RON-DAI-FRA-1L': 'Daikiri frambuesa',
   'RON-DAI-FRU-1L': 'Daikiri frutilla',
   'RON-DAI-MAN-1L': 'Daikiri mango',
   'RON-DAI-MAR-1L': 'Daikiri maracuya',
-  'PN-SOU-NAT-475': 'Pisco sour',
+  'PN-SOU-NAT-475': 'Sour Chileno',
   'PT-SOU-NAT-475': 'Sour Peruano',
-  'PN-SOU-MAN-475': 'Mango Sour',
-  'PT-SOU-MAR-475': 'Maracuyá Sour',
+  'PN-SOU-MAN-475': 'Sour Mango',
+  'PT-SOU-MAR-475': 'Sour Maracuyá',
   'GIN-TON-NAT-1L': 'Gin Tonic',
   'GIN-ENE-MAR-1L+RY': 'Tropical Gin',
   'GIN-ENE-FRA-1L+RB': 'Berry Bomb',
@@ -244,9 +245,9 @@ export const GEMELOS = {
   'TEQ-MRG-NAT-1L+CZ': 'Margarita Blue',
   'JGR-JAG-NAT-1L': 'Mojito Jager',
   'JGR-JAG-MAR-1L': 'Mojito Jager Maracuyá',
-  'ZER-FZM-NAT-1L': 'Frozen mojito (1lt)',
-  'ZER-FRS-FRU-1L': 'Berry Frost (1lt)',
-  'ZER-VIO-NAT-1L': 'Violetto tonic',
+  'ZER-FZM-NAT-1L': '0.0 Mojito Frozen',
+  'ZER-FRS-FRU-1L': '0.0 Berry Frost',
+  'ZER-VIO-NAT-1L': '0.0 Violetto tonic',
 }
 
 // Detecta un código dentro de una línea de texto pegada del chat.

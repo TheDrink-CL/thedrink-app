@@ -36,10 +36,14 @@ const ALIAS = {
   'mojito clasico': 'Mojito',
   'mojito coco frambuesa': 'Mojito coco-frambuesa',
   'margarita clasica': 'Margarita',
+  'pisco sour': 'Sour Chileno',
   'pisco sour peruano': 'Sour Peruano',
-  'mojito frozen 0 0': 'Frozen mojito (1lt)',
-  'berry frost 0 0': 'Berry Frost (1lt)',
-  'violetto tonic 0 0': 'Violetto tonic',
+  'mango sour': 'Sour Mango',
+  'maracuya sour': 'Sour Maracuyá',
+  'mojito frozen 0 0': '0.0 Mojito Frozen',
+  'berry frost 0 0': '0.0 Berry Frost',
+  'violetto tonic 0 0': '0.0 Violetto tonic',
+  'berry bomb 0 0': '0.0 Berry Bomb',
 }
 
 // Cards con sabores: cómo se llama la receta de cada sabor.
@@ -47,7 +51,7 @@ const CON_SABOR = {
   'mojito sabores': (s) => `Mojito ${s}`,
   'daikiri sabores': (s) => `Daikiri ${s}`,
   'margarita sabores': (s) => `Margarita ${s.replace(/\s*\(.*\)$/, '')}`, // «Blue (curaçao)» → Blue
-  'colada': (s) => `${s} Colada`,
+  'colada': (s) => `Colada ${s}`,
 }
 
 // «Mojito Sabores · Piña» → «Mojito piña» (la receta tal como está en la base),
