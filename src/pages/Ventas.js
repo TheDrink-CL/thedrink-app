@@ -10,6 +10,7 @@ import { tarifaEnvio, HABITUAL_MIN_PEDIDOS } from '../lib/tarifaEnvio'
 import { todas } from '../lib/todas'
 import { comandasDelPedido, cerrarComanda, cargarComandasAbiertas, haceCuanto } from '../lib/comandasCierre'
 import FrascosBloque from '../components/FrascosBloque'
+import BuscarPrototipo from '../components/BuscarPrototipo'
 import {
   FRASCOS_POR_CANJE, NOTA_CANJE, RECETA_CANJE, SALDO_VACIO,
   cargarSaldo, movimientosDeOrden, resumenOrden, validarCanje, guardarFrascosOrden, canalDesdeEntrega,
@@ -928,6 +929,16 @@ export default function Ventas({ desdeComanda = null, onComandaCargada, editarOr
 
   const agregarItem = () => setItems(prev => [...prev, itemVacio()])
   const quitarItem = (i) => setItems(prev => prev.filter((_, idx) => idx !== i))
+  // La receta del prototipo puede ser recién creada: entra a la lista para que
+  // el selector la muestre. Ocupa el ítem en blanco, si lo hay.
+  const agregarPrototipo = ({ receta_nombre, precio_venta }) => {
+    setRecetas(prev => prev.some(r => r.nombre === receta_nombre) ? prev
+      : [...prev, { nombre: receta_nombre, precio_venta }].sort((a, b) => a.nombre.localeCompare(b.nombre)))
+    setItems(prev => [
+      ...prev.filter(it => it.receta_nombre || it.precio_venta !== ''),
+      { ...itemVacio(), receta_nombre, precio_venta },
+    ])
+  }
   const canjearFrascos = () => setItems(prev => {
     // Si hay un ítem en blanco, el canje no queda debajo de él
     const base = prev.filter(it => it.receta_nombre || it.precio_venta !== '')
@@ -1623,6 +1634,7 @@ export default function Ventas({ desdeComanda = null, onComandaCargada, editarOr
               style={{ width:'100%', background:'rgba(255,255,255,0.04)', border:'1px dashed var(--border)', borderRadius:10, padding:'10px 0', color:'var(--muted)', cursor:'pointer', fontSize:13 }}>
               + Agregar producto
             </button>
+            <BuscarPrototipo onAgregar={agregarPrototipo} />
             <FrascosBloque estado={saldoFrascos.estado} saldo={saldoFrascos.saldo}
               aceptados={frascosAceptados} rechazados={frascosRechazados}
               setAceptados={setFrascosAceptados} setRechazados={setFrascosRechazados}
