@@ -549,3 +549,33 @@ export function buildLegible(ingredientes) {
     })
     .join(' · ')
 }
+
+// ─── Prototipos que llegan sin código ────────────────────────────────────────
+//
+// «PROTOTIPO #4375» solo es una etiqueta: la numeración vive en `lab-motor.js`
+// y copiarla acá sería una segunda fuente que se desfasa sola. Lo que sí se
+// puede hacer es no quedarse callado: reconocer el número y mandar al Resolver,
+// que devuelve el código. Antes el pedido quedaba vacío, sin ningún aviso.
+export const urlResolver = numero =>
+  `https://lab.ncity.live/staff/?q=${encodeURIComponent(numero)}`
+
+// Un número pelado solo cuenta si es TODO el texto: en un chat, "4375" puede
+// ser cualquier cosa (una dirección, un monto).
+const RE_SOLO_NUMERO = /^\s*(?:prototipo\s*)?#?\s*(\d{1,6})\s*$/i
+
+// True si en el texto no hay nada más que un número: analizarlo daría un pedido
+// vacío.
+export const esSoloNumeroPrototipo = texto => RE_SOLO_NUMERO.test(String(texto || ''))
+
+// Números de prototipo mencionados en el texto que no traen su código al lado.
+// Un mensaje del LAB trae los dos, así que esos no se reportan.
+export function prototiposSinCodigo(texto) {
+  if (!texto) return []
+  const T = String(texto)
+  const solo = T.match(RE_SOLO_NUMERO)
+  if (solo) return [solo[1]]
+  const lab = parsearMensajeLab(T)
+  const conCodigo = new Set((lab?.items || []).map(i => i.etiqueta))
+  const numeros = [...T.matchAll(/PROTOTIPO\s*#\s*(\d+)/gi)].map(m => m[1])
+  return [...new Set(numeros)].filter(n => !conCodigo.has(`PROTOTIPO #${n}`))
+}

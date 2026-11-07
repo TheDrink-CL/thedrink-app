@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { estimarTiempoDelivery, ventanaCountdownMin } from '../lib/comandasTiming'
-import { parsearMensajeLab, construirBuild, buildLegible } from '../lib/labCodigos'
+import { parsearMensajeLab, construirBuild, buildLegible, prototiposSinCodigo, esSoloNumeroPrototipo, urlResolver } from '../lib/labCodigos'
 import { cargarMoldes, asegurarReceta } from '../lib/labPrototipos'
 import { parsearMensajeCarta } from '../lib/cartaPedido'
 
@@ -720,6 +720,9 @@ export default function ImportarPedido() {
   )
 
   // ── PEGAR CHAT ────────────────────────────────────────────────────────────
+  const sinCodigo = prototiposSinCodigo(textoChat)
+  const soloNumero = esSoloNumeroPrototipo(textoChat)
+  const puedeAnalizar = !!textoChat.trim() && !soloNumero
   return (
     <div style={{ padding:'16px 16px 100px', maxWidth:540, margin:'0 auto' }}>
       <div style={{ fontSize:20, fontWeight:800, color:'var(--text-strong)', marginBottom:4 }}>
@@ -736,7 +739,24 @@ export default function ImportarPedido() {
           style={{ ...sty.input, minHeight:200, resize:'vertical', fontFamily:'monospace', fontSize:13 }}
           placeholder={"-2 mojitos\n-uno tradicional y uno maracuya\ncalle falsa 123\ncel 912345678"} />
       </div>
-      <button onClick={handleParsear} disabled={!textoChat.trim()} style={{ ...sty.btnP, opacity:textoChat.trim()?1:0.5 }}>
+      {sinCodigo.length > 0 && (
+        <div style={{ ...sty.card, borderColor:'rgba(255,200,50,0.4)', background:'rgba(255,200,50,0.07)', fontSize:13, lineHeight:1.5, color:'var(--text-strong)' }}>
+          <div style={{ fontWeight:700, color:'#ffc832', marginBottom:6 }}>
+            ⚠ {sinCodigo.length === 1 ? 'Prototipo sin código' : 'Prototipos sin código'}
+          </div>
+          <div style={{ color:'var(--muted)', marginBottom:10 }}>
+            Con el número solo no se puede armar el trago. Ábrelo en el Resolver, copia el código y el precio, y pégalos acá.
+            {!soloNumero && ' Si analizas así, queda fuera del pedido.'}
+          </div>
+          {sinCodigo.map(n => (
+            <a key={n} href={urlResolver(n)} target="_blank" rel="noopener noreferrer"
+              style={{ display:'block', fontWeight:700, color:'var(--cyan)', padding:'6px 0' }}>
+              Ver PROTOTIPO #{n} en el Resolver →
+            </a>
+          ))}
+        </div>
+      )}
+      <button onClick={handleParsear} disabled={!puedeAnalizar} style={{ ...sty.btnP, opacity:puedeAnalizar?1:0.5 }}>
         Analizar pedido
       </button>
     </div>
