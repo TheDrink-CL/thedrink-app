@@ -166,6 +166,10 @@ decodifica en `ImportarPedido` y materializa los prototipos como recetas.
 
 - `src/lib/labCodigos.js` — decodificador puro, sin base de datos.
 - `src/lib/labPrototipos.js` — crea la receta del prototipo bajo demanda.
+- `public/lab-resolver.worker.js` + `src/lib/labResolver.js` — traducen «-1 Prototipo
+  4375» a código y precio en Importar WA. Leen en vivo `lab.ncity.live/lab-motor.js`
+  (la numeración no se copia). Va en un worker para que ese código no alcance la
+  sesión: no moverlo al hilo principal. Si el LAB no carga, queda el Resolver.
 
 **La gramática del código vive en dos lugares**: acá y en el HTML del LAB
 (`Páginas web/app pedidos/deploy/v1/index.html`). Si cambias una, cambia la

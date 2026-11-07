@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { estimarTiempoDelivery, ventanaCountdownMin } from '../lib/comandasTiming'
-import { parsearMensajeLab, construirBuild, buildLegible, prototiposSinCodigo, esSoloNumeroPrototipo, urlResolver } from '../lib/labCodigos'
+import { parsearMensajeLab, construirBuild, buildLegible, referenciasPrototipo, urlResolver } from '../lib/labCodigos'
+import { resolverNumeros } from '../lib/labResolver'
 import { cargarMoldes, asegurarReceta } from '../lib/labPrototipos'
 import { parsearMensajeCarta } from '../lib/cartaPedido'
 
@@ -260,6 +261,9 @@ export default function ImportarPedido() {
   // Despacho que el LAB ya le mostró al cliente. Se arrastra para no cotizarle
   // un envío distinto al que aceptó al armar el pedido.
   const [labDespacho, setLabDespacho] = useState(null)
+  const [buscandoProto, setBuscandoProto] = useState(false)
+  // Prototipos que no se pudieron traducir: { numeros, sinConexion, hayMas }
+  const [sinResolver, setSinResolver] = useState(null)
   const textareaRef = useRef(null)
 
   // Aviso proactivo: si el teléfono del cliente ya canjeó un NEON, avisar para
@@ -302,18 +306,59 @@ export default function ImportarPedido() {
     }
   }, [paso])
 
-  const handleParsear = async () => {
+  // Un ítem de la revisión a partir de un trago con código del LAB.
+  const itemLab = (i, moldes) => {
+    const b = construirBuild(i.spec, moldes)
+    return {
+      key: Date.now() + Math.random(),
+      cantidad: i.cantidad,
+      textoOriginal: i.etiqueta,
+      receta_nombre: i.spec.recetaGemela || '',
+      precio_venta: i.precio_venta || '',
+      nota: '',
+      lab: {
+        spec: i.spec,
+        codigo: i.codigo,
+        build: b.ok ? b.ingredientes : null,
+        motivo: b.motivo,
+      },
+    }
+  }
+
+  const handleParsear = async ({ omitirSinResolver = false } = {}) => {
     if (!textoChat.trim()) return
+    // «-1 Prototipo 4375» no trae código: se le pide al motor del LAB.
+    const { refs, resto } = referenciasPrototipo(textoChat)
+    let protos = []
+    if (refs.length) {
+      setBuscandoProto(true)
+      const { tragos, sinConexion } = await resolverNumeros(refs.map(r => r.numero))
+      setBuscandoProto(false)
+      const faltan = refs.filter(r => !tragos[r.numero]).map(r => r.numero)
+      if (faltan.length && !omitirSinResolver) {
+        setSinResolver({ numeros: faltan, sinConexion, hayMas: !!resto.trim() || faltan.length < refs.length })
+        return
+      }
+      protos = refs.filter(r => tragos[r.numero]).map(r => ({
+        cantidad: r.cantidad,
+        etiqueta: 'PROTOTIPO #' + r.numero,
+        codigo: tragos[r.numero].codigo,
+        spec: tragos[r.numero].spec,
+        precio_venta: tragos[r.numero].precio,
+      }))
+    }
+    setSinResolver(null)
+    const texto = refs.length ? resto : textoChat
     // Un pedido del LAB trae códigos exactos (RON-MOJ-MAR-1L+CZ). Si los hay,
     // no se adivina por similitud: se decodifican. El match difuso puede
     // pegarle a una receta equivocada y descontar los insumos que no son.
-    const lab = parsearMensajeLab(textoChat)
+    const lab = parsearMensajeLab(texto)
     // La carta web también manda un formato fijo («▸ 1x Mojito Sabores · Piña»):
     // se traduce con reglas exactas, no por similitud.
-    const carta = lab ? null : parsearMensajeCarta(textoChat, recetas)
+    const carta = lab ? null : parsearMensajeCarta(texto, recetas)
     let resultado
     if (carta) {
-      const contexto = parsearChat(textoChat, [])  // rescata dirección y teléfono
+      const contexto = parsearChat(texto, [])  // rescata dirección y teléfono
       resultado = {
         direccion: contexto.direccion,
         telefono: contexto.telefono,
@@ -332,32 +377,20 @@ export default function ImportarPedido() {
       setLabDespacho(null)
     } else if (lab) {
       const moldes = await cargarMoldes(lab.items.map(i => i.spec))
-      const contexto = parsearChat(textoChat, [])  // rescata dirección y teléfono
+      const contexto = parsearChat(texto, [])  // rescata dirección y teléfono
       resultado = {
         direccion: contexto.direccion,
         telefono: contexto.telefono,
-        items: lab.items.map(i => {
-          const b = construirBuild(i.spec, moldes)
-          return {
-            key: Date.now() + Math.random(),
-            cantidad: i.cantidad,
-            textoOriginal: i.etiqueta,
-            receta_nombre: i.spec.recetaGemela || '',
-            precio_venta: i.precio_venta || '',
-            nota: '',
-            lab: {
-              spec: i.spec,
-              codigo: i.codigo,
-              build: b.ok ? b.ingredientes : null,
-              motivo: b.motivo,
-            },
-          }
-        }),
+        items: lab.items.map(i => itemLab(i, moldes)),
       }
       setLabDespacho(lab.despacho || null)
     } else {
-      resultado = parsearChat(textoChat, recetas)
+      resultado = parsearChat(texto, recetas)
       setLabDespacho(null)
+    }
+    if (protos.length) {
+      const moldes = await cargarMoldes(protos.map(i => i.spec))
+      resultado = { ...resultado, items: [...resultado.items, ...protos.map(i => itemLab(i, moldes))] }
     }
     setParsed(resultado)
     setEditItems(resultado.items)
@@ -720,9 +753,7 @@ export default function ImportarPedido() {
   )
 
   // ── PEGAR CHAT ────────────────────────────────────────────────────────────
-  const sinCodigo = prototiposSinCodigo(textoChat)
-  const soloNumero = esSoloNumeroPrototipo(textoChat)
-  const puedeAnalizar = !!textoChat.trim() && !soloNumero
+  const puedeAnalizar = !!textoChat.trim() && !buscandoProto
   return (
     <div style={{ padding:'16px 16px 100px', maxWidth:540, margin:'0 auto' }}>
       <div style={{ fontSize:20, fontWeight:800, color:'var(--text-strong)', marginBottom:4 }}>
@@ -735,29 +766,35 @@ export default function ImportarPedido() {
         <span style={sty.label}>Nombre del contacto en WhatsApp</span>
         <input style={{ ...sty.input, marginBottom:16 }} value={nombreChat} onChange={e => setNombreChat(e.target.value)} placeholder="Ej: Jose Garcia" />
         <span style={sty.label}>Mensajes del chat</span>
-        <textarea ref={textareaRef} value={textoChat} onChange={e => setTextoChat(e.target.value)}
+        <textarea ref={textareaRef} value={textoChat} onChange={e => { setTextoChat(e.target.value); setSinResolver(null) }}
           style={{ ...sty.input, minHeight:200, resize:'vertical', fontFamily:'monospace', fontSize:13 }}
           placeholder={"-2 mojitos\n-uno tradicional y uno maracuya\ncalle falsa 123\ncel 912345678"} />
       </div>
-      {sinCodigo.length > 0 && (
-        <div style={{ ...sty.card, borderColor:'rgba(255,200,50,0.4)', background:'rgba(255,200,50,0.07)', fontSize:13, lineHeight:1.5, color:'var(--text-strong)' }}>
+      {sinResolver && (
+        <div style={{ ...sty.card, borderColor:'rgba(255,200,50,0.4)', background:'rgba(255,200,50,0.07)', fontSize:13, lineHeight:1.5 }}>
           <div style={{ fontWeight:700, color:'#ffc832', marginBottom:6 }}>
-            ⚠ {sinCodigo.length === 1 ? 'Prototipo sin código' : 'Prototipos sin código'}
+            ⚠ {sinResolver.sinConexion ? 'No pude leer el LAB' : 'No encontré ' + sinResolver.numeros.map(n => '#' + n).join(', ')}
           </div>
           <div style={{ color:'var(--muted)', marginBottom:10 }}>
-            Con el número solo no se puede armar el trago. Ábrelo en el Resolver, copia el código y el precio, y pégalos acá.
-            {!soloNumero && ' Si analizas así, queda fuera del pedido.'}
+            {sinResolver.sinConexion
+              ? 'Revisa la conexión e intenta de nuevo, o pega el código del trago.'
+              : 'Ese número no existe en la numeración actual. Revisa que esté bien copiado o pídele el código al cliente.'}
           </div>
-          {sinCodigo.map(n => (
+          {sinResolver.numeros.map(n => (
             <a key={n} href={urlResolver(n)} target="_blank" rel="noopener noreferrer"
               style={{ display:'block', fontWeight:700, color:'var(--cyan)', padding:'6px 0' }}>
-              Ver PROTOTIPO #{n} en el Resolver →
+              Ver #{n} en el Resolver →
             </a>
           ))}
+          {sinResolver.hayMas && (
+            <button onClick={() => handleParsear({ omitirSinResolver: true })} style={{ ...sty.btnS, width:'100%', marginTop:8 }}>
+              Analizar sin ese prototipo
+            </button>
+          )}
         </div>
       )}
-      <button onClick={handleParsear} disabled={!puedeAnalizar} style={{ ...sty.btnP, opacity:puedeAnalizar?1:0.5 }}>
-        Analizar pedido
+      <button onClick={() => handleParsear()} disabled={!puedeAnalizar} style={{ ...sty.btnP, opacity:puedeAnalizar?1:0.5 }}>
+        {buscandoProto ? 'Buscando prototipo…' : 'Analizar pedido'}
       </button>
     </div>
   )

@@ -552,30 +552,47 @@ export function buildLegible(ingredientes) {
 
 // ─── Prototipos que llegan sin código ────────────────────────────────────────
 //
-// «PROTOTIPO #4375» solo es una etiqueta: la numeración vive en `lab-motor.js`
-// y copiarla acá sería una segunda fuente que se desfasa sola. Lo que sí se
-// puede hacer es no quedarse callado: reconocer el número y mandar al Resolver,
-// que devuelve el código. Antes el pedido quedaba vacío, sin ningún aviso.
+// «PROTOTIPO #4375» es solo una etiqueta: la numeración vive en `lab-motor.js`.
+// Acá se reconoce la mención; `labResolver.js` la traduce a código. Antes el
+// pedido quedaba vacío, sin ningún aviso.
+
+// El Resolver queda de respaldo, para cuando no se puede leer el LAB o el
+// número solo existe en la numeración vieja.
 export const urlResolver = numero =>
-  `https://lab.ncity.live/staff/?q=${encodeURIComponent(numero)}`
+  'https://lab.ncity.live/staff/?q=' + encodeURIComponent(numero)
 
 // Un número pelado solo cuenta si es TODO el texto: en un chat, "4375" puede
 // ser cualquier cosa (una dirección, un monto).
-const RE_SOLO_NUMERO = /^\s*(?:prototipo\s*)?#?\s*(\d{1,6})\s*$/i
+const RE_SOLO_NUMERO = /^\s*#?\s*(\d{1,6})\s*$/
+// El # es opcional: a mano se escribe "-1 Prototipo 4375".
+const RE_PROTOTIPO = /prototipos?\s*(?:n(?:[°º.]|ro\.?|[uú]mero)?\s*)?#?\s*(\d{1,6})/gi
 
-// True si en el texto no hay nada más que un número: analizarlo daría un pedido
-// vacío.
-export const esSoloNumeroPrototipo = texto => RE_SOLO_NUMERO.test(String(texto || ''))
-
-// Números de prototipo mencionados en el texto que no traen su código al lado.
-// Un mensaje del LAB trae los dos, así que esos no se reportan.
-export function prototiposSinCodigo(texto) {
-  if (!texto) return []
-  const T = String(texto)
+// Las menciones sin código, con su cantidad, y el texto sin esas líneas para
+// que el resto del pedido se analice como siempre. Un mensaje del LAB trae
+// número Y código: esos no se tocan.
+export function referenciasPrototipo(texto) {
+  const T = String(texto || '')
   const solo = T.match(RE_SOLO_NUMERO)
-  if (solo) return [solo[1]]
+  if (solo) return { refs: [{ numero: solo[1], cantidad: 1 }], resto: '' }
+
   const lab = parsearMensajeLab(T)
   const conCodigo = new Set((lab?.items || []).map(i => i.etiqueta))
-  const numeros = [...T.matchAll(/PROTOTIPO\s*#\s*(\d+)/gi)].map(m => m[1])
-  return [...new Set(numeros)].filter(n => !conCodigo.has(`PROTOTIPO #${n}`))
+  const refs = []
+  const resto = T.split('\n').filter(linea => {
+    if (REGEX_CODIGO.test(linea)) return true
+    let desde = 0, hubo = false
+    for (const m of linea.matchAll(RE_PROTOTIPO)) {
+      const numero = m[1]
+      if (conCodigo.has('PROTOTIPO #' + numero)) continue
+      hubo = true
+      // "-2 Prototipo 4375", "2x prototipo 4375" o "prototipo 4375 x2"
+      const antes = linea.slice(desde, m.index).match(/(?:^|[^\d.])(\d{1,2})\s*[xX×]?\s*$/)
+      const despues = linea.slice(m.index + m[0].length).match(/^\s*[xX×]\s*(\d{1,2})\b/)
+      desde = m.index + m[0].length
+      if (refs.some(r => r.numero === numero)) continue
+      refs.push({ numero, cantidad: parseInt((antes || despues || [])[1], 10) || 1 })
+    }
+    return !hubo
+  }).join('\n')
+  return { refs, resto }
 }
